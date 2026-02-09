@@ -1514,7 +1514,7 @@ These tests MUST exist before v1 ships. Derived from architectural and domain re
 
 | # | Risk | Severity | Mitigation |
 |---|------|----------|------------|
-| 1 | **Reference profile undefined** — all performance budgets unvalidatable without concrete cell/field/agent counts | Critical | Define before implementation (section 20, R-PERF-3) |
+| 1 | **Reference profile unvalidated** — performance budgets defined (§20, R-PERF-3: 10K cells, 5 fields, 3 propagators, 16 agents) but not yet benchmarked | Medium | Benchmark against defined profile during implementation; CI regression thresholds |
 | 2 | **Scale behavior >100K cells** — architecture validated at 10K cells; 100K+ untested | Medium-High | Reference profile MUST include stress scenario |
 | 3 | **Arena memory fragmentation** — long RealtimeAsync runs may fragment segmented arena | Medium | Periodic compaction during low-load; needs profiling |
 | 4 | **Field->chunk arena migration for v1.5 LOD** — touches 4 subsystems | Medium | `FieldStorage` trait provides abstraction boundary |
