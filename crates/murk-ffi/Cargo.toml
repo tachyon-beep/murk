@@ -1,0 +1,10 @@
+[package]
+name = "murk-ffi"
+version = "0.1.0"
+edition = "2021"
+description = "C FFI bindings for the Murk simulation framework"
+
+[dependencies]
+murk-core = { path = "../murk-core" }
+murk-engine = { path = "../murk-engine" }
+murk-obs = { path = "../murk-obs" }

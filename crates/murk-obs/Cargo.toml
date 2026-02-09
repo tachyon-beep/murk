@@ -1,0 +1,13 @@
+[package]
+name = "murk-obs"
+version = "0.1.0"
+edition = "2021"
+description = "Observation specification and extraction for Murk simulations"
+
+[dependencies]
+murk-core = { path = "../murk-core" }
+murk-space = { path = "../murk-space" }
+indexmap = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }

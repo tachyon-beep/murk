@@ -1,0 +1,4 @@
+disallowed-types = [
+    { path = "std::collections::HashMap", reason = "Use IndexMap for deterministic iteration" },
+    { path = "std::collections::HashSet", reason = "Use IndexSet for deterministic iteration" },
+]

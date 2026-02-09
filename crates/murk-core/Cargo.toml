@@ -1,0 +1,11 @@
+[package]
+name = "murk-core"
+version = "0.1.0"
+edition = "2021"
+description = "Core types and traits for the Murk simulation framework"
+
+[dependencies]
+indexmap = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }

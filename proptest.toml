@@ -1,0 +1,2 @@
+# Proptest configuration for the Murk workspace.
+# Regression files are stored alongside each test crate.

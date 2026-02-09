@@ -1,0 +1,12 @@
+[package]
+name = "murk-replay"
+version = "0.1.0"
+edition = "2021"
+description = "Deterministic replay and action logging for Murk simulations"
+
+[dependencies]
+murk-core = { path = "../murk-core" }
+indexmap = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }

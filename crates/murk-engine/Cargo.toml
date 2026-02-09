@@ -1,0 +1,16 @@
+[package]
+name = "murk-engine"
+version = "0.1.0"
+edition = "2021"
+description = "Simulation engine orchestrating Murk environments"
+
+[dependencies]
+murk-core = { path = "../murk-core" }
+murk-arena = { path = "../murk-arena" }
+murk-space = { path = "../murk-space" }
+murk-propagator = { path = "../murk-propagator" }
+murk-obs = { path = "../murk-obs" }
+indexmap = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }

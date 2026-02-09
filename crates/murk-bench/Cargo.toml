@@ -1,0 +1,15 @@
+[package]
+name = "murk-bench"
+version = "0.1.0"
+edition = "2021"
+description = "Benchmarks for the Murk simulation framework"
+
+[dependencies]
+murk-core = { path = "../murk-core" }
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "placeholder"
+harness = false

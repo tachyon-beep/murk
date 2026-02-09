@@ -1,0 +1,12 @@
+[package]
+name = "murk-arena"
+version = "0.1.0"
+edition = "2021"
+description = "Arena-based generational allocation for Murk simulations"
+
+[dependencies]
+murk-core = { path = "../murk-core" }
+indexmap = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }

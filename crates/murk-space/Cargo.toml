@@ -1,0 +1,12 @@
+[package]
+name = "murk-space"
+version = "0.1.0"
+edition = "2021"
+description = "Spatial data structures and field storage for Murk simulations"
+
+[dependencies]
+murk-core = { path = "../murk-core" }
+indexmap = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }

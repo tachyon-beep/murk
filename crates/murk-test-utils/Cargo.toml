@@ -1,0 +1,8 @@
+[package]
+name = "murk-test-utils"
+version = "0.1.0"
+edition = "2021"
+description = "Test utilities and mock types for Murk development"
+
+[dependencies]
+murk-core = { path = "../murk-core" }

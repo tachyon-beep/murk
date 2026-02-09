@@ -1,0 +1,8 @@
+[package]
+name = "murk-python"
+version = "0.1.0"
+edition = "2021"
+description = "Python bindings for the Murk simulation framework (PyO3 stub)"
+
+[dependencies]
+murk-ffi = { path = "../murk-ffi" }
