@@ -14,8 +14,8 @@ This is the **authoritative** design document for the Murk World Engine. It inco
 
 - [0. Context and Intent](#0-context-and-intent)
 - [1. Normative Language](#1-normative-language)
-- [2. Normative Principles](#2-normative-principles)
-- [3. Glossary](#3-glossary)
+- [2. Glossary](#2-glossary)
+- [3. Normative Principles](#3-normative-principles)
 - [4. Stakeholders and Primary Use Cases](#4-stakeholders-and-primary-use-cases)
 - [5. Foundational Design Decision: Arena-Based Generational Allocation](#5-foundational-design-decision-arena-based-generational-allocation)
 - [6. System Architecture (Three-Interface Model)](#6-system-architecture-three-interface-model)
@@ -58,6 +58,18 @@ This is the **authoritative** design document for the Murk World Engine. It inco
 * Added `FieldMutability` (Static/PerTick/Sparse) and memory optimization analysis.
 * Added plan-to-snapshot generation matching for ObsPlan invalidation.
 * Added new requirements: R-FIELD-3, R-PROP-4, R-PROP-5, R-OBS-7, R-OBS-8, R-FFI-4, R-FFI-5, R-MODE-4.
+
+### v3.0.1
+
+* **Resolved CR-NEW-1:** ProductSpace default distance changed from L∞ to L1 (graph geodesic) to match per-component adjacency. Added dual distance API.
+* **Resolved CR-NEW-2:** TTL made tick-based in both modes (`expires_after_tick`). Wall-clock TTL is ingress convenience only.
+* **Added §5.6:** Lockstep arena recycling via double-buffer ping-pong with Sparse field promotion.
+* **Added §8.3:** Epoch reclamation safety with stalled worker teardown.
+* **Added §15.2:** StepContext read semantics (current in-tick view vs frozen tick-start view).
+* **Clarified §21.1:** world_generation_id bumps only on plan-relevant changes; GlobalParameters tracked via separate `parameter_version`.
+* **Corrected §12.3:** Hex valid_ratio asymptote from 0.83 to 0.75.
+* **Scoped §19.1:** Determinism CI tests target Lockstep mode only.
+* **Unified snapshot representation:** Handles (generation-scoped integers), not pointers.
 
 ### v2.5
 
@@ -128,7 +140,7 @@ This document uses:
 
 * **Tick**: discrete simulation step boundary. All authoritative mutation happens within TickEngine during ticks.
 * **TickEngine**: the sole authoritative mutator and time owner.
-* **Snapshot**: immutable world state view published at tick boundaries. In arena model, a lightweight descriptor of field pointers into a `ReadArena`.
+* **Snapshot**: immutable world state view published at tick boundaries. A lightweight descriptor mapping `FieldId -> FieldHandle` into a `ReadArena`. Handles are generation-scoped integers; `ReadArena::resolve()` provides `&[f32]` slice access.
 * **ReadArena**: published, immutable arena generation. `Send + Sync`, safe for concurrent egress reads.
 * **WriteArena**: staging arena for current tick. Exclusively owned by TickEngine via `&mut` access.
 * **Ingress**: command intake interface (intents in).
@@ -143,7 +155,7 @@ This document uses:
 * **WorldEvent**: ephemeral mutation intent (move/spawn/damage).
 * **GlobalParameter**: persistent rules/config change (gravity, diffusion coefficients).
 * **FieldMutability**: classification of field update frequency (Static/PerTick/Sparse) for arena optimization.
-* **Determinism tier**: declared scope of repeatability (see section 15).
+* **Determinism tier**: declared scope of repeatability (see section 19).
 
 ---
 
@@ -166,9 +178,13 @@ This principle closes three RealtimeAsync failure modes simultaneously:
 
 > **All engine-internal time references that affect state transitions MUST be expressible in tick-count.**
 
-**Mode-specific interpretation:**
-- **Lockstep**: ALL time references use tick-count (TTL, timeouts, age). Wall-clock time is forbidden in deterministic paths.
-- **RealtimeAsync**: State-affecting time uses tick-count; display metadata (`age_ms`) and wall-clock TTL for non-deterministic paths are allowed.
+**TTL specifically:**
+- All commands carry `expires_after_tick: u64` as the authoritative TTL.
+- **Lockstep**: `expires_after_tick` set directly by submitter. Wall-clock time is forbidden in deterministic paths.
+- **RealtimeAsync**: Ingress MAY accept `ttl_ms` as a convenience and convert to `expires_after_tick` at ingress-admit time: `expires_after_tick = current_tick_id + ceil(ttl_ms / configured_ms_per_tick)`. The configured tick period (e.g., 16.67ms for 60Hz) is used, not measured tick durations. The tick-based value is authoritative.
+- TickEngine evaluates `expires_after_tick` during command drain. Expired commands are rejected with `STALE` reason code.
+- Replay logs record `expires_after_tick`, not wall-clock TTL.
+- Display metadata (`age_ms`) remains wall-clock (does not affect state transitions).
 
 Covers: TTL, `age_ticks`, lockstep timeouts. Prevents replay-divergence bugs caused by wall-clock time in deterministic paths.
 
@@ -199,7 +215,7 @@ This is the most load-bearing architectural decision. It was identified by the a
 1. Each field is stored as a contiguous `[f32]` allocation in a generational arena.
 2. At tick start, propagators write to **fresh allocations** in the new generation (no copies).
 3. Unmodified fields share their allocation across generations (zero-cost structural sharing).
-4. Snapshot publication = swap a ~1KB descriptor of field pointers. Cost: **<2us** (250x under the 500us budget).
+4. Snapshot publication = swap a ~1KB descriptor of field handles. Cost: **<2us** (target, 250x under the 500us budget). The descriptor maps `FieldId -> FieldHandle`; `ReadArena::resolve(handle)` provides `&[f32]` access.
 5. Old generations remain readable until all snapshot references are released.
 
 ### 5.2 Comparison to Traditional CoW
@@ -216,7 +232,10 @@ This is the most load-bearing architectural decision. It was identified by the a
 
 - `ReadArena` (published, immutable): `Send + Sync`, safe for concurrent egress reads.
 - `WriteArena` (staging, exclusive to TickEngine): `&mut` access, no aliasing.
-- Snapshot references contain generation-scoped handles (integers), not pointers.
+- Snapshot descriptors contain `FieldHandle` values (generation-scoped integers), not raw pointers. `ReadArena::resolve(handle) -> &[f32]` provides the actual slice access. This indirection:
+  - Makes FFI safe (handles can be validated; pointers cannot).
+  - Enables generation invalidation (handle from gen N is invalid on gen N+2's arena after recycling).
+  - Keeps the descriptor small (~1KB for 100 fields: `FieldId -> FieldHandle` map).
 - Field access requires `&FieldArena` — borrow checker enforces arena liveness.
 - Segmented arena (linked list of 64MB segments) ensures no reallocation.
 
@@ -245,6 +264,30 @@ For vectorized RL (128 envs x 2MB mutable + 8MB shared static): **264MB** vs 1.2
 **R-FIELD-3 FieldMutability (MUST)**
 
 Each field MUST declare its mutability class (`Static`, `PerTick`, `Sparse`). The arena MUST use this classification to optimise allocation. `Static` fields MUST share a single allocation across all snapshots and vectorized environment instances.
+
+### 5.6 Lockstep Arena Recycling (MUST)
+
+In Lockstep mode, arena memory MUST be bounded regardless of episode length.
+
+**Mechanism: double-buffer ping-pong.**
+
+Two arena buffers, A and B, alternate roles each tick:
+
+| Tick N | Read from | Write to | After publish |
+|--------|-----------|----------|---------------|
+| Even   | A (gen N-1) | B (gen N staging) | B becomes readable; A is reclaimable |
+| Odd    | B (gen N-1) | A (gen N staging) | A becomes readable; B is reclaimable |
+
+- `&mut self` on `step_sync()` guarantees the caller has released any `&Snapshot` borrows before the next step. The borrow checker enforces this at compile time.
+- "Reclaim" = reset bump pointer to zero. O(1), no deallocation.
+- `reset()` reclaims BOTH buffers (bump pointer reset on both). O(1).
+- Static fields (FieldMutability::Static) live in a separate generation-0 arena that is never reclaimed (shared across all generations).
+
+**Sparse field storage:** Sparse fields MUST NOT reside in the ping-pong buffers. Instead, Sparse fields are stored in a dedicated long-lived arena slab. When a Sparse field is modified, a new allocation is made in the Sparse slab (not in the PerTick ping-pong buffer). The old allocation is freed when no snapshot references it (trivially immediate in Lockstep due to `&mut self`). This avoids repeated promotion on buffer reclaim and preserves zero-copy semantics for unmodified Sparse fields.
+
+**Memory bound:** At any point, Lockstep uses at most 2x the per-generation PerTick field footprint, plus 1x the Static field footprint, plus the Sparse slab. For the reference profile (10K cells, 5 fields): ~4MB PerTick + 2MB Static + <1MB Sparse = **<7MB total**, regardless of episode length.
+
+**Triple-buffering is NOT needed** because Lockstep has no concurrent readers — the caller owns the only snapshot reference, and `&mut self` prevents aliasing.
 
 ---
 
@@ -283,7 +326,7 @@ Expose:
 * Returns observations from the most appropriate snapshot (P-1: always returns).
 * Supports pre-vectorised ObsSpec/ObsPlan outputs.
 * Supports stale/incomplete responses with explicit metadata:
-  * `tick_id`, `age_ticks`, `coverage`, `validity_mask`, `topology_generation`.
+  * `tick_id`, `age_ticks`, `coverage`, `validity_mask`, `world_generation_id`, `parameter_version`.
 
 #### TickEngine (MUST)
 
@@ -366,6 +409,7 @@ Properties:
 - **No wall-clock deadline** (maximize throughput, not frame rate).
 - **`&mut self` enforces RL lifecycle** — borrow checker prevents snapshot references surviving across step/reset.
 - **Vectorized:** 16-128 independent `LockstepWorld` instances, each owned by one thread, `Send` not `Sync`.
+- **Bounded memory via double-buffer ping-pong** (see §5.6). Two arena buffers alternate; `&mut self` guarantees the previous generation is reclaimable. Memory does not grow with episode length.
 
 **Lockstep deadlock (C-9) cannot occur.** Lockstep mode has no `WorldEgress` interface. Observations are filled inline from the returned `&Snapshot`. The observe-decide-act loop is a single-threaded sequential call chain:
 
@@ -405,7 +449,7 @@ GAT (Generic Associated Type) lets each mode define its snapshot reference type.
 Ingress implements (in both modes):
 
 * bounded queue,
-* TTL (tick-count in Lockstep per P-2, wall-clock in RealtimeAsync),
+* TTL: tick-based in both modes (`expires_after_tick`). RealtimeAsync ingress MAY accept wall-clock `ttl_ms` from callers and convert at admit time: `expires_after_tick = current_tick_id + ceil(ttl_ms / configured_ms_per_tick)`.
 * deterministic drop/reject policy,
 * metrics for overload events.
 
@@ -430,6 +474,26 @@ No dedicated threads. The caller's thread executes the full pipeline: command pr
 | Ingress acceptor (0-M) | Accept commands, assign `arrival_seq` | Write end of bounded queue |
 
 Snapshot lifetime is managed by epoch-based reclamation, not refcount eviction. This avoids cache-line ping-pong from atomic reference counting under high obs throughput.
+
+### 8.3 Epoch Reclamation Safety (RealtimeAsync, MUST)
+
+Epoch-based reclamation MUST handle stalled egress workers to prevent unbounded memory growth.
+
+**Mechanisms (all MUST):**
+
+1. **Quiescent point requirement.** Each egress worker MUST reach a quiescent point (release its current epoch) at least once per `max_epoch_hold` duration (configurable; default: 100ms / 6 ticks at 60Hz). Workers that fail to reach quiescence are considered stalled.
+
+2. **Stalled worker teardown.** The TickEngine (or a monitoring thread) MUST detect workers that exceed `max_epoch_hold` and:
+   - Cancel the in-flight ObsPlan execution (cooperative cancellation via flag). Cancellation flag SHOULD be checked between spatial region iterations in ObsPlan execution, not between individual cell accesses. This balances cancellation latency (~1ms worst case for large regions) against branch overhead in the gather inner loop.
+   - Treat the worker's epoch as quiesced for reclamation purposes.
+   - Log the stall event with worker ID, held epoch, and duration.
+   - The worker MAY be restarted or replaced in the egress thread pool.
+
+3. **Ring buffer eviction takes precedence.** If the snapshot ring buffer evicts a generation (by count or byte budget), that generation is removed from epoch eligibility regardless of worker epoch state. Workers holding evicted epochs receive `PLAN_INVALIDATED` on their next resolve attempt.
+
+4. **Memory bound.** At any time, the number of live arena generations is bounded by: `K (ring size) + max_stalled_workers`. Since `max_stalled_workers` is bounded by the egress thread pool size (typically 4-8), total memory is predictable.
+
+**Interaction with P-1 (Egress Always Returns):** A stalled worker that is torn down returns `ObsError::ExecutionFailed` with reason `WORKER_STALLED`. P-1 is satisfied because the *system* always returns — individual worker failures are reported, not swallowed.
 
 ---
 
@@ -514,6 +578,7 @@ The following error codes MUST be defined for v1. Full enumeration to be complet
 | `MURK_ERROR_EXECUTION_FAILED` | Egress | ObsPlan execution error | Mid-execution failure |
 | `MURK_ERROR_INVALID_OBSSPEC` | ObsPlan | Malformed ObsSpec at compilation | Missing field, invalid region, shape overflow |
 | `MURK_ERROR_DT_OUT_OF_RANGE` | Pipeline | dt exceeds propagator max_dt | World creation with incompatible dt |
+| `MURK_ERROR_WORKER_STALLED` | Egress | Egress worker exceeded max_epoch_hold | ObsPlan execution on stalled worker |
 
 ---
 
@@ -615,7 +680,7 @@ Examples:
 
 v1 tested compositions MUST be capped at **3 components maximum**. Compositions with >3 components are allowed but untested/unsupported.
 
-**R-OBS-7 valid_ratio in ObsPlan metadata (MUST):** ObsPlan MUST report `valid_ratio` (fraction of tensor cells that are valid vs padding). Compositions with `valid_ratio < 0.5` MUST emit a warning. ProductSpace Hex2D x Hex2D yields ~62-67% valid — within bounds. Compositions below 35% MUST fail with `INVALID_COMPOSITION`.
+**R-OBS-7 valid_ratio in ObsPlan metadata (MUST):** ObsPlan MUST report `valid_ratio` (fraction of tensor cells that are valid vs padding). Compositions with `valid_ratio < 0.5` MUST emit a warning. ProductSpace Hex2D x Hex2D yields ~56% valid — above the 0.35 threshold but below 0.5, triggering a compilation warning per R-OBS-7. Compositions below 35% MUST fail with `INVALID_COMPOSITION`.
 
 ### R-SPACE-5 Required Initial Backends (MUST)
 
@@ -661,13 +726,21 @@ For coordinate `(h, l, r)`, neighbours = `{(h', l, r) | h' in hex_neighbours(h)}
 
 **R-SPACE-9 ProductSpace Distance (MUST)**
 
-ProductSpace `distance()` MUST use L-infinity (max of component distances) as the default metric. Alternative metrics (L1, weighted) MAY be supported via configuration.
+ProductSpace MUST provide two distance functions:
+
+1. `distance(a, b) -> scalar` — the **graph-geodesic distance** (L1: sum of per-component distances). This is the default and primary metric. It MUST equal the shortest path length in the ProductSpace adjacency graph defined by R-SPACE-8. All subsystems that use distance for causal reasoning (observation shells, foveation, propagator influence ranges) MUST use this function.
+
+2. `metric_distance(a, b, metric: ProductMetric) -> scalar` — configurable metric for region queries and user-specified geometry. Supported metrics: `L1` (sum), `LInfinity` (max), `Weighted(weights)`.
+
+**Rationale:** Per-component adjacency (R-SPACE-8) produces L1 geodesics. The default distance MUST match the graph geodesic so that observation shell radii correspond to causal propagation cones. L∞ is available via `metric_distance()` for region queries that want Cartesian-product-shaped selections.
 
 **Worked example — Hex2D x Line1D:**
 
-`distance((h1, l1), (h2, l2)) = max(hex_distance(h1, h2), line_distance(l1, l2))`
+`distance((h1, l1), (h2, l2)) = hex_distance(h1, h2) + line_distance(l1, l2)`
 
-For `((2,1), 5)` to `((4,0), 8)`: hex_distance = 2, line_distance = 3, product_distance = **3**.
+For `((2,1), 5)` to `((4,0), 8)`: hex_distance = 2, line_distance = 3, **distance = 5** (graph geodesic, L1).
+
+`metric_distance(_, _, LInfinity)` for the same pair: max(2, 3) = **3**.
 
 **R-SPACE-10 ProductSpace Iteration Ordering (MUST)**
 
@@ -732,10 +805,10 @@ Hex regions are non-rectangular. Export uses:
 * a **validity mask** where `1 = valid cell`, `0 = padding/invalid`.
 
 **Padding efficiency** (relates to R-OBS-7):
-- Hex disk radius R: bounding box = (2R+1) x (2R+1), valid cells = 3R^2+3R+1, `valid_ratio` ~ 0.83 for large R.
-- Hex rectangle WxH: bounding box ~ WxH, `valid_ratio` ~ 0.87.
-- Single-hex compositions (Hex2D x Line1D): preserves hex `valid_ratio` >= 0.83.
-- Hex2D x Hex2D: `valid_ratio` ~ 0.83^2 ~ 0.69 (above 0.35 threshold, passes).
+- Hex disk radius R: bounding box = (2R+1) x (2R+1), valid cells = 3R^2+3R+1, `valid_ratio` converges to **0.75** for large R (0.78 for R=1, monotonically decreasing).
+- Hex rectangle WxH in offset coordinates: bounding box = W x H, `valid_ratio` = 1.0 (all cells valid by construction).
+- Single-hex compositions (Hex2D x Line1D): preserves per-component hex `valid_ratio` >= 0.75.
+- Hex2D x Hex2D: `valid_ratio` ~ 0.75^2 ~ **0.56** (above 0.35 threshold, passes; below 0.5, emits warning per R-OBS-7).
 
 ObsPlan MAY additionally export an index map (tensor index -> axial coord) for debugging/traceability.
 
@@ -839,6 +912,7 @@ For each accepted command log record, include at minimum:
 * resolved `priority_class`
 * `source_id` and `source_seq` if present
 * `arrival_seq` (always present)
+* `expires_after_tick` (always present; resolved at ingress-admit time)
 
 Replayers MUST use recorded resolved ordering metadata and MUST NOT recompute ordering from wall-clock intake timing.
 
@@ -877,8 +951,8 @@ pub enum WriteMode {
 }
 
 pub struct StepContext<'a> {
-    reads: FieldReadSet<'a>,       // &ReadArena: latest committed versions
-    reads_prev: FieldReadSet<'a>,  // &ReadArena: generation N (tick start)
+    reads: FieldReadSet<'a>,       // current in-tick view: base gen + staged writes from prior propagators
+    reads_prev: FieldReadSet<'a>,  // frozen tick-start view: base gen only, never sees staged writes
     writes: FieldWriteSet<'a>,     // &mut WriteArena: new generation staging
     scratch: &'a mut ScratchRegion,// bump allocator, reset between propagators
     space: &'a dyn SpaceAccess,
@@ -923,7 +997,17 @@ The propagator pipeline MUST be validated at startup. Validation includes:
 
 Validation failure MUST prevent world creation (not deferred to first tick).
 
-### 15.1 Reward as a Propagator
+### 15.2 StepContext Read Semantics (MUST)
+
+- `reads` provides the **current in-tick view**: the base generation (tick-start state) overlaid with staged writes from all previously-executed propagators in this tick. If propagator A writes field X, then propagator B (executing after A) sees A's written values when reading field X via `reads`. This enables Euler-style sequential integration.
+
+- `reads_previous` provides the **frozen tick-start view**: the base generation only, never reflecting staged writes from any propagator in the current tick. This enables Jacobi-style parallel integration where all propagators read the same consistent pre-tick state.
+
+- A propagator that declares a field in both `reads()` and `writes()` with `WriteMode::Incremental` sees the previous generation's values in the seeded write buffer, and its own in-progress writes. It does NOT see other propagators' staged writes to the same field (write-write conflicts are forbidden by R-PROP-5).
+
+In v1, the sequential visibility guarantee for `reads` is trivially satisfied by single-threaded execution. If v1.5 introduces parallel propagators (disjoint writes only per R-PROP-5), the overlay MUST provide acquire/release ordering so that a propagator reading field X sees the complete write from the propagator that wrote X.
+
+### 15.3 Reward as a Propagator
 
 Reward computation is a standard propagator that runs last in the pipeline (dependency constraint: reads all mutable fields it needs). Benefits:
 
@@ -983,7 +1067,8 @@ Return:
 * `age_ticks` (tick-count, per P-2; `age_ms` also available for RealtimeAsync display)
 * `coverage`
 * `validity_mask`
-* `topology_generation`
+* `world_generation_id` (was `topology_generation`)
+* `parameter_version`
 
 ### R-OBS-6 ObsPlan Validity and Generation Binding (MUST)
 
@@ -1021,6 +1106,7 @@ Optimisation stack:
 3. **FieldMutability caching**: Static fields cached once, only PerTick fields re-gathered per step.
 4. **Batch execution**: single traversal fills N agent buffers (SHOULD v1, MUST v1.5).
 5. **Interior/boundary dispatch**: O(1) check per agent, branch-free interior path, validated boundary path.
+6. **Causal-consistent observation shells**: Foveation shells and distance-based region selection SHOULD default to `distance()` (graph-geodesic, L1) so observation geometry matches causal propagation cones. `metric_distance(LInfinity)` MAY be used when Cartesian-product-shaped shells are explicitly desired.
 
 ### 16.2 Topology Change Graceful Degradation (RealtimeAsync)
 
@@ -1058,7 +1144,7 @@ Snapshot retention uses arena-based generational allocation (see section 5). Mod
 * Ring buffer of last **K** `ReadArena` generations for exact-tick reads.
 * Bounded by count and/or byte budget; eviction by **epoch-based reclamation** (not refcount).
 * Epoch-based reclamation: egress threads register epochs; arena generations are freed when no egress thread holds a reference to that epoch.
-* Each snapshot carries `topology_generation` for ObsPlan compatibility checking.
+* Each snapshot carries `world_generation_id` and `parameter_version` for ObsPlan compatibility checking and parameter tracking.
 
 ### R-SNAP-2 Lockstep Exact-Tick Egress Semantics (MUST)
 
@@ -1168,18 +1254,27 @@ Replay achievable from:
 
 Per P-2: all engine-internal time references that affect state transitions MUST be expressible in tick-count. Specifically:
 
-* Lockstep TTL: tick-count.
-* RealtimeAsync TTL: wall-clock (does not affect deterministic state transitions).
+* Lockstep TTL: tick-count (`expires_after_tick`, set directly by submitter).
+* RealtimeAsync TTL: tick-count (`expires_after_tick`). Ingress convenience layer converts wall-clock `ttl_ms` at admit time. Accept/drop decisions use tick-count only.
 * Lockstep timeouts: tick-count.
 * `age_ticks` in observation metadata: tick-count (always available). `age_ms` also available for RealtimeAsync display.
 
 ### 19.1 Determinism Verification
 
 **v1 implementation requirement:** A CI replay-and-compare test MUST exist that:
-- Runs a representative scenario twice with identical inputs.
-- Compares snapshots at tick N for bit-exact equality.
+- Runs **in Lockstep mode** using recorded command logs and fixed `dt`.
+- Compares snapshots at tick N for bit-exact equality across two runs with identical inputs.
 - Minimum replay length: 1000 ticks.
 - Fails on any divergence.
+
+**Mode scoping:** Determinism verification MUST target Lockstep mode. RealtimeAsync introduces thread scheduling non-determinism (command drain timing, ingress ordering under concurrent submission) that is outside the scope of Tier B determinism. RealtimeAsync determinism is a v1.5 investigation if needed.
+
+**Minimum test coverage:**
+- At least one scenario with propagators reading both `reads` and `reads_previous` fields (verifying sequential-commit vs Jacobi semantics per §15.2).
+- At least one scenario with command ordering from multiple sources (`source_id` disambiguation).
+- At least one scenario with `WriteMode::Incremental` propagators (seed + modify pattern).
+- At least one scenario exercising arena double-buffer recycling (§5.6) across 1000+ ticks to verify no generation handle leakage.
+- At least one scenario with Sparse field modification pattern (field shared for N ticks, then modified, verifying correct generation tracking and Sparse promotion).
 
 ### R-DET-5 Build Metadata in Replay (MUST)
 
@@ -1210,15 +1305,15 @@ Obs generation: off-thread (egress pool), does not count against tick budget.
 
 #### Lockstep (Throughput-Maximized, No Deadline)
 
-| Phase | Budget | Notes |
+| Phase | Target | Notes |
 |-------|--------|-------|
-| Command processing | 5us | Minimal for single-agent |
-| Propagator pipeline | 50-80us | Depends on propagator count and cell count |
-| Snapshot publish | <0.1us | Descriptor swap only |
-| Obs generation (inline) | 16-27us | 16 agents x ~1.7us/obs |
-| **Total** | **70-115us** | |
-| **Throughput** | **8,700-14,300 steps/sec** | Per env |
-| **Vectorized (16 cores)** | **139K-229K steps/sec** | Aggregate |
+| Command processing | target: 5us | Minimal for single-agent |
+| Propagator pipeline | target: 50-80us | Depends on propagator count and cell count |
+| Snapshot publish | target: <0.1us | Descriptor swap only |
+| Obs generation (inline) | target: 16-27us | 16 agents x ~1.7us/obs |
+| **Total** | **target: 70-115us** | |
+| **Throughput** | **target: 8,700-14,300 steps/sec** | Per env |
+| **Vectorized (16 cores)** | **target: 139K-229K steps/sec** | Aggregate |
 
 #### MuJoCo Ant-v4 Comparison
 
@@ -1280,13 +1375,18 @@ Metrics/logging for:
 
 ## 21. Stable IDs and Generation Policy
 
-### 21.1 Stable IDs Policy (MUST)
+### 21.1 Stable IDs and Generation Policy (MUST)
 
 * Field IDs and Space IDs are stable under the same world definition.
 * World configuration exposes a monotonic `world_generation_id`.
-  * Bumped on any topology, field layout, or configuration change.
+  * Bumped on **plan-relevant changes** only: topology changes (space dimensions, lattice type, boundary conditions), field layout changes (disallowed in v1 per R-FIELD-4, but future-proofed), and space configuration changes that affect coordinate-to-tensor mappings.
+  * MUST NOT bump on GlobalParameter changes (gravity, diffusion coefficients, etc.) or entity spawn/despawn (these are field mutations, not layout changes).
   * v1.5: MAY split into `field_layout_generation_id` and `space_topology_generation_id` if profiling shows excessive invalidation.
-* Plans bind to generations; snapshot-plan mismatch triggers `PLAN_INVALIDATED`.
+* GlobalParameter changes are tracked separately via `parameter_version` (see §14.2). Propagators access parameters via `StepContext`, not via generation-gated lookups.
+* Snapshot metadata MUST include `parameter_version` alongside `tick_id` and `world_generation_id`. This enables egress consumers to correlate observations with parameter regimes without requiring receipt log access.
+* Plans bind to `world_generation_id`; snapshot-plan mismatch triggers `PLAN_INVALIDATED`.
+
+**Rationale:** ObsPlan validity depends on field layout and spatial topology (tensor shapes, index mappings). Parameter tweaks don't affect tensor shapes — only field values change, which ObsPlan reads directly from snapshots. Bumping `world_generation_id` on parameter changes would cause mass plan invalidation during curriculum learning, defeating R-OBS-9.
 
 ### 21.2 Validity Mask Semantics (MUST)
 
@@ -1354,7 +1454,7 @@ These tests MUST exist before v1 ships. Derived from architectural and domain re
 
 ### Integration Tests
 
-7. Determinism replay: identical scenario twice -> bit-exact snapshot at tick N (minimum 1000 ticks).
+7. Determinism replay (Lockstep mode): identical scenario twice -> bit-exact snapshot at tick N (minimum 1000 ticks). See §19.1 for minimum test coverage requirements.
 8. ObsPlan generation invalidation -> `PLAN_INVALIDATED` error on snapshot-plan mismatch.
 9. Snapshot ring eviction -> `NOT_AVAILABLE` response.
 10. Ingress backpressure -> deterministic drop behavior.
@@ -1382,6 +1482,8 @@ These tests MUST exist before v1 ships. Derived from architectural and domain re
 | C-8 | Full C ABI error code enumeration | **Minimum set defined** (section 9.7) | Full enum completed during implementation |
 | I-6 | Graceful shutdown/lifecycle | **Not addressed** | MUST be specified during implementation: in-flight commands, pending ObsPlans, held snapshot references on shutdown |
 | Q-4 | FlatBuffers schema evolution | **Direction set** (section 16.3) | Details during implementation |
+| CR-NEW-1 | ProductSpace distance metric vs neighbours | **Resolved** (v3.0.1) | L1 graph geodesic as default; dual API with configurable metric_distance() |
+| CR-NEW-2 | P-2 tick time vs RealtimeAsync TTL | **Resolved** (v3.0.1) | Tick-based authoritative TTL in both modes; wall-clock as ingress convenience only |
 
 ### Remaining Risks
 
@@ -1401,7 +1503,7 @@ This section maps the architectural review's critical findings to their resoluti
 
 | Review Finding | Severity | Resolution | HLD Section |
 |---------------|----------|------------|-------------|
-| CR-1: ProductSpace semantics undefined | Critical | Specified: per-component neighbours, L-inf distance, lexicographic iteration | 11.1 |
+| CR-1: ProductSpace semantics undefined | Critical | Specified: per-component neighbours, L1 graph-geodesic distance (v3.0.1), lexicographic iteration | 11.1 |
 | CR-2: Egress threading model | Critical | Mode duality: inline for Lockstep, thread pool for RealtimeAsync | 7, 8 |
 | CR-3: Snapshot creation strategy | Critical | Arena-based generational allocation | 5 |
 | CR-4: No error model | Critical | Tick atomicity, all-or-nothing rollback, per-subsystem error semantics | 9 |
@@ -1410,13 +1512,13 @@ This section maps the architectural review's critical findings to their resoluti
 | C-7: ObsPlan mass invalidation | Critical | Plan-to-snapshot generation matching, fallback snapshot selection | 16, R-OBS-6 |
 | C-8: C ABI error model | Critical | Handle lifecycle invariants, error codes, thread safety contracts | 9.6, 18 |
 | C-9: Lockstep deadlock | Critical | Cannot occur: step_sync() is synchronous | 7.1 |
-| P-1: Egress Always Returns | Principle | Adopted as normative principle | 2 |
-| P-2: Tick-expressible time | Principle | Adopted as normative principle | 2, R-DET-4 |
-| P-3: Asymmetric dampening | Principle | Adopted, reflected in mode-specific designs | 2, R-ACT-2 |
+| P-1: Egress Always Returns | Principle | Adopted as normative principle | 3 |
+| P-2: Tick-expressible time | Principle | Adopted as normative principle; TTL made tick-based in both modes (v3.0.1) | 3, R-DET-4 |
+| P-3: Asymmetric dampening | Principle | Adopted, reflected in mode-specific designs | 3, R-ACT-2 |
 | P-4: CoW dependency graph | Principle | All four properties satisfied by arena model | 5.4 |
 | I-1: Stale action rejection oscillation | Important | Adaptive max_tick_skew with backoff | R-ACT-2 |
 | I-2: Hex region bounding box strategy | Important | Bbox + validity mask, padding math quantified | 12.3 |
-| I-3: TTL must be tick-based in Lockstep | Important | P-2 + R-DET-4 | 19, R-DET-4 |
+| I-3: TTL must be tick-based | Important | P-2 + R-DET-4; tick-based in both modes (v3.0.1) | 3, 19, R-DET-4 |
 | I-4: Replay log format unspecified | Important | Minimum format specified | 14.4 |
 | I-5: Collapse 3 generation IDs to 1 | Important | Single world_generation_id for v1 | 21.1 |
 | I-6: No graceful shutdown/lifecycle | Important | **Not addressed in v3.0** — deferred to implementation | 24 |
@@ -1461,5 +1563,5 @@ All 17 unanimous decisions from the domain expert review are incorporated:
 | 13 | Mode-specific performance budgets | Section 20 |
 | 14 | Fallback snapshot selection for topology changes | Section 16.2 |
 | 15 | Batched step_vec C API for vectorized RL | Section 18, R-FFI-4 |
-| 16 | Reward/done as propagator-computed fields | Section 15.1 |
+| 16 | Reward/done as propagator-computed fields | Section 15.3 |
 | 17 | Interior/boundary dispatch for agent-relative obs | Section 16.1 |
