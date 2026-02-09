@@ -1,4 +1,4 @@
-# Murk World Engine — High-Level Design (v3.0)
+# Murk World Engine — High-Level Design (v3.1)
 
 This is the **authoritative** design document for the Murk World Engine. It incorporates:
 
@@ -58,6 +58,17 @@ This is the **authoritative** design document for the Murk World Engine. It inco
 * Added `FieldMutability` (Static/PerTick/Sparse) and memory optimization analysis.
 * Added plan-to-snapshot generation matching for ObsPlan invalidation.
 * Added new requirements: R-FIELD-3, R-PROP-4, R-PROP-5, R-OBS-7, R-OBS-8, R-FFI-4, R-FFI-5, R-MODE-4.
+
+### v3.1
+
+* **Integrated Design Decisions v3.1** (5 decisions from 4-expert panel):
+  * **Decision B:** Bounded unsafe in `murk-arena/raw.rs` with phased MaybeUninit migration and FullWriteGuard (§5.3).
+  * **Decision E:** Graceful shutdown protocol — Lockstep `Drop`, RealtimeAsync 4-state drain-then-join ≤300ms (§9.7, §24).
+  * **Decision J:** No re-enqueue on rollback; `tick_disabled` after 3 consecutive failures (§9.1, §9.7).
+  * **Decision M:** `&dyn Space` with `Space: Any + Send + 'static` and `downcast_ref()` (referenced in Implementation Plan).
+  * **Decision N:** `SnapshotAccess` trait in murk-core; murk-obs decoupled from murk-arena (referenced in Implementation Plan).
+* Added `MURK_ERROR_SHUTTING_DOWN` and `MURK_ERROR_TICK_DISABLED` to §9.7 error code table.
+* Updated I-6 (graceful shutdown) status from "Not addressed" to "Resolved" in §24.
 
 ### v3.0.1
 
@@ -225,13 +236,14 @@ This is the most load-bearing architectural decision. It was identified by the a
 | Copy cost | Fault-driven, unpredictable | Zero (allocate fresh, write directly) |
 | Snapshot publication | Clone or CoW fork | Atomic descriptor swap, <2us |
 | Rollback | Undo log or full checkpoint | Free (abandon new generation) |
-| `unsafe` required | Usually (page-level CoW) | None (borrow checker verifies) |
+| `unsafe` required | Usually (page-level CoW) | Bounded: ≤5 audited functions in `murk-arena/src/raw.rs` (see Design Decisions v3.1, Decision B) |
 | Memory predictability | Fault-driven = unpredictable | Bump allocation = predictable |
 
 ### 5.3 Rust Type-Level Properties
 
 - `ReadArena` (published, immutable): `Send + Sync`, safe for concurrent egress reads.
 - `WriteArena` (staging, exclusive to TickEngine): `&mut` access, no aliasing.
+- **Bounded unsafe:** `#![deny(unsafe_code)]` crate-wide with per-function `#[allow(unsafe_code)]` in `crates/murk-arena/src/raw.rs` only (≤5 functions: `alloc_uninit`, `assume_init`, segment pointer math, bump-pointer reset). Each function has `// SAFETY:` comment and Miri coverage. Public API is 100% safe. Phase 1 (WP-2–WP-5): `Vec<f32>` zero-init. Phase 2 (after WP-4 delivers FullWriteGuard): `MaybeUninit<f32>`. See Design Decisions v3.1, Decision B.
 - Snapshot descriptors contain `FieldHandle` values (generation-scoped integers), not raw pointers. `ReadArena::resolve(handle) -> &[f32]` provides the actual slice access. This indirection:
   - Makes FFI safe (handles can be validated; pointers cannot).
   - Enables generation invalidation (handle from gen N is invalid on gen N+2's arena after recycling).
@@ -508,18 +520,30 @@ match pipeline.execute(&mut state, &mut staging, commands, dt) {
     Ok(()) => {
         arena.publish(staging);  // ownership transfer, zero-copy
         generation += 1;
+        consecutive_rollback_count = 0;
     }
-    Err(TickError::PropagatorFailed { .. }) => {
+    Err(TickError::PropagatorFailed { name, reason }) => {
         drop(staging);           // abandon -- state unchanged, zero-cost
-        ingress.re_enqueue(commands, ReasonCode::TICK_ROLLBACK);
+        // DO NOT re-enqueue. Drop all commands with TICK_ROLLBACK.
+        for cmd in commands {
+            receipts.push(Receipt::rejected(cmd, ReasonCode::TICK_ROLLBACK));
+        }
+        consecutive_rollback_count += 1;
+        if consecutive_rollback_count >= MAX_CONSECUTIVE_ROLLBACKS {
+            tick_disabled.store(true, Ordering::Release);
+            // Log CRITICAL, reject further commands with MURK_ERROR_TICK_DISABLED
+        }
     }
 }
 ```
 
 * Rollback is free with the arena model (abandon staging generation).
-* Commands are re-enqueued with `TICK_ROLLBACK` reason code.
-* Determinism preserved: replaying same commands after rollback produces same result.
+* **Commands are dropped** (not re-enqueued) with `TICK_ROLLBACK` reason code. Re-enqueue is forbidden: same commands trigger same failure (infinite loop), stale `basis_tick_id`, TTL violations, and ordering ambiguity for replay.
+* **RealtimeAsync `tick_disabled` mechanism:** After 3 consecutive rollbacks, TickEngine sets `tick_disabled: AtomicBool` and stops executing ticks (thread stays alive for shutdown). Ingress rejects with `MURK_ERROR_TICK_DISABLED`. Egress continues serving last good snapshot (P-1 satisfied). Recovery: `reset()` clears the flag, or destroy the world.
+* **Lockstep:** `step_sync()` returns `Err(StepError::PropagatorFailed)`. Caller decides. No `tick_disabled` mechanism needed.
+* **Self-healing:** Agents observe unchanged state (P-1) and naturally resubmit corrected commands.
 * Escape hatch: `reset()` for unrecoverable states (standard Gymnasium pattern).
+* See Design Decisions v3.1, Decision J.
 
 ### 9.2 Propagator Failure (MUST)
 
@@ -579,6 +603,8 @@ The following error codes MUST be defined for v1. Full enumeration to be complet
 | `MURK_ERROR_INVALID_OBSSPEC` | ObsPlan | Malformed ObsSpec at compilation | Missing field, invalid region, shape overflow |
 | `MURK_ERROR_DT_OUT_OF_RANGE` | Pipeline | dt exceeds propagator max_dt | World creation with incompatible dt |
 | `MURK_ERROR_WORKER_STALLED` | Egress | Egress worker exceeded max_epoch_hold | ObsPlan execution on stalled worker |
+| `MURK_ERROR_SHUTTING_DOWN` | Lifecycle | World is shutting down | Command submitted during Draining or Quiescing phase (Decision E) |
+| `MURK_ERROR_TICK_DISABLED` | TickEngine | Tick disabled after consecutive rollbacks | Command submitted or tick attempted after 3 consecutive rollbacks (Decision J) |
 
 ---
 
@@ -937,7 +963,7 @@ pub trait Propagator: Send + 'static {
     fn name(&self) -> &str;
     fn reads(&self) -> FieldSet;
     fn reads_previous(&self) -> FieldSet { FieldSet::empty() }
-    fn writes(&self) -> Vec<(FieldId, WriteMode)>;
+    fn writes(&self) -> Vec<(FieldId, WriteMode)>;  // called once at startup, not per-tick
     fn max_dt(&self) -> Option<f64> { None }
     fn scratch_bytes(&self) -> usize { 0 }
     fn step(&self, ctx: &StepContext, dt: f64) -> Result<(), PropagatorError>;
@@ -1141,7 +1167,7 @@ Snapshot retention uses arena-based generational allocation (see section 5). Mod
 * Arena reset is O(1) on `reset()` (bump pointer reset).
 
 **RealtimeAsync:**
-* Ring buffer of last **K** `ReadArena` generations for exact-tick reads.
+* Ring buffer of last **K** `ReadArena` generations for exact-tick reads (default K=8; configurable).
 * Bounded by count and/or byte budget; eviction by **epoch-based reclamation** (not refcount).
 * Epoch-based reclamation: egress threads register epochs; arena generations are freed when no egress thread holds a reference to that epoch.
 * Each snapshot carries `world_generation_id` and `parameter_version` for ObsPlan compatibility checking and parameter tracking.
@@ -1186,7 +1212,7 @@ Primary tensor export path uses caller-owned buffers:
 
 ObsSpec is serialisable and portable across bindings, with explicit versioning. FlatBuffers (see section 16.3).
 
-### R-FFI-4 Batched step_vec C API (SHOULD v1, MUST v1.5)
+### R-FFI-4 Batched step_vec C API (MUST v1)
 
 Vectorized RL training requires batched stepping across multiple environments:
 
@@ -1413,7 +1439,7 @@ Retain current voxel/octree backend as v1 discrete backend and wrap via new spac
 * Hex-capable discrete lattice backend (Hex2D).
 * ProductSpace composition model (tested up to 3 components).
 * ObsSpec -> ObsPlan compilation + fixed-shape tensor export + masks + metadata.
-* Handle-based C ABI + Python fast path with GIL release.
+* Handle-based C ABI + Python fast path with GIL release, including batched `step_vec`.
 * Deterministic command ordering + replay log format.
 * Tested/supported N = 1..=5.
 * Reference profile defined with CI benchmarks.
@@ -1424,7 +1450,6 @@ Retain current voxel/octree backend as v1 discrete backend and wrap via new spac
 * ContinuousGridSpace<N> + operator parity.
 * Expanded ObsSpec history + richer pooling.
 * Batch ObsPlan execution (MUST).
-* Batched `step_vec` C API (MUST).
 * Per-component propagator conflict detection in ProductSpace.
 * Split generation IDs (field/topology) if profiling justifies.
 * Dynamic LOD load-shedding for RealtimeAsync.
@@ -1480,7 +1505,7 @@ These tests MUST exist before v1 ships. Derived from architectural and domain re
 | CR-1 | ProductSpace composition semantics | **Specified with worked examples** (section 11.1) | Resolved in v3.0 |
 | C-5 | Determinism verification strategy | **Partially addressed** (section 19.1) | R-DET-6 requires living catalogue; full strategy during implementation |
 | C-8 | Full C ABI error code enumeration | **Minimum set defined** (section 9.7) | Full enum completed during implementation |
-| I-6 | Graceful shutdown/lifecycle | **Not addressed** | MUST be specified during implementation: in-flight commands, pending ObsPlans, held snapshot references on shutdown |
+| I-6 | Graceful shutdown/lifecycle | **Resolved** (Design Decisions v3.1, Decision E) | Mode-specific: Lockstep = trivial Drop; RealtimeAsync = 4-state drain-then-join (Running→Draining→Quiescing→Dropped), ≤300ms, reuses §8.3 machinery |
 | Q-4 | FlatBuffers schema evolution | **Direction set** (section 16.3) | Details during implementation |
 | CR-NEW-1 | ProductSpace distance metric vs neighbours | **Resolved** (v3.0.1) | L1 graph geodesic as default; dual API with configurable metric_distance() |
 | CR-NEW-2 | P-2 tick time vs RealtimeAsync TTL | **Resolved** (v3.0.1) | Tick-based authoritative TTL in both modes; wall-clock as ingress convenience only |
@@ -1521,7 +1546,7 @@ This section maps the architectural review's critical findings to their resoluti
 | I-3: TTL must be tick-based | Important | P-2 + R-DET-4; tick-based in both modes (v3.0.1) | 3, 19, R-DET-4 |
 | I-4: Replay log format unspecified | Important | Minimum format specified | 14.4 |
 | I-5: Collapse 3 generation IDs to 1 | Important | Single world_generation_id for v1 | 21.1 |
-| I-6: No graceful shutdown/lifecycle | Important | **Not addressed in v3.0** — deferred to implementation | 24 |
+| I-6: No graceful shutdown/lifecycle | Important | **Resolved** (Design Decisions v3.1, Decision E) — mode-specific shutdown protocol | 9, 24 |
 | I-7: ProductSpace padding explosion | Important | valid_ratio reporting, 35% threshold | R-OBS-7 |
 | I-8: Acceptance criteria not testable | Important | Partially addressed (verification methods added to key criteria) | Throughout |
 | I-9: No concurrency contract for ObsPlan | Important | Resolved by mode duality + epoch-based reclamation | 7, 8 |

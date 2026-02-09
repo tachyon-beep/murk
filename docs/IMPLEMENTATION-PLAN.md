@@ -55,7 +55,7 @@ murk-core (leaf — zero murk deps)
   ├── murk-arena       (core)
   ├── murk-space       (core)
   ├── murk-propagator  (core, space)        ← NOT arena
-  ├── murk-obs         (core, arena, space)
+  ├── murk-obs         (core, space)         ← NOT arena (Decision N: reads via &dyn SnapshotAccess)
   ├── murk-engine      (core, arena, space, propagator, obs)
   ├── murk-replay      (core)
   ├── murk-ffi         (core, engine, obs)
@@ -72,7 +72,7 @@ murk-core (leaf — zero murk deps)
 
 | Crate | Contents | Stability |
 |-------|----------|-----------|
-| **murk-core** | `FieldId`, `SpaceId`, `TickId`, `WorldGenerationId`, `ParameterVersion`, `Command`, `Receipt`, error enums (§9.7), `FieldDef`, `FieldMutability`, `FieldSet`, `FieldReader`/`FieldWriter` traits | Semi-stable |
+| **murk-core** | `FieldId`, `SpaceId`, `TickId`, `WorldGenerationId`, `ParameterVersion`, `Command`, `Receipt`, error enums (§9.7 + `SHUTTING_DOWN` + `TICK_DISABLED`), `FieldDef`, `FieldMutability`, `FieldSet`, `FieldReader`/`FieldWriter` traits, `SnapshotAccess` trait (Decision N) | Semi-stable |
 | **murk-arena** | `ReadArena` (Send+Sync), `WriteArena` (&mut), `FieldHandle`, segmented arena (64MB segments), double-buffer ping-pong, sparse slab, static gen-0 arena, `ScratchRegion`, implements `FieldReader`/`FieldWriter` | Internal |
 | **murk-space** | `Space` trait, `LatticeSpace` (Line1D, Ring1D, Square4, Square8, Hex2D), `ProductSpace`, `VoxelOctreeSpace` wrapper, region queries, dual distance API | Semi-stable |
 | **murk-propagator** | `Propagator` trait, `StepContext<R,W>`, `WriteMode`, pipeline validation (DAG, write conflicts, dt, Incremental budget), `PropagatorError` | Semi-stable |
@@ -84,7 +84,8 @@ murk-core (leaf — zero murk deps)
 
 ### 1.4 Determinism Enforcement
 
-- `#![forbid(unsafe_code)]` in all crates except murk-ffi
+- `#![forbid(unsafe_code)]` in all crates except murk-ffi and murk-arena
+- `#![deny(unsafe_code)]` in murk-arena with per-function `#[allow]` in bounded `raw.rs` module (≤5 functions), mandatory `// SAFETY:` comment, Miri coverage (Decision B)
 - `#![deny(unsafe_code)]` in murk-ffi with per-function `#[allow]` + mandatory `// SAFETY:` comment
 - `clippy::disallowed_types` banning `HashMap`/`HashSet` in all deterministic-path crates (core, arena, space, propagator, obs, engine, replay)
 - `IndexMap`/`IndexSet` as default replacement; `BTreeMap` where sorted order is semantically required
@@ -100,7 +101,7 @@ murk-core (leaf — zero murk deps)
 - **Description:** Cargo workspace with all 9 crate stubs, CI pipeline, test framework, clippy configuration.
 - **Complexity:** S
 - **Hard deps:** None (first WP)
-- **Deliverables:** Workspace `Cargo.toml`, crate stubs with `#![forbid(unsafe_code)]` and `#![deny(missing_docs)]`, CI pipeline (`cargo check` + `cargo test` + `cargo clippy` + `cargo miri` for murk-arena), `murk-test-utils` with `TestWorldBuilder` scaffold and `MockFieldReader`/`MockFieldWriter`, proptest configured, Criterion harness configured, `clippy.toml` per-crate with `disallowed_types`, PR checklist template.
+- **Deliverables:** Workspace `Cargo.toml`, crate stubs with `#![forbid(unsafe_code)]` (except murk-arena: `#![deny(unsafe_code)]`) and `#![deny(missing_docs)]`, CI pipeline (`cargo check` + `cargo test` + `cargo clippy` + `cargo miri` for murk-arena), `murk-test-utils` with `TestWorldBuilder` scaffold, `MockFieldReader`/`MockFieldWriter`, and `MockSnapshot` (implements `SnapshotAccess` with `Vec<f32>` backing, Decision N), proptest configured, Criterion harness configured, `clippy.toml` per-crate with `disallowed_types`, PR checklist template.
 - **Milestone:** Pre-M0
 
 ### WP-1: Core Types and Error Model
@@ -108,7 +109,7 @@ murk-core (leaf — zero murk deps)
 - **Complexity:** S
 - **Hard deps:** WP-0
 - **HLD refs:** R-ARCH-1, R-ARCH-2, §2 (glossary), §9 (error codes), §13 (field model)
-- **Deliverables:** `murk-core` crate with: `FieldId`, `SpaceId`, `TickId`, `WorldGenerationId`, `ParameterVersion`, `Command` (with `expires_after_tick`), `Receipt`, all error enums from §9.7, `FieldDef` (scalar/vector/categorical, units, bounds, boundary behavior), `FieldMutability` enum (Static/PerTick/Sparse), `FieldSet`, `FieldReader` trait, `FieldWriter` trait.
+- **Deliverables:** `murk-core` crate with: `FieldId`, `SpaceId`, `TickId`, `WorldGenerationId`, `ParameterVersion`, `Command` (with `expires_after_tick`), `Receipt`, all error enums from §9.7 (including `MURK_ERROR_SHUTTING_DOWN` and `MURK_ERROR_TICK_DISABLED`), `FieldDef` (scalar/vector/categorical, units, bounds, boundary behavior), `FieldMutability` enum (Static/PerTick/Sparse), `FieldSet`, `FieldReader` trait, `FieldWriter` trait, `SnapshotAccess` trait (4 methods: `read_field`, `tick_id`, `world_generation_id`, `parameter_version` — Decision N).
 - **Acceptance:** All types compile. Error code enum is exhaustive per §9.7. Property test: `FieldSet` operations (union, intersection, difference) satisfy set algebra axioms.
 
 ### WP-2: Arena Allocator
@@ -117,7 +118,11 @@ murk-core (leaf — zero murk deps)
 - **Hard deps:** WP-1
 - **HLD refs:** §5.1-5.6, R-FIELD-3
 - **Deliverables:** `murk-arena` crate with: `ReadArena` (Send+Sync), `WriteArena` (&mut), `FieldHandle` (generation-scoped integer: generation u32, segment_index u16, offset u32, len u32), segmented arena (64MB segments, linked list), double-buffer ping-pong for Lockstep (§5.6), sparse slab with promotion on reclaim, static generation-0 arena, `ScratchRegion` bump allocator, implements `FieldReader` for `ReadArena` and `FieldWriter` for `WriteArena`.
-- **Acceptance:** Property tests: arbitrary field counts × sizes × generation sequences round-trip correctly. Handle from gen N invalid after gen N+2 recycling. Static fields share allocation across generations (pointer equality). Sparse fields share until modified. Memory bound: after N Lockstep ticks, arena size ≤ 2× PerTick + 1× Static + Sparse slab. Miri clean. Zero `unsafe` blocks. Criterion micro-benchmark: allocate/publish/resolve cycle.
+- **Phase 1 (WP-2 through WP-5):** `Vec<f32>` zero-init for all arena allocations. Safe during early development. `cfg(feature = "zero-init-arena")` as permanent safety net opt-in (Decision B).
+- **Phase 2 (after WP-4 delivers FullWriteGuard):** Migrate to `MaybeUninit<f32>` + `FullWriteGuard`. Bounded unsafe in `crates/murk-arena/src/raw.rs` only (≤5 functions).
+- **FullWriteGuard:** Debug builds: `BitVec` coverage tracking per cell, panics on drop if `Full` write buffer incompletely written (diagnostic: propagator name, field ID, coverage %). Release builds: bare `&mut [MaybeUninit<f32>]`, zero overhead.
+- **Acceptance:** Property tests: arbitrary field counts × sizes × generation sequences round-trip correctly. Handle from gen N invalid after gen N+2 recycling. Static fields share allocation across generations (pointer equality). Sparse fields share until modified. Memory bound: after N Lockstep ticks, arena size ≤ 2× PerTick + 1× Static + Sparse slab. Miri clean. Unsafe limited to `raw.rs` (≤5 functions, each with `// SAFETY:` comment). Criterion micro-benchmark: allocate/publish/resolve cycle.
+- **M2 extension:** Static generation-0 arena wrapped in `Arc` for cross-environment sharing in vectorized training. 128 `LockstepWorld` instances MUST share a single static arena allocation. This is the mechanism behind M2's "Static field sharing via Arc" quality gate.
 - **Risk:** HIGH — handle validation, epoch reclamation interaction (RealtimeAsync deferred to WP-10).
 
 ### WP-3: Space Trait and Simple Backends
@@ -128,8 +133,9 @@ murk-core (leaf — zero murk deps)
 - **Sub-packages:**
   - **WP-3a:** Space trait definition + Line1D + Ring1D (S)
   - **WP-3b:** Square4 + Square8 (S)
-- **Deliverables:** `murk-space` crate with: `Space` trait (ndim, cell_count, neighbours, distance, compile_region, iter_region, map_coord_to_tensor_index, canonical_ordering), `Coord` (SmallVec<[i32; 4]>), 4 lattice backends with boundary handling (clamp, wrap, absorb).
-- **Acceptance:** Per-topology unit tests (neighbours, distance, iteration). Property tests: distance is a metric (d(a,a)=0, symmetry, triangle inequality). Neighbours symmetric (b in neighbours(a) iff a in neighbours(b)). Iteration deterministic (call twice → same sequence).
+  - **WP-3c:** VoxelOctreeSpace wrapper (M) — wraps existing voxel/octree system behind `Space` trait (R-MIG-1). Adapter pattern only; no rewrite of existing octree internals.
+- **Deliverables:** `murk-space` crate with: `Space` trait (`Space: Any + Send + 'static`; ndim, cell_count, neighbours, distance, compile_region, iter_region, map_coord_to_tensor_index, canonical_ordering), `downcast_ref::<T>()` on `dyn Space` for opt-in specialization (Decision M), `Coord` (SmallVec<[i32; 4]>), 4 lattice backends with boundary handling (clamp, wrap, absorb), `VoxelOctreeSpace` adapter wrapping existing octree backend.
+- **Acceptance:** Per-topology unit tests (neighbours, distance, iteration). Property tests: distance is a metric (d(a,a)=0, symmetry, triangle inequality). Neighbours symmetric (b in neighbours(a) iff a in neighbours(b)). Iteration deterministic (call twice → same sequence). VoxelOctreeSpace: passes same Space trait compliance tests as lattice backends.
 
 ### WP-4: Propagator Pipeline
 - **Description:** Propagator trait, StepContext with split-borrow semantics, pipeline validation, execution.
@@ -138,7 +144,7 @@ murk-core (leaf — zero murk deps)
 - **Soft deps:** WP-2 (for real arena testing; use mocks initially)
 - **HLD refs:** R-PROP-1 through R-PROP-5, §15.2, §15.3
 - **Deliverables:** `murk-propagator` crate with: `Propagator` trait (&self, Send + 'static), `StepContext<R: FieldReader, W: FieldWriter>` with `reads` (in-tick overlay view) and `reads_previous` (frozen tick-start view), `WriteMode` enum (Full/Incremental), pipeline validation (write-write conflict detection, DAG consistency with user-provided order, dt validation, Incremental budget estimation, all field refs exist), `PropagatorError`. 3 validation fixtures: `IdentityPropagator`, `ConstPropagator`, `FailingPropagator` in murk-test-utils.
-- **Acceptance:** Pipeline validation rejects write-write conflicts. Rejects unresolvable field IDs. Rejects dt > min(max_dt). Property test: arbitrary propagator DAGs validate iff no conflicts and all refs exist. StepContext mock tests verify split-borrow semantics (reads sees staged, reads_previous doesn't). Criterion: pipeline validation time for 10 propagators.
+- **Acceptance:** Pipeline validation rejects write-write conflicts. Rejects unresolvable field IDs. Rejects dt > min(max_dt). Property test: arbitrary propagator DAGs validate iff no conflicts and all refs exist. StepContext mock tests verify split-borrow semantics (reads sees staged, reads_previous doesn't). **FullWriteGuard acceptance:** debug-mode `BitVec` tracking catches incomplete `Full` writes with diagnostic (propagator name, field ID, coverage %) — Decision B. **`downcast_ref` documented:** propagator examples show opt-in specialization via `ctx.space.downcast_ref::<Square4Space>()` — Decision M. Criterion: pipeline validation time for 10 propagators.
 
 ### WP-5: TickEngine Core
 - **Description:** Central tick execution: drain ingress → validate → run propagators → publish snapshot.
@@ -146,7 +152,7 @@ murk-core (leaf — zero murk deps)
 - **Hard deps:** WP-2, WP-4
 - **Soft deps:** WP-3 (need at least Square4 for testing)
 - **HLD refs:** R-ARCH-1, R-ARCH-3, §9.1 (tick atomicity)
-- **Deliverables:** Core tick pipeline in `murk-engine`: command drain with `expires_after_tick` evaluation, deterministic ordering (priority_class → source_id/source_seq → arrival_seq, stable sort), receipt generation, **precomputed ReadResolutionPlan** (per-propagator read routing built at startup), propagator execution in dependency order with overlay resolution, tick atomicity (all-or-nothing via arena abandon on propagator failure), snapshot descriptor publication.
+- **Deliverables:** Core tick pipeline in `murk-engine`: command drain with `expires_after_tick` evaluation, deterministic ordering (priority_class → source_id/source_seq → arrival_seq, stable sort), receipt generation, **precomputed ReadResolutionPlan** (per-propagator read routing built at startup), propagator execution in dependency order with overlay resolution, tick atomicity (all-or-nothing via arena abandon on propagator failure — commands dropped with `TICK_ROLLBACK`, not re-enqueued), snapshot descriptor publication, **configurable NaN sentinel check** on written fields (HLD §9.2: off by default, enabled via pipeline config), **`consecutive_rollback_count` tracking** and **`tick_disabled` mechanism** (AtomicBool set after 3 consecutive rollbacks; ingress rejects with `MURK_ERROR_TICK_DISABLED`; recovery via `reset()` — Decision J), `murk_consecutive_rollbacks()` C ABI query function.
 - **Critical sub-task:** Overlay resolution — the ReadResolutionPlan that routes `reads()` to base gen or staged writes from prior propagators. This is ~50-100 lines with the highest correctness criticality in the engine.
 - **Acceptance:** Command ordering unit tests (priority, source disambiguation, arrival_seq tiebreak). TTL rejection test (expired → STALE). Tick atomicity test (propagator failure → no snapshot, state unchanged). **Three-propagator overlay visibility test** (5 cases: A writes X, B reads X via reads() sees A's value; B reads X via reads_previous() sees base gen; C reads X sees B's staged value if B wrote; etc.). Criterion: full tick cycle on reference profile.
 - **Risk:** HIGH — overlay resolution is the single highest-risk correctness item.
@@ -157,8 +163,8 @@ murk-core (leaf — zero murk deps)
 - **Hard deps:** WP-5
 - **Soft deps:** WP-7 (ObsPlan for obs, but M0 uses direct field reads)
 - **HLD refs:** R-MODE-1, §7.1, §5.6, §8.1
-- **Deliverables:** `LockstepWorld` in `murk-engine`: `step_sync(&mut self, commands) -> StepResult<&Snapshot>`, `reset(&mut self, seed) -> &Snapshot`, double-buffer ping-pong arena recycling, Send not Sync.
-- **Acceptance:** 1000-step determinism (2 runs, same seed+commands → bit-exact snapshots at every tick). Memory bound assertion (RSS at tick 1000 ≈ tick 10). Reset reclaims both buffers. &mut self prevents snapshot aliasing (compile-time test).
+- **Deliverables:** `LockstepWorld` in `murk-engine`: `step_sync(&mut self, commands) -> StepResult<&Snapshot>`, `reset(&mut self, seed) -> &Snapshot`, double-buffer ping-pong arena recycling, Send not Sync. **Graceful shutdown:** `LockstepWorld` implements `Drop`; `&mut self` guarantees no outstanding borrows; arena reset reclaims all memory (Decision E).
+- **Acceptance:** 1000-step determinism (2 runs, same seed+commands → bit-exact snapshots at every tick). Memory bound assertion (RSS at tick 1000 ≈ tick 10). Reset reclaims both buffers. &mut self prevents snapshot aliasing (compile-time test). Basic telemetry: per-step timing (total, per-propagator), memory usage reporting (R-OPS-1, Lockstep subset).
 - **M0 exit:** This WP + reference propagators = M0 complete.
 
 ### WP-7: ObsSpec/ObsPlan (Simple Plan Class)
@@ -178,7 +184,7 @@ murk-core (leaf — zero murk deps)
 - **Complexity:** L
 - **Hard deps:** WP-6, WP-7
 - **HLD refs:** R-FFI-1 through R-FFI-5, §9.6, §18
-- **Deliverables:** `murk-ffi` crate: opaque handles (slot-based with generation counter, not raw pointers), create/destroy lifecycle (double-destroy safe, use-after-destroy returns INVALID_HANDLE), `murk_abi_version()`, `murk_dt_range()`, caller-allocated buffers, `murk_lockstep_step()`, `murk_lockstep_reset()`, `murk_obsplan_compile()`, `murk_obsplan_execute()`, `murk_lockstep_step_vec()` (MUST v1), all error codes from §9.7.
+- **Deliverables:** `murk-ffi` crate: opaque handles (slot-based with generation counter, not raw pointers), create/destroy lifecycle (double-destroy safe, use-after-destroy returns INVALID_HANDLE), `murk_abi_version()`, `murk_dt_range()`, caller-allocated buffers, `murk_lockstep_step()`, `murk_lockstep_reset()`, `murk_obsplan_compile()`, `murk_obsplan_execute()`, `murk_lockstep_step_vec()` (MUST v1; dispatches via rayon thread pool for M2 vectorized training), all error codes from §9.7.
 - **Acceptance:** Handle lifecycle proptest (random create/step/observe/destroy sequences → no UB). Miri clean. Error code coverage (every error path returns defined code). double-destroy no-op. null-handle → error code. Criterion: FFI overhead per call.
 
 ### WP-9: Python Bindings
@@ -186,8 +192,8 @@ murk-core (leaf — zero murk deps)
 - **Complexity:** M
 - **Hard deps:** WP-8
 - **HLD refs:** R-FFI-2, R-FFI-5, §18
-- **Deliverables:** `murk-python` crate (PyO3): `MurkEnv(gymnasium.Env)` class with step/reset/observation_space/action_space, `MurkVecEnv(gymnasium.vector.VectorEnv)` with auto-reset, GIL released via `py.allow_threads()` on all C ABI calls, NumPy buffer integration (caller-allocated, zero-copy pointer pass), context manager for handle lifecycle.
-- **Acceptance:** GIL release verified (N concurrent Python threads make progress during step). Gymnasium compliance (step/reset contract). NumPy buffer contains correct observation data. PPO smoke test (100K steps, learning curve shows improvement — soft gate).
+- **Deliverables:** `murk-python` crate (PyO3): `MurkEnv(gymnasium.Env)` class with step/reset/observation_space/action_space, `MurkVecEnv(gymnasium.vector.VectorEnv)` with auto-reset, GIL released via `py.allow_threads()` on all C ABI calls, NumPy buffer integration (caller-allocated, zero-copy pointer pass), context manager for handle lifecycle. **PettingZoo Parallel API** (R-MODE-4, SHOULD v1): `MurkParallelEnv(pettingzoo.ParallelEnv)` wrapper for multi-agent environments if schedule permits; interface design MUST be finalized for v1.5.
+- **Acceptance:** GIL release verified (N concurrent Python threads make progress during step). Gymnasium compliance (step/reset contract). NumPy buffer contains correct observation data. PPO smoke test (100K steps, learning curve shows improvement — soft gate). PettingZoo: if implemented, passes AEC API compliance test.
 
 ### WP-10: Hex2D and ProductSpace
 - **Description:** Hex2D lattice backend + ProductSpace composition with dual distance API.
@@ -197,7 +203,7 @@ murk-core (leaf — zero murk deps)
 - **HLD refs:** R-SPACE-4 through R-SPACE-12, §11.1, §12
 - **Sub-packages:**
   - **WP-10a:** Hex2D (M) — axial coords, 6 neighbours, cube-distance, canonical ordering (r-then-q), hex tensor export (bounding box + validity mask, branch-free gather with precomputed index tables)
-  - **WP-10b:** ProductSpace (L) — composition, per-component neighbours (R-SPACE-8), L1 graph-geodesic distance (R-SPACE-9), `metric_distance()` with configurable metrics, lexicographic iteration (R-SPACE-10), region queries as Cartesian products (R-SPACE-11), `valid_ratio` computation (product of per-component ratios)
+  - **WP-10b:** ProductSpace (L) — stores components as `Vec<Box<dyn Space>>` (Decision M; vtable dispatch handles nesting naturally), composition, per-component neighbours (R-SPACE-8), L1 graph-geodesic distance (R-SPACE-9), `metric_distance()` with configurable metrics, lexicographic iteration (R-SPACE-10), region queries as Cartesian products (R-SPACE-11), `valid_ratio` computation (product of per-component ratios)
 - **Acceptance:** Hex2D: 6 neighbours in documented order, distance matches BFS, valid_ratio converges to 0.75 for large R. ProductSpace: worked examples from HLD §11.1 (Hex2D×Line1D distance, neighbours, iteration). Property tests: distance metric axioms, neighbour symmetry, BFS = geodesic. valid_ratio ≥ 0.35 for all v1 compositions. Hex2D×Hex2D ≈ 0.56 (warns, doesn't fail).
 - **Risk:** MEDIUM — Hex2D tensor export mapping (branch-free gather with precomputed index tables) is deceptively hard. ProductSpace lexicographic iteration with mixed-dimensionality components needs careful nesting.
 
@@ -206,7 +212,7 @@ murk-core (leaf — zero murk deps)
 - **Complexity:** L
 - **Hard deps:** WP-7, WP-10
 - **HLD refs:** §16.1, §16.3
-- **Deliverables:** Agent-relative regions with interior/boundary dispatch (O(1) check, ~90% interior path for radius < grid/4), pooling operations, Standard plan class, ObsPlan caching with rate-limited recompilation, FlatBuffers ObsSpec serialization for cross-language use.
+- **Deliverables:** Agent-relative regions with interior/boundary dispatch (O(1) check, ~90% interior path for radius < grid/4), pooling operations, Standard plan class, ObsPlan caching with rate-limited recompilation, FlatBuffers ObsSpec serialization for cross-language use. **Batch ObsPlan execution** (R-OBS-8, SHOULD v1): single traversal fills N agent observation buffers; interface MUST be designed even if batch execution is deferred to v1.5.
 - **Acceptance:** Interior/boundary dispatch produces identical results (functional equivalence test). Hex foveation correct (hex disk region + validity mask). FlatBuffers round-trip test.
 
 ### WP-12: RealtimeAsync Mode
@@ -214,7 +220,7 @@ murk-core (leaf — zero murk deps)
 - **Complexity:** XL
 - **Hard deps:** WP-5, WP-7
 - **HLD refs:** R-MODE-1, §7.2, §8.2, §8.3, P-1, P-3
-- **Deliverables:** `RealtimeAsyncWorld` in `murk-engine`: TickEngine on dedicated thread, snapshot ring buffer (count + byte-budget eviction), egress thread pool, epoch-based reclamation with stalled worker teardown (§8.3: max_epoch_hold, cancellation flag, cooperative check between region iterations), 60Hz wall-clock deadline, fallback snapshot selection, `ttl_ms → expires_after_tick` conversion at ingress, adaptive max_tick_skew, backpressure policy (R-MODE-2), telemetry (tick duration, queue depth, snapshot age).
+- **Deliverables:** `RealtimeAsyncWorld` in `murk-engine`: TickEngine on dedicated thread, snapshot ring buffer (default K=8, configurable; count + byte-budget eviction), egress thread pool, epoch-based reclamation with stalled worker teardown (§8.3: max_epoch_hold, cancellation flag, cooperative check between region iterations), 60Hz wall-clock deadline, fallback snapshot selection, `ttl_ms → expires_after_tick` conversion at ingress, adaptive max_tick_skew, backpressure policy (R-MODE-2), telemetry (tick duration, queue depth, snapshot age). **Graceful shutdown protocol** (Decision E): 4-state machine (Running→Draining→Quiescing→Dropped), bounded timeouts (≤300ms total: ~33ms drain + ~200ms quiesce + ~10ms join), reuses §8.3 stalled-worker machinery, returns `ShutdownResult` with phase reporting, `MURK_ERROR_SHUTTING_DOWN` for commands arriving during shutdown. **`tick_disabled` mechanism** (Decision J): `tick_disabled: AtomicBool` integration with shutdown (thread stays alive for orderly shutdown even when tick-disabled).
 - **Acceptance:** 60Hz sustained under reference profile. P-1 verified (egress always returns — stalled workers get ObsError::ExecutionFailed with WORKER_STALLED). Stress tests: death spiral (§23 #15), mass invalidation (#16), rejection oscillation (#17). Epoch reclamation: memory bounded under sustained load.
 - **Risk:** HIGH — epoch reclamation + stalled worker interaction is the hardest correctness problem. Implement LAST among engine features.
 
@@ -241,7 +247,7 @@ murk-core (leaf — zero murk deps)
 - **Complexity:** L
 - **Hard deps:** WP-6, WP-7, WP-12, WP-13, WP-14
 - **HLD refs:** §23 (all 17 tests), R-PERF-3, §19.1
-- **Deliverables:** All 17 §23 mandatory tests (unit/property, integration, stress). CI benchmark pipeline with Criterion (15 micro-benchmarks) + custom system harness (throughput, memory growth). Regression detection: -5% warns, -10% blocks. Reference profile CI artifact. VoxelOctreeSpace integration (R-MIG-1). Graceful shutdown tests. NaN detection (configurable sentinel check). Determinism catalogue complete and reviewed.
+- **Deliverables:** All 17 §23 mandatory tests (unit/property, integration, stress). CI benchmark pipeline with Criterion (15 micro-benchmarks) + custom system harness (throughput, memory growth). Regression detection: -5% warns, -10% blocks. Reference profile CI artifact. VoxelOctreeSpace integration verified (R-MIG-1, implemented in WP-3c). Graceful shutdown tests. NaN detection (configurable sentinel check). Determinism catalogue complete and reviewed.
 - **Acceptance:** All §23 tests pass. Benchmarks within budget. R-DET-6 catalogue reviewed. No regressions from baseline.
 
 ---
@@ -328,7 +334,7 @@ Tracks A, B, D, and E are independent until they converge at WP-5.
 - [ ] ReadResolutionPlan unit test (precomputed routing correct)
 - [ ] Rollback negative test (propagator failure → state unchanged)
 - [ ] Arena property tests pass
-- [ ] No `unsafe` blocks
+- [ ] No `unsafe` blocks outside murk-arena `raw.rs` (≤5 functions, Decision B)
 - [ ] No `HashMap` in deterministic crates (clippy lint)
 - [ ] Criterion micro-benchmarks baselined
 
@@ -459,7 +465,15 @@ pub struct Command {
 }
 pub struct Receipt { /* accepted, applied_tick_id, reason_code, ... */ }
 
-// Error model (§9.7 — all 14 error codes)
+// Snapshot access (Decision N — ObsPlan reads through this, not ReadArena directly)
+pub trait SnapshotAccess {
+    fn read_field(&self, field: FieldId) -> Option<&[f32]>;
+    fn tick_id(&self) -> TickId;
+    fn world_generation_id(&self) -> WorldGenerationId;
+    fn parameter_version(&self) -> ParameterVersion;
+}
+
+// Error model (§9.7 — all 16 error codes, including SHUTTING_DOWN and TICK_DISABLED)
 pub enum StepError { /* ... */ }
 pub enum PropagatorError { /* ... */ }
 pub enum ObsError { /* ... */ }
@@ -476,16 +490,16 @@ pub trait Propagator: Send + 'static {
     fn writes(&self) -> Vec<(FieldId, WriteMode)>;
     fn max_dt(&self) -> Option<f64> { None }
     fn scratch_bytes(&self) -> usize { 0 }
-    fn step(&self, ctx: &StepContext<impl FieldReader, impl FieldWriter>, dt: f64)
+    fn step(&self, ctx: &StepContext<'_, impl FieldReader, impl FieldWriter>, dt: f64)
         -> Result<(), PropagatorError>;
 }
 
-pub struct StepContext<R: FieldReader, W: FieldWriter> {
+pub struct StepContext<'a, R: FieldReader, W: FieldWriter> {
     pub reads: R,           // current in-tick view (overlay)
     pub reads_prev: R,      // frozen tick-start view
     pub writes: W,          // staging arena
-    pub scratch: ScratchRegion,
-    pub space: Box<dyn Space>,
+    pub scratch: &'a mut ScratchRegion,  // borrowed; pipeline reuses allocation, reset between propagators
+    pub space: &'a dyn Space,  // Decision M: &dyn not Box; Space: Any + Send + 'static enables downcast_ref()
     pub tick_id: TickId,
     pub dt: f64,
 }
@@ -561,7 +575,7 @@ The following decisions were made through cross-challenge review with unanimous 
 | 14 | PerTick for most RL fields; Sparse for events only | Mutability = write pattern, not value change frequency |
 | 15 | Sparse runtime warning on consecutive modification | Prevents silent performance degradation |
 | 16 | WP-0 (test infra) as first work package | Foundation for all testing; CI lint enforcement |
-| 17 | forbid(unsafe_code) in all crates except murk-ffi | Zero unsafe design goal; CI enforced |
+| 17 | forbid(unsafe_code) in all crates except murk-ffi and murk-arena | Zero unsafe by default; murk-arena has bounded deny + raw.rs (Decision B) |
 | 18 | deny(missing_docs) workspace-wide | 95% MUST requirements automatically verifiable |
 | 19 | PettingZoo SHOULD v1, MUST v1.5 | Multi-agent engine support from v1; Python wrapper later |
 | 20 | Three-propagator overlay test as WP-5 acceptance | Highest-risk correctness item; named criterion |
