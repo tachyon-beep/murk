@@ -18,12 +18,23 @@ pub struct Ring1D {
 }
 
 impl Ring1D {
+    /// Maximum length: coordinates use `i32`, so `len` must fit.
+    pub const MAX_LEN: u32 = i32::MAX as u32;
+
     /// Create a new 1D ring with `len` cells.
     ///
-    /// Returns `Err(SpaceError::EmptySpace)` if `len == 0`.
+    /// Returns `Err(SpaceError::EmptySpace)` if `len == 0`, or
+    /// `Err(SpaceError::DimensionTooLarge)` if `len > i32::MAX`.
     pub fn new(len: u32) -> Result<Self, SpaceError> {
         if len == 0 {
             return Err(SpaceError::EmptySpace);
+        }
+        if len > Self::MAX_LEN {
+            return Err(SpaceError::DimensionTooLarge {
+                name: "len",
+                value: len,
+                max: Self::MAX_LEN,
+            });
         }
         Ok(Self { len })
     }
@@ -131,6 +142,15 @@ mod tests {
     #[test]
     fn new_zero_len_returns_error() {
         assert!(matches!(Ring1D::new(0), Err(SpaceError::EmptySpace)));
+    }
+
+    #[test]
+    fn new_rejects_len_exceeding_i32_max() {
+        assert!(matches!(
+            Ring1D::new(i32::MAX as u32 + 1),
+            Err(SpaceError::DimensionTooLarge { .. })
+        ));
+        assert!(Ring1D::new(i32::MAX as u32).is_ok());
     }
 
     // ── Compliance ──────────────────────────────────────────────

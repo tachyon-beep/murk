@@ -26,12 +26,30 @@ pub struct Square4 {
 }
 
 impl Square4 {
+    /// Maximum dimension size: coordinates use `i32`, so each axis must fit.
+    pub const MAX_DIM: u32 = i32::MAX as u32;
+
     /// Create a new 2D grid with `rows * cols` cells and the given edge behavior.
     ///
-    /// Returns `Err(SpaceError::EmptySpace)` if either dimension is 0.
+    /// Returns `Err(SpaceError::EmptySpace)` if either dimension is 0, or
+    /// `Err(SpaceError::DimensionTooLarge)` if either exceeds `i32::MAX`.
     pub fn new(rows: u32, cols: u32, edge: EdgeBehavior) -> Result<Self, SpaceError> {
         if rows == 0 || cols == 0 {
             return Err(SpaceError::EmptySpace);
+        }
+        if rows > Self::MAX_DIM {
+            return Err(SpaceError::DimensionTooLarge {
+                name: "rows",
+                value: rows,
+                max: Self::MAX_DIM,
+            });
+        }
+        if cols > Self::MAX_DIM {
+            return Err(SpaceError::DimensionTooLarge {
+                name: "cols",
+                value: cols,
+                max: Self::MAX_DIM,
+            });
         }
         Ok(Self { rows, cols, edge })
     }
@@ -294,6 +312,20 @@ mod tests {
             Square4::new(5, 0, EdgeBehavior::Absorb),
             Err(SpaceError::EmptySpace)
         ));
+    }
+
+    #[test]
+    fn new_rejects_dims_exceeding_i32_max() {
+        let big = i32::MAX as u32 + 1;
+        assert!(matches!(
+            Square4::new(big, 5, EdgeBehavior::Absorb),
+            Err(SpaceError::DimensionTooLarge { name: "rows", .. })
+        ));
+        assert!(matches!(
+            Square4::new(5, big, EdgeBehavior::Absorb),
+            Err(SpaceError::DimensionTooLarge { name: "cols", .. })
+        ));
+        assert!(Square4::new(i32::MAX as u32, 1, EdgeBehavior::Absorb).is_ok());
     }
 
     // ── 1×1 edge case ──────────────────────────────────────────

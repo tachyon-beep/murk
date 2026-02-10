@@ -33,7 +33,7 @@ pub(crate) fn check_2d_bounds(
 
 /// Row-major canonical ordering: `[0,0], [0,1], ..., [rows-1, cols-1]`.
 pub(crate) fn canonical_ordering_2d(rows: u32, cols: u32) -> Vec<Coord> {
-    let mut out = Vec::with_capacity((rows * cols) as usize);
+    let mut out = Vec::with_capacity((rows as usize) * (cols as usize));
     for r in 0..rows as i32 {
         for c in 0..cols as i32 {
             out.push(smallvec![r, c]);
@@ -80,7 +80,7 @@ pub(crate) fn compile_disk_2d(
     cols: u32,
     get_neighbours: impl Fn(i32, i32) -> Vec<(i32, i32)>,
 ) -> RegionPlan {
-    let n = (rows * cols) as usize;
+    let n = (rows as usize) * (cols as usize);
     let mut visited = vec![false; n];
     let mut queue = VecDeque::new();
     let mut result: Vec<(i32, i32)> = Vec::new();

@@ -20,6 +20,15 @@ pub enum SpaceError {
     },
     /// Attempted to construct a space with zero cells.
     EmptySpace,
+    /// A dimension exceeds the representable coordinate range.
+    DimensionTooLarge {
+        /// Which dimension is too large (e.g. "len", "rows", "cols").
+        name: &'static str,
+        /// The value that was provided.
+        value: u32,
+        /// The maximum allowed value.
+        max: u32,
+    },
 }
 
 impl fmt::Display for SpaceError {
@@ -32,6 +41,9 @@ impl fmt::Display for SpaceError {
                 write!(f, "invalid region: {reason}")
             }
             Self::EmptySpace => write!(f, "space must have at least one cell"),
+            Self::DimensionTooLarge { name, value, max } => {
+                write!(f, "{name} ({value}) exceeds maximum ({max})")
+            }
         }
     }
 }

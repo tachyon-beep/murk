@@ -22,12 +22,23 @@ pub struct Line1D {
 }
 
 impl Line1D {
+    /// Maximum length: coordinates use `i32`, so `len` must fit.
+    pub const MAX_LEN: u32 = i32::MAX as u32;
+
     /// Create a new 1D line with `len` cells and the given edge behavior.
     ///
-    /// Returns `Err(SpaceError::EmptySpace)` if `len == 0`.
+    /// Returns `Err(SpaceError::EmptySpace)` if `len == 0`, or
+    /// `Err(SpaceError::DimensionTooLarge)` if `len > i32::MAX`.
     pub fn new(len: u32, edge: EdgeBehavior) -> Result<Self, SpaceError> {
         if len == 0 {
             return Err(SpaceError::EmptySpace);
+        }
+        if len > Self::MAX_LEN {
+            return Err(SpaceError::DimensionTooLarge {
+                name: "len",
+                value: len,
+                max: Self::MAX_LEN,
+            });
         }
         Ok(Self { len, edge })
     }
@@ -473,6 +484,14 @@ mod tests {
     fn new_zero_len_returns_error() {
         let result = Line1D::new(0, EdgeBehavior::Absorb);
         assert!(matches!(result, Err(SpaceError::EmptySpace)));
+    }
+
+    #[test]
+    fn new_rejects_len_exceeding_i32_max() {
+        let result = Line1D::new(i32::MAX as u32 + 1, EdgeBehavior::Absorb);
+        assert!(matches!(result, Err(SpaceError::DimensionTooLarge { .. })));
+        // i32::MAX itself should be accepted.
+        assert!(Line1D::new(i32::MAX as u32, EdgeBehavior::Absorb).is_ok());
     }
 
     // ── Compliance suites ───────────────────────────────────────
