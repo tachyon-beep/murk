@@ -15,6 +15,6 @@ mod overlay;
 pub mod tick;
 
 pub use config::{BackoffConfig, ConfigError, WorldConfig};
-pub use ingress::{DrainResult, IngressQueue};
+pub use ingress::{DrainResult, DrainedCommand, IngressQueue};
 pub use metrics::StepMetrics;
-pub use tick::{TickEngine, TickResult};
+pub use tick::{TickEngine, TickError, TickResult};

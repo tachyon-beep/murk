@@ -22,11 +22,23 @@ use murk_core::command::{Command, Receipt};
 use murk_core::error::IngressError;
 use murk_core::id::TickId;
 
+/// A command paired with its original batch-local index from `submit()`.
+///
+/// Returned in [`DrainResult::commands`] so the tick engine can build
+/// receipts with correct `command_index` values even after priority reordering.
+#[derive(Debug)]
+pub struct DrainedCommand {
+    /// The command to execute.
+    pub command: Command,
+    /// The original batch-local index from the `submit()` call.
+    pub command_index: usize,
+}
+
 /// Result of draining the queue at the start of a tick.
 #[derive(Debug)]
 pub struct DrainResult {
     /// Commands that passed TTL checks, sorted in deterministic order.
-    pub commands: Vec<Command>,
+    pub commands: Vec<DrainedCommand>,
     /// Receipts for commands that expired before reaching the current tick.
     pub expired_receipts: Vec<Receipt>,
 }
@@ -139,17 +151,20 @@ impl IngressQueue {
                     command_index: entry.command_index,
                 });
             } else {
-                valid.push(entry.command);
+                valid.push(DrainedCommand {
+                    command: entry.command,
+                    command_index: entry.command_index,
+                });
             }
         }
 
         // Deterministic sort: (priority_class, source_id|MAX, source_seq|MAX, arrival_seq)
-        valid.sort_unstable_by_key(|cmd| {
+        valid.sort_unstable_by_key(|dc| {
             (
-                cmd.priority_class,
-                cmd.source_id.unwrap_or(u64::MAX),
-                cmd.source_seq.unwrap_or(u64::MAX),
-                cmd.arrival_seq,
+                dc.command.priority_class,
+                dc.command.source_id.unwrap_or(u64::MAX),
+                dc.command.source_seq.unwrap_or(u64::MAX),
+                dc.command.arrival_seq,
             )
         });
 
@@ -172,6 +187,14 @@ impl IngressQueue {
     /// Maximum number of commands this queue can hold.
     pub fn capacity(&self) -> usize {
         self.capacity
+    }
+
+    /// Discard all pending commands.
+    ///
+    /// Called during [`TickEngine::reset()`](crate::TickEngine::reset) so
+    /// stale commands from previous ticks don't survive a reset.
+    pub fn clear(&mut self) {
+        self.queue.clear();
     }
 }
 
@@ -221,9 +244,9 @@ mod tests {
 
         // Drain and check arrival_seq 0, 1, 2
         let result = q.drain(TickId(0));
-        assert_eq!(result.commands[0].arrival_seq, 0);
-        assert_eq!(result.commands[1].arrival_seq, 1);
-        assert_eq!(result.commands[2].arrival_seq, 2);
+        assert_eq!(result.commands[0].command.arrival_seq, 0);
+        assert_eq!(result.commands[1].command.arrival_seq, 1);
+        assert_eq!(result.commands[2].command.arrival_seq, 2);
     }
 
     #[test]
@@ -277,9 +300,9 @@ mod tests {
         q.submit(vec![make_cmd(1, 100), make_cmd(1, 100)], false);
         q.submit(vec![make_cmd(1, 100)], false);
         let result = q.drain(TickId(0));
-        assert_eq!(result.commands[0].arrival_seq, 0);
-        assert_eq!(result.commands[1].arrival_seq, 1);
-        assert_eq!(result.commands[2].arrival_seq, 2);
+        assert_eq!(result.commands[0].command.arrival_seq, 0);
+        assert_eq!(result.commands[1].command.arrival_seq, 1);
+        assert_eq!(result.commands[2].command.arrival_seq, 2);
     }
 
     #[test]
@@ -336,9 +359,9 @@ mod tests {
             false,
         );
         let result = q.drain(TickId(0));
-        assert_eq!(result.commands[0].priority_class, 0);
-        assert_eq!(result.commands[1].priority_class, 1);
-        assert_eq!(result.commands[2].priority_class, 2);
+        assert_eq!(result.commands[0].command.priority_class, 0);
+        assert_eq!(result.commands[1].command.priority_class, 1);
+        assert_eq!(result.commands[2].command.priority_class, 2);
     }
 
     #[test]
@@ -354,13 +377,13 @@ mod tests {
         );
         let result = q.drain(TickId(0));
         // source_id 5 < 10, so it comes first
-        assert_eq!(result.commands[0].source_id, Some(5));
-        assert_eq!(result.commands[0].source_seq, Some(0));
+        assert_eq!(result.commands[0].command.source_id, Some(5));
+        assert_eq!(result.commands[0].command.source_seq, Some(0));
         // Then source_id 10 seq 1 before seq 2
-        assert_eq!(result.commands[1].source_id, Some(10));
-        assert_eq!(result.commands[1].source_seq, Some(1));
-        assert_eq!(result.commands[2].source_id, Some(10));
-        assert_eq!(result.commands[2].source_seq, Some(2));
+        assert_eq!(result.commands[1].command.source_id, Some(10));
+        assert_eq!(result.commands[1].command.source_seq, Some(1));
+        assert_eq!(result.commands[2].command.source_id, Some(10));
+        assert_eq!(result.commands[2].command.source_seq, Some(2));
     }
 
     #[test]
@@ -372,9 +395,9 @@ mod tests {
             false,
         );
         let result = q.drain(TickId(0));
-        assert_eq!(result.commands[0].arrival_seq, 0);
-        assert_eq!(result.commands[1].arrival_seq, 1);
-        assert_eq!(result.commands[2].arrival_seq, 2);
+        assert_eq!(result.commands[0].command.arrival_seq, 0);
+        assert_eq!(result.commands[1].command.arrival_seq, 1);
+        assert_eq!(result.commands[2].command.arrival_seq, 2);
     }
 
     #[test]
@@ -389,8 +412,8 @@ mod tests {
         );
         let result = q.drain(TickId(0));
         // source_id 5 < u64::MAX, so sourced command comes first
-        assert_eq!(result.commands[0].source_id, Some(5));
-        assert_eq!(result.commands[1].source_id, None);
+        assert_eq!(result.commands[0].command.source_id, Some(5));
+        assert_eq!(result.commands[1].command.source_id, None);
     }
 
     #[test]
@@ -489,8 +512,8 @@ mod tests {
 
                 // Verify sort order
                 for window in result.commands.windows(2) {
-                    let a = &window[0];
-                    let b = &window[1];
+                    let a = &window[0].command;
+                    let b = &window[1].command;
                     let key_a = (
                         a.priority_class,
                         a.source_id.unwrap_or(u64::MAX),

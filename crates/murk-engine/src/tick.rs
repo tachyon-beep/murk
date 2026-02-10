@@ -10,6 +10,7 @@
 //! background threads. RealtimeAsync mode (future WP) wraps this in
 //! a thread with a ring buffer.
 
+use std::fmt;
 use std::time::Instant;
 
 use murk_arena::config::ArenaConfig;
@@ -38,6 +39,33 @@ pub struct TickResult {
     pub receipts: Vec<Receipt>,
     /// Performance metrics for this tick.
     pub metrics: StepMetrics,
+}
+
+// ── TickError ───────────────────────────────────────────────────
+
+/// Error returned from [`TickEngine::execute_tick()`].
+///
+/// Wraps the underlying [`StepError`] and any receipts that were produced
+/// before the failure. On rollback, receipts carry `TickRollback` reason
+/// codes; callers must not discard them.
+#[derive(Debug)]
+pub struct TickError {
+    /// The underlying error.
+    pub kind: StepError,
+    /// Receipts produced before the failure (may include rollback receipts).
+    pub receipts: Vec<Receipt>,
+}
+
+impl fmt::Display for TickError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.kind)
+    }
+}
+
+impl std::error::Error for TickError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.kind)
+    }
 }
 
 // ── TickEngine ───────────────────────────────────────────────────
@@ -149,44 +177,49 @@ impl TickEngine {
     /// Runs the full propagator pipeline, publishes the snapshot, and
     /// returns receipts plus metrics. On propagator failure, the tick
     /// is rolled back atomically (the staging buffer is abandoned).
-    pub fn execute_tick(&mut self) -> Result<TickResult, StepError> {
+    pub fn execute_tick(&mut self) -> Result<TickResult, TickError> {
         let tick_start = Instant::now();
 
         // 0. Check if ticking is disabled.
         if self.tick_disabled {
-            return Err(StepError::TickDisabled);
+            return Err(TickError {
+                kind: StepError::TickDisabled,
+                receipts: Vec::new(),
+            });
         }
 
         let next_tick = TickId(self.current_tick.0 + 1);
 
-        // 1. Drain ingress queue.
-        let cmd_start = Instant::now();
-        let drain = self.ingress.drain(next_tick);
-        let mut receipts = drain.expired_receipts;
-        let commands = drain.commands;
-        // Mark accepted commands — we'll finalize their applied_tick_id on success.
-        let accepted_receipt_start = receipts.len();
-        for (i, _cmd) in commands.iter().enumerate() {
-            receipts.push(Receipt {
-                accepted: true,
-                applied_tick_id: None,
-                reason_code: None,
-                command_index: i,
-            });
-        }
-        let command_processing_us = cmd_start.elapsed().as_micros() as u64;
-
-        // 2. Populate base field cache from snapshot.
+        // 1. Populate base field cache from snapshot.
         {
             let snapshot = self.arena.snapshot();
             self.base_cache.populate(&snapshot, &self.base_field_set);
         }
 
-        // 3. Begin tick.
+        // 2. Begin tick — if this fails, commands stay in the queue.
         let mut guard = self
             .arena
             .begin_tick()
-            .map_err(|_| StepError::AllocationFailed)?;
+            .map_err(|_| TickError {
+                kind: StepError::AllocationFailed,
+                receipts: Vec::new(),
+            })?;
+
+        // 3. Drain ingress queue (safe: begin_tick succeeded).
+        let cmd_start = Instant::now();
+        let drain = self.ingress.drain(next_tick);
+        let mut receipts = drain.expired_receipts;
+        let commands = drain.commands;
+        let accepted_receipt_start = receipts.len();
+        for dc in &commands {
+            receipts.push(Receipt {
+                accepted: true,
+                applied_tick_id: None,
+                reason_code: None,
+                command_index: dc.command_index,
+            });
+        }
+        let command_processing_us = cmd_start.elapsed().as_micros() as u64;
 
         // 4. Run propagator pipeline.
         let mut propagator_us = Vec::with_capacity(self.propagators.len());
@@ -233,7 +266,7 @@ impl TickEngine {
                     return self.handle_rollback(
                         prop_name,
                         reason,
-                        &mut receipts[..],
+                        receipts,
                         accepted_receipt_start,
                     );
                 }
@@ -273,13 +306,16 @@ impl TickEngine {
     }
 
     /// Handle a propagator failure by rolling back the tick.
+    ///
+    /// Takes ownership of `receipts` and returns them inside [`TickError`]
+    /// so the caller can inspect per-command rollback reason codes.
     fn handle_rollback(
         &mut self,
         prop_name: String,
         reason: murk_core::PropagatorError,
-        receipts: &mut [Receipt],
+        mut receipts: Vec<Receipt>,
         accepted_start: usize,
-    ) -> Result<TickResult, StepError> {
+    ) -> Result<TickResult, TickError> {
         // Guard was dropped → staging buffer abandoned (free rollback).
         self.consecutive_rollback_count += 1;
         if self.consecutive_rollback_count >= self.max_consecutive_rollbacks {
@@ -293,15 +329,19 @@ impl TickEngine {
             receipt.reason_code = Some(IngressError::TickRollback);
         }
 
-        Err(StepError::PropagatorFailed {
-            name: prop_name,
-            reason,
+        Err(TickError {
+            kind: StepError::PropagatorFailed {
+                name: prop_name,
+                reason,
+            },
+            receipts,
         })
     }
 
     /// Reset the engine to its initial state.
     pub fn reset(&mut self) -> Result<(), ConfigError> {
         self.arena.reset().map_err(ConfigError::Arena)?;
+        self.ingress.clear();
         self.current_tick = TickId(0);
         self.param_version = ParameterVersion(0);
         self.tick_disabled = false;
@@ -657,7 +697,17 @@ mod tests {
         engine.submit_commands(vec![make_cmd(100)]);
 
         let result = engine.execute_tick();
-        assert!(matches!(result, Err(StepError::PropagatorFailed { .. })));
+        match result {
+            Err(TickError {
+                kind: StepError::PropagatorFailed { .. },
+                receipts,
+            }) => {
+                // Receipts must be surfaced, not silently dropped.
+                assert_eq!(receipts.len(), 1);
+                assert_eq!(receipts[0].reason_code, Some(IngressError::TickRollback));
+            }
+            other => panic!("expected PropagatorFailed with receipts, got {other:?}"),
+        }
     }
 
     // ── Rollback tracking tests ─────────────────────────────
@@ -699,7 +749,7 @@ mod tests {
 
         // Next tick should fail immediately with TickDisabled.
         match engine.execute_tick() {
-            Err(StepError::TickDisabled) => {}
+            Err(TickError { kind: StepError::TickDisabled, .. }) => {}
             other => panic!("expected TickDisabled, got {other:?}"),
         }
     }
@@ -786,5 +836,63 @@ mod tests {
 
         let metrics = engine.last_metrics();
         assert!(metrics.memory_bytes > 0);
+    }
+
+    // ── Bug-fix regression tests ─────────────────────────────
+
+    #[test]
+    fn reset_clears_pending_ingress() {
+        let mut engine = simple_engine();
+
+        // Submit commands but don't tick.
+        engine.submit_commands(vec![make_cmd(1000), make_cmd(1000)]);
+
+        // Reset should discard pending commands.
+        engine.reset().unwrap();
+
+        // Tick should produce zero receipts (no pending commands).
+        let result = engine.execute_tick().unwrap();
+        assert!(result.receipts.is_empty());
+    }
+
+    #[test]
+    fn command_index_preserved_after_reordering() {
+        let mut engine = simple_engine();
+
+        // Submit commands with different priorities — they'll be reordered.
+        // Low priority first (index 0), high priority second (index 1).
+        let cmds = vec![
+            Command {
+                payload: CommandPayload::SetParameter {
+                    key: ParameterKey(0),
+                    value: 1.0,
+                },
+                expires_after_tick: TickId(100),
+                source_id: None,
+                source_seq: None,
+                priority_class: 2, // low priority
+                arrival_seq: 0,
+            },
+            Command {
+                payload: CommandPayload::SetParameter {
+                    key: ParameterKey(0),
+                    value: 2.0,
+                },
+                expires_after_tick: TickId(100),
+                source_id: None,
+                source_seq: None,
+                priority_class: 0, // high priority — sorted first
+                arrival_seq: 0,
+            },
+        ];
+        engine.submit_commands(cmds);
+
+        let result = engine.execute_tick().unwrap();
+        // After reordering, priority_class=0 (batch index 1) executes first,
+        // priority_class=2 (batch index 0) executes second.
+        // command_index must reflect the ORIGINAL batch position.
+        assert_eq!(result.receipts.len(), 2);
+        assert_eq!(result.receipts[0].command_index, 1); // was batch[1]
+        assert_eq!(result.receipts[1].command_index, 0); // was batch[0]
     }
 }
