@@ -445,6 +445,7 @@ dependencies = [
  "indexmap",
  "murk-core",
  "murk-space",
+ "murk-test-utils",
  "proptest",
 ]
 
@@ -479,6 +480,8 @@ name = "murk-test-utils"
 version = "0.1.0"
 dependencies = [
  "murk-core",
+ "murk-propagator",
+ "murk-space",
 ]
 
 [[package]]

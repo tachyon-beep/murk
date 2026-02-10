@@ -72,12 +72,37 @@ pub enum PropagatorError {
         /// Human-readable description of the failure.
         reason: String,
     },
+    /// NaN detected in propagator output (sentinel checking).
+    NanDetected {
+        /// The field containing the NaN.
+        field_id: crate::FieldId,
+        /// Index of the first NaN cell, if known.
+        cell_index: Option<usize>,
+    },
+    /// A user-defined constraint was violated.
+    ConstraintViolation {
+        /// Description of the violated constraint.
+        constraint: String,
+    },
 }
 
 impl fmt::Display for PropagatorError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::ExecutionFailed { reason } => write!(f, "execution failed: {reason}"),
+            Self::NanDetected {
+                field_id,
+                cell_index,
+            } => {
+                write!(f, "NaN detected in field {field_id}")?;
+                if let Some(idx) = cell_index {
+                    write!(f, " at cell {idx}")?;
+                }
+                Ok(())
+            }
+            Self::ConstraintViolation { constraint } => {
+                write!(f, "constraint violation: {constraint}")
+            }
         }
     }
 }

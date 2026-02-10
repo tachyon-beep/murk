@@ -1,18 +1,23 @@
 //! Test utilities and mock types for Murk development.
 //!
 //! Provides mock implementations of core traits ([`FieldReader`],
-//! [`FieldWriter`], [`SnapshotAccess`]) and a [`TestWorldBuilder`]
-//! scaffold for constructing test scenarios.
+//! [`FieldWriter`], [`SnapshotAccess`]) and reusable propagator test
+//! fixtures ([`IdentityPropagator`], [`ConstPropagator`],
+//! [`FailingPropagator`]).
 
 #![forbid(unsafe_code)]
 #![allow(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]
+
+pub mod fixtures;
 
 use std::collections::HashMap;
 
 use murk_core::{
     FieldId, FieldReader, FieldWriter, ParameterVersion, SnapshotAccess, TickId, WorldGenerationId,
 };
+
+pub use fixtures::{ConstPropagator, FailingPropagator, IdentityPropagator};
 
 /// Builder for constructing test worlds with preconfigured state.
 ///
