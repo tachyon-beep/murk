@@ -416,7 +416,9 @@ dependencies = [
  "murk-obs",
  "murk-propagator",
  "murk-space",
+ "murk-test-utils",
  "proptest",
+ "smallvec",
 ]
 
 [[package]]

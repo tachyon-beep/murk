@@ -7,3 +7,11 @@
 #![deny(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]
 #![forbid(unsafe_code)]
+
+pub mod config;
+pub mod ingress;
+pub mod metrics;
+
+pub use config::{BackoffConfig, ConfigError, WorldConfig};
+pub use ingress::{DrainResult, IngressQueue};
+pub use metrics::StepMetrics;
