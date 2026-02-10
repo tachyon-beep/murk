@@ -31,13 +31,22 @@ pub struct DrainResult {
     pub expired_receipts: Vec<Receipt>,
 }
 
+/// A command paired with its original batch-local index.
+///
+/// Preserves the `command_index` from the `submit()` call so that
+/// `drain()` can produce correct receipts for expired commands.
+struct QueueEntry {
+    command: Command,
+    command_index: usize,
+}
+
 /// Bounded command queue for the ingress pipeline.
 ///
 /// Accepts batches of commands via [`submit()`](IngressQueue::submit),
 /// assigns monotonic arrival sequence numbers, and produces a sorted,
 /// TTL-filtered batch via [`drain()`](IngressQueue::drain).
 pub struct IngressQueue {
-    queue: VecDeque<Command>,
+    queue: VecDeque<QueueEntry>,
     capacity: usize,
     next_arrival_seq: u64,
 }
@@ -93,7 +102,10 @@ impl IngressQueue {
 
             cmd.arrival_seq = self.next_arrival_seq;
             self.next_arrival_seq += 1;
-            self.queue.push_back(cmd);
+            self.queue.push_back(QueueEntry {
+                command: cmd,
+                command_index: i,
+            });
 
             receipts.push(Receipt {
                 accepted: true,
@@ -118,16 +130,16 @@ impl IngressQueue {
         let mut valid = Vec::new();
         let mut expired_receipts = Vec::new();
 
-        for cmd in self.queue.drain(..) {
-            if cmd.expires_after_tick.0 < current_tick.0 {
+        for entry in self.queue.drain(..) {
+            if entry.command.expires_after_tick.0 < current_tick.0 {
                 expired_receipts.push(Receipt {
                     accepted: true,
                     applied_tick_id: None,
                     reason_code: Some(IngressError::Stale),
-                    command_index: 0, // original index lost after queue buffering
+                    command_index: entry.command_index,
                 });
             } else {
-                valid.push(cmd);
+                valid.push(entry.command);
             }
         }
 
@@ -399,6 +411,43 @@ mod tests {
         let result = q.drain(TickId(10));
         assert!(result.commands.is_empty());
         assert_eq!(result.expired_receipts.len(), 3);
+    }
+
+    #[test]
+    fn drain_expired_receipts_preserve_command_index() {
+        let mut q = IngressQueue::new(10);
+        // Submit a batch of 4 commands; the middle two will expire.
+        q.submit(
+            vec![
+                make_cmd(1, 100), // index 0 — valid
+                make_cmd(1, 2),   // index 1 — expires at tick 3
+                make_cmd(1, 1),   // index 2 — expires at tick 3
+                make_cmd(1, 100), // index 3 — valid
+            ],
+            false,
+        );
+        let result = q.drain(TickId(3));
+        assert_eq!(result.commands.len(), 2);
+        assert_eq!(result.expired_receipts.len(), 2);
+        // Expired receipts carry their original batch indices, not 0.
+        assert_eq!(result.expired_receipts[0].command_index, 1);
+        assert_eq!(result.expired_receipts[1].command_index, 2);
+    }
+
+    #[test]
+    fn drain_expired_receipts_across_batches() {
+        let mut q = IngressQueue::new(10);
+        // Batch 1: indices 0, 1
+        q.submit(vec![make_cmd(1, 0), make_cmd(1, 100)], false);
+        // Batch 2: indices 0, 1 (new batch, indices reset)
+        q.submit(vec![make_cmd(1, 100), make_cmd(1, 0)], false);
+        let result = q.drain(TickId(5));
+        assert_eq!(result.commands.len(), 2);
+        assert_eq!(result.expired_receipts.len(), 2);
+        // First expired came from batch 1 index 0
+        assert_eq!(result.expired_receipts[0].command_index, 0);
+        // Second expired came from batch 2 index 1
+        assert_eq!(result.expired_receipts[1].command_index, 1);
     }
 
     #[test]

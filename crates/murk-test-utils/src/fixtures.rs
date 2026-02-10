@@ -174,9 +174,12 @@ impl Propagator for FailingPropagator {
             });
         }
         // On success, fill output with call index for traceability.
-        if let Some(output) = ctx.writes().write(self.output) {
-            output.fill(n as f32);
-        }
+        let output = ctx.writes().write(self.output).ok_or_else(|| {
+            PropagatorError::ExecutionFailed {
+                reason: format!("field {:?} not writable", self.output),
+            }
+        })?;
+        output.fill(n as f32);
         Ok(())
     }
 }
