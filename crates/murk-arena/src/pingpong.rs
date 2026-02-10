@@ -1,0 +1,638 @@
+//! Double-buffered ping-pong arena orchestrator.
+//!
+//! [`PingPongArena`] is the top-level arena type. It maintains two per-tick
+//! segment pools (buffer A and buffer B) that alternate between "staging"
+//! (writable) and "published" (readable) roles. On [`PingPongArena::publish`], the
+//! staging buffer becomes published and the old published buffer becomes
+//! the next staging buffer (reset for reuse).
+//!
+//! The lifecycle per tick is:
+//! 1. `begin_tick()` — pre-allocate all PerTick fields in the staging buffer
+//! 2. Propagators write via `WriteArena` (from the `TickGuard`)
+//! 3. `publish()` — swap buffers, update generation
+//! 4. `snapshot()` — borrow published buffer as a `Snapshot`
+
+use murk_core::id::{FieldId, ParameterVersion, TickId, WorldGenerationId};
+use murk_core::{FieldDef, FieldMutability};
+
+use crate::config::ArenaConfig;
+use crate::descriptor::FieldDescriptor;
+use crate::error::ArenaError;
+use crate::handle::{FieldHandle, FieldLocation};
+use crate::read::Snapshot;
+use crate::scratch::ScratchRegion;
+use crate::segment::SegmentList;
+use crate::sparse::SparseSlab;
+use crate::static_arena::SharedStaticArena;
+use crate::write::WriteArena;
+
+/// Tick guard providing write + read access during a tick.
+///
+/// Created by [`PingPongArena::begin_tick()`] and consumed before
+/// [`PingPongArena::publish()`]. Holds mutable borrows into the staging
+/// buffer, preventing any other access to the arena during the tick.
+pub struct TickGuard<'a> {
+    /// Mutable write access to the staging buffer.
+    pub writer: WriteArena<'a>,
+    /// Scratch space for temporary propagator allocations.
+    pub scratch: &'a mut ScratchRegion,
+}
+
+/// Double-buffered arena with ping-pong swap.
+///
+/// This is the main arena type used by the tick engine. It manages:
+/// - Two per-tick segment pools (A and B) that alternate roles
+/// - A dedicated sparse segment pool (not ping-pong'd)
+/// - A shared static arena for generation-0 data
+/// - Two field descriptors (staging and published) that are swapped
+///
+/// # Buffer layout
+///
+/// ```text
+/// buffer_a: SegmentList  ←─── staging (even generations) / published (odd)
+/// buffer_b: SegmentList  ←─── published (even generations) / staging (odd)
+/// sparse:   SegmentList  ←─── dedicated, never reset
+/// static:   StaticArena  ←─── generation 0 forever
+/// ```
+pub struct PingPongArena {
+    /// Per-tick segment pool A.
+    buffer_a: SegmentList,
+    /// Per-tick segment pool B.
+    buffer_b: SegmentList,
+    /// Dedicated sparse segment pool.
+    sparse_segments: SegmentList,
+    /// Sparse slab for CoW tracking.
+    sparse_slab: SparseSlab,
+    /// Shared static arena.
+    static_arena: SharedStaticArena,
+    /// Descriptor for the staging buffer.
+    staging_descriptor: FieldDescriptor,
+    /// Descriptor for the published buffer.
+    published_descriptor: FieldDescriptor,
+    /// Current arena generation (incremented on publish).
+    generation: u32,
+    /// Which buffer is currently staging (false = A staging, true = B staging).
+    b_is_staging: bool,
+    /// Scratch region for temporary allocations.
+    scratch: ScratchRegion,
+    /// Arena configuration.
+    config: ArenaConfig,
+    /// Last published tick ID.
+    last_tick_id: TickId,
+    /// Last published parameter version.
+    last_param_version: ParameterVersion,
+    /// Field definitions (kept for reset).
+    field_defs: Vec<(FieldId, FieldDef)>,
+}
+
+impl PingPongArena {
+    /// Create a new ping-pong arena.
+    ///
+    /// `field_defs` are the registered fields for the simulation world.
+    /// `static_arena` should already contain initialised static field data.
+    /// `config` controls segment sizing and capacity limits.
+    pub fn new(
+        config: ArenaConfig,
+        field_defs: Vec<(FieldId, FieldDef)>,
+        static_arena: SharedStaticArena,
+    ) -> Self {
+        let descriptor = FieldDescriptor::from_field_defs(&field_defs, config.cell_count);
+
+        // Initial sparse allocations for all Sparse fields.
+        let mut sparse_segments = SegmentList::new(config.segment_size, config.max_segments);
+        let mut sparse_slab = SparseSlab::new();
+        let mut staging_descriptor = descriptor.clone();
+
+        for (&field_id, entry) in descriptor.iter() {
+            if entry.meta.mutability == FieldMutability::Sparse {
+                if let Ok(handle) =
+                    sparse_slab.alloc(field_id, entry.meta.total_len, 0, &mut sparse_segments)
+                {
+                    staging_descriptor.update_handle(field_id, handle);
+                }
+            }
+            if entry.meta.mutability == FieldMutability::Static {
+                if let Some((off, len)) = static_arena.field_location(field_id) {
+                    let handle =
+                        FieldHandle::new(0, off, len, FieldLocation::Static { offset: off, len });
+                    staging_descriptor.update_handle(field_id, handle);
+                }
+            }
+        }
+
+        let published_descriptor = staging_descriptor.clone();
+
+        Self {
+            buffer_a: SegmentList::new(config.segment_size, config.max_segments),
+            buffer_b: SegmentList::new(config.segment_size, config.max_segments),
+            sparse_segments,
+            sparse_slab,
+            static_arena,
+            staging_descriptor,
+            published_descriptor,
+            generation: 0,
+            b_is_staging: false,
+            scratch: ScratchRegion::new(config.cell_count as usize * 4),
+            config,
+            last_tick_id: TickId(0),
+            last_param_version: ParameterVersion(0),
+            field_defs,
+        }
+    }
+
+    /// Begin a new tick, pre-allocating all PerTick fields in the staging buffer.
+    ///
+    /// Returns a [`TickGuard`] providing write access to the staging buffer
+    /// and scratch space. The guard must be dropped before calling `publish()`.
+    pub fn begin_tick(&mut self) -> Result<TickGuard<'_>, ArenaError> {
+        let next_gen = self.generation + 1;
+
+        // Reset the staging buffer (it was the published buffer last tick).
+        if self.b_is_staging {
+            self.buffer_b.reset();
+        } else {
+            self.buffer_a.reset();
+        }
+
+        // Collect PerTick field IDs and sizes before mutating segments.
+        // (Can't iterate descriptor and mutate segments simultaneously.)
+        let per_tick_fields: Vec<(FieldId, u32)> = self
+            .staging_descriptor
+            .iter()
+            .filter(|(_, e)| e.meta.mutability == FieldMutability::PerTick)
+            .map(|(&id, e)| (id, e.meta.total_len))
+            .collect();
+
+        // Pre-allocate ALL PerTick fields in the staging buffer.
+        // This ensures that after publish, the published descriptor points
+        // entirely into the published buffer — no dangling handles.
+        //
+        // We collect allocations first, then update descriptor, to avoid
+        // borrowing both &mut segments and &mut descriptor simultaneously.
+        let staging = if self.b_is_staging {
+            &mut self.buffer_b
+        } else {
+            &mut self.buffer_a
+        };
+
+        let mut alloc_results: Vec<(FieldId, FieldHandle)> = Vec::with_capacity(per_tick_fields.len());
+        for (field_id, total_len) in &per_tick_fields {
+            let (seg_idx, offset) = staging.alloc(*total_len)?;
+            let handle = FieldHandle::new(
+                next_gen,
+                offset,
+                *total_len,
+                FieldLocation::PerTick {
+                    segment_index: seg_idx,
+                },
+            );
+            alloc_results.push((*field_id, handle));
+        }
+
+        for (field_id, handle) in alloc_results {
+            self.staging_descriptor.update_handle(field_id, handle);
+        }
+
+        self.scratch.reset();
+
+        // Construct TickGuard via helper to get clean split borrows.
+        let guard = Self::make_tick_guard(
+            if self.b_is_staging {
+                &mut self.buffer_b
+            } else {
+                &mut self.buffer_a
+            },
+            &mut self.sparse_segments,
+            &mut self.sparse_slab,
+            &mut self.staging_descriptor,
+            &mut self.scratch,
+            next_gen,
+        );
+
+        Ok(guard)
+    }
+
+    /// Helper to construct a TickGuard from split borrows.
+    fn make_tick_guard<'a>(
+        per_tick_segments: &'a mut SegmentList,
+        sparse_segments: &'a mut SegmentList,
+        sparse_slab: &'a mut SparseSlab,
+        descriptor: &'a mut FieldDescriptor,
+        scratch: &'a mut ScratchRegion,
+        generation: u32,
+    ) -> TickGuard<'a> {
+        TickGuard {
+            writer: WriteArena::new(
+                per_tick_segments,
+                sparse_segments,
+                sparse_slab,
+                descriptor,
+                generation,
+            ),
+            scratch,
+        }
+    }
+
+    /// Publish the staging buffer, making it the new published generation.
+    ///
+    /// After this call:
+    /// - The staging descriptor becomes the published descriptor
+    /// - The staging buffer becomes the published buffer
+    /// - The old published buffer will be reset on the next `begin_tick()`
+    /// - The generation counter is incremented
+    pub fn publish(&mut self, tick_id: TickId, param_version: ParameterVersion) {
+        self.generation += 1;
+
+        // Swap descriptors.
+        std::mem::swap(&mut self.staging_descriptor, &mut self.published_descriptor);
+
+        // Clone the newly published descriptor back to staging as a starting point.
+        // Sparse and Static handles carry over; PerTick handles will be replaced
+        // at the next begin_tick().
+        self.staging_descriptor = self.published_descriptor.clone();
+
+        // Toggle which buffer is staging.
+        self.b_is_staging = !self.b_is_staging;
+
+        self.last_tick_id = tick_id;
+        self.last_param_version = param_version;
+    }
+
+    /// Get a read-only snapshot of the published generation.
+    pub fn snapshot(&self) -> Snapshot<'_> {
+        let published_segments = if self.b_is_staging {
+            &self.buffer_a
+        } else {
+            &self.buffer_b
+        };
+
+        Snapshot::new(
+            published_segments,
+            &self.sparse_segments,
+            &self.static_arena,
+            &self.published_descriptor,
+            self.last_tick_id,
+            WorldGenerationId(self.generation as u64),
+            self.last_param_version,
+        )
+    }
+
+    /// Access the scratch region (for use outside of tick processing).
+    pub fn scratch(&mut self) -> &mut ScratchRegion {
+        &mut self.scratch
+    }
+
+    /// Reset the arena to its initial state.
+    ///
+    /// Resets all buffers, the sparse slab, and generation counter.
+    /// Static arena is untouched (it's shared and immutable).
+    pub fn reset(&mut self) {
+        self.buffer_a.reset();
+        self.buffer_b.reset();
+        self.sparse_segments = SegmentList::new(self.config.segment_size, self.config.max_segments);
+        self.sparse_slab = SparseSlab::new();
+
+        // Rebuild descriptors from field defs.
+        let descriptor =
+            FieldDescriptor::from_field_defs(&self.field_defs, self.config.cell_count);
+        self.staging_descriptor = descriptor.clone();
+        self.published_descriptor = descriptor;
+
+        // Re-initialise sparse and static handle entries.
+        for (field_id, def) in &self.field_defs {
+            if def.mutability == FieldMutability::Sparse {
+                let total_len = self.config.cell_count * def.field_type.components();
+                if let Ok(handle) = self.sparse_slab.alloc(
+                    *field_id,
+                    total_len,
+                    0,
+                    &mut self.sparse_segments,
+                ) {
+                    self.staging_descriptor.update_handle(*field_id, handle);
+                    self.published_descriptor.update_handle(*field_id, handle);
+                }
+            }
+            if def.mutability == FieldMutability::Static {
+                if let Some((off, len)) = self.static_arena.field_location(*field_id) {
+                    let handle = FieldHandle::new(
+                        0,
+                        off,
+                        len,
+                        FieldLocation::Static { offset: off, len },
+                    );
+                    self.staging_descriptor.update_handle(*field_id, handle);
+                    self.published_descriptor.update_handle(*field_id, handle);
+                }
+            }
+        }
+
+        self.generation = 0;
+        self.b_is_staging = false;
+        self.last_tick_id = TickId(0);
+        self.last_param_version = ParameterVersion(0);
+    }
+
+    /// Total memory usage across all arena buffers in bytes.
+    pub fn memory_bytes(&self) -> usize {
+        self.buffer_a.memory_bytes()
+            + self.buffer_b.memory_bytes()
+            + self.sparse_segments.memory_bytes()
+            + self.static_arena.memory_bytes()
+            + self.scratch.memory_bytes()
+    }
+
+    /// Current generation number.
+    pub fn generation(&self) -> u32 {
+        self.generation
+    }
+
+    /// Get a reference to the arena config.
+    pub fn config(&self) -> &ArenaConfig {
+        &self.config
+    }
+
+    /// Get a reference to the shared static arena.
+    pub fn static_arena(&self) -> &SharedStaticArena {
+        &self.static_arena
+    }
+
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::static_arena::StaticArena;
+    use murk_core::traits::{FieldReader, FieldWriter, SnapshotAccess};
+    use murk_core::{BoundaryBehavior, FieldType};
+
+    fn make_field_defs() -> Vec<(FieldId, FieldDef)> {
+        vec![
+            (
+                FieldId(0),
+                FieldDef {
+                    name: "temperature".into(),
+                    field_type: FieldType::Scalar,
+                    mutability: FieldMutability::PerTick,
+                    units: None,
+                    bounds: None,
+                    boundary_behavior: BoundaryBehavior::Clamp,
+                },
+            ),
+            (
+                FieldId(1),
+                FieldDef {
+                    name: "velocity".into(),
+                    field_type: FieldType::Vector { dims: 3 },
+                    mutability: FieldMutability::PerTick,
+                    units: None,
+                    bounds: None,
+                    boundary_behavior: BoundaryBehavior::Clamp,
+                },
+            ),
+            (
+                FieldId(2),
+                FieldDef {
+                    name: "terrain".into(),
+                    field_type: FieldType::Scalar,
+                    mutability: FieldMutability::Static,
+                    units: None,
+                    bounds: None,
+                    boundary_behavior: BoundaryBehavior::Clamp,
+                },
+            ),
+            (
+                FieldId(3),
+                FieldDef {
+                    name: "resources".into(),
+                    field_type: FieldType::Scalar,
+                    mutability: FieldMutability::Sparse,
+                    units: None,
+                    bounds: None,
+                    boundary_behavior: BoundaryBehavior::Clamp,
+                },
+            ),
+        ]
+    }
+
+    fn make_arena() -> PingPongArena {
+        let cell_count = 100u32;
+        let config = ArenaConfig::new(cell_count);
+        let field_defs = make_field_defs();
+
+        // Build static arena with terrain data.
+        let static_fields: Vec<(FieldId, u32)> = field_defs
+            .iter()
+            .filter(|(_, d)| d.mutability == FieldMutability::Static)
+            .map(|(id, d)| (*id, cell_count * d.field_type.components()))
+            .collect();
+
+        let mut static_arena = StaticArena::new(&static_fields);
+        // Fill terrain with recognisable data.
+        if let Some(data) = static_arena.write_field(FieldId(2)) {
+            for (i, v) in data.iter_mut().enumerate() {
+                *v = i as f32;
+            }
+        }
+        let shared_static = static_arena.into_shared();
+
+        PingPongArena::new(config, field_defs, shared_static)
+    }
+
+    #[test]
+    fn new_arena_starts_at_generation_zero() {
+        let arena = make_arena();
+        assert_eq!(arena.generation(), 0);
+    }
+
+    #[test]
+    fn begin_tick_and_write() {
+        let mut arena = make_arena();
+        let mut guard = arena.begin_tick().unwrap();
+        let data = guard.writer.write(FieldId(0)).unwrap();
+        assert_eq!(data.len(), 100); // cell_count * 1 component
+        data[0] = 42.0;
+    }
+
+    #[test]
+    fn publish_increments_generation() {
+        let mut arena = make_arena();
+        let _guard = arena.begin_tick().unwrap();
+        drop(_guard);
+        arena.publish(TickId(1), ParameterVersion(0));
+        assert_eq!(arena.generation(), 1);
+    }
+
+    #[test]
+    fn snapshot_reads_published_data() {
+        let mut arena = make_arena();
+
+        // Tick 1: write temperature.
+        {
+            let mut guard = arena.begin_tick().unwrap();
+            let data = guard.writer.write(FieldId(0)).unwrap();
+            data[0] = 42.0;
+            data[99] = 99.0;
+        }
+        arena.publish(TickId(1), ParameterVersion(0));
+
+        // Read snapshot.
+        let snap = arena.snapshot();
+        let data = snap.read(FieldId(0)).unwrap();
+        assert_eq!(data[0], 42.0);
+        assert_eq!(data[99], 99.0);
+    }
+
+    #[test]
+    fn snapshot_reads_static_fields() {
+        let mut arena = make_arena();
+
+        // Even before any tick, static data should be readable.
+        // We need at least one publish for the snapshot to be meaningful.
+        {
+            let _guard = arena.begin_tick().unwrap();
+        }
+        arena.publish(TickId(1), ParameterVersion(0));
+
+        let snap = arena.snapshot();
+        let terrain = snap.read_field(FieldId(2)).unwrap();
+        assert_eq!(terrain[0], 0.0);
+        assert_eq!(terrain[50], 50.0);
+        assert_eq!(terrain[99], 99.0);
+    }
+
+    #[test]
+    fn snapshot_metadata_matches_publish_args() {
+        let mut arena = make_arena();
+        {
+            let _guard = arena.begin_tick().unwrap();
+        }
+        arena.publish(TickId(5), ParameterVersion(3));
+
+        let snap = arena.snapshot();
+        assert_eq!(snap.tick_id(), TickId(5));
+        assert_eq!(snap.parameter_version(), ParameterVersion(3));
+    }
+
+    #[test]
+    fn ping_pong_alternates_buffers() {
+        let mut arena = make_arena();
+
+        // Tick 1: write temp = 1.0
+        {
+            let mut guard = arena.begin_tick().unwrap();
+            let data = guard.writer.write(FieldId(0)).unwrap();
+            data[0] = 1.0;
+        }
+        arena.publish(TickId(1), ParameterVersion(0));
+
+        // Verify tick 1 data in snapshot.
+        assert_eq!(arena.snapshot().read(FieldId(0)).unwrap()[0], 1.0);
+
+        // Tick 2: write temp = 2.0 (should be in different buffer).
+        {
+            let mut guard = arena.begin_tick().unwrap();
+            let data = guard.writer.write(FieldId(0)).unwrap();
+            // Pre-allocated zeroes (not the old 1.0, because this is a fresh buffer).
+            assert_eq!(data[0], 0.0);
+            data[0] = 2.0;
+        }
+        arena.publish(TickId(2), ParameterVersion(0));
+
+        // Verify tick 2 data in snapshot.
+        assert_eq!(arena.snapshot().read(FieldId(0)).unwrap()[0], 2.0);
+    }
+
+    #[test]
+    fn vector_field_has_correct_size() {
+        let mut arena = make_arena();
+        {
+            let mut guard = arena.begin_tick().unwrap();
+            let vel = guard.writer.write(FieldId(1)).unwrap();
+            // velocity is Vector{dims:3}, cell_count=100, so len = 300.
+            assert_eq!(vel.len(), 300);
+        }
+    }
+
+    #[test]
+    fn scratch_resets_between_ticks() {
+        let mut arena = make_arena();
+        {
+            let guard = arena.begin_tick().unwrap();
+            guard.scratch.alloc(50).unwrap();
+            assert_eq!(guard.scratch.used(), 50);
+        }
+        arena.publish(TickId(1), ParameterVersion(0));
+
+        // Next tick: scratch should be reset.
+        {
+            let guard = arena.begin_tick().unwrap();
+            assert_eq!(guard.scratch.used(), 0);
+        }
+    }
+
+    #[test]
+    fn reset_returns_to_initial_state() {
+        let mut arena = make_arena();
+
+        // Run a few ticks.
+        for i in 1..=5 {
+            {
+                let mut guard = arena.begin_tick().unwrap();
+                let data = guard.writer.write(FieldId(0)).unwrap();
+                data[0] = i as f32;
+            }
+            arena.publish(TickId(i), ParameterVersion(0));
+        }
+        assert_eq!(arena.generation(), 5);
+
+        arena.reset();
+        assert_eq!(arena.generation(), 0);
+    }
+
+    #[test]
+    fn memory_bytes_is_positive() {
+        let arena = make_arena();
+        assert!(arena.memory_bytes() > 0);
+    }
+
+    #[test]
+    fn multi_tick_round_trip() {
+        let mut arena = make_arena();
+
+        for tick in 1u64..=10 {
+            {
+                let mut guard = arena.begin_tick().unwrap();
+                let data = guard.writer.write(FieldId(0)).unwrap();
+                data[0] = tick as f32;
+            }
+            arena.publish(TickId(tick), ParameterVersion(0));
+
+            let snap = arena.snapshot();
+            assert_eq!(snap.read(FieldId(0)).unwrap()[0], tick as f32);
+            assert_eq!(snap.tick_id(), TickId(tick));
+        }
+    }
+
+    #[test]
+    fn sparse_field_persists_across_ticks() {
+        let mut arena = make_arena();
+
+        // Tick 1: write sparse field.
+        {
+            let mut guard = arena.begin_tick().unwrap();
+            let data = guard.writer.write(FieldId(3)).unwrap();
+            data[0] = 77.0;
+        }
+        arena.publish(TickId(1), ParameterVersion(0));
+
+        // Tick 2: don't write sparse field — it should persist.
+        {
+            let _guard = arena.begin_tick().unwrap();
+        }
+        arena.publish(TickId(2), ParameterVersion(0));
+
+        let snap = arena.snapshot();
+        let data = snap.read(FieldId(3)).unwrap();
+        assert_eq!(data[0], 77.0);
+    }
+}
