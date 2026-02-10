@@ -100,6 +100,19 @@ impl PingPongArena {
         field_defs: Vec<(FieldId, FieldDef)>,
         static_arena: SharedStaticArena,
     ) -> Result<Self, ArenaError> {
+        // Three pools (buffer_a, buffer_b, sparse) each preallocate one
+        // segment, so we need at least 3 to satisfy the budget invariant.
+        if config.max_segments < 3 {
+            return Err(ArenaError::InvalidConfig {
+                reason: format!(
+                    "max_segments must be >= 3 (got {}); \
+                     the arena requires at least one segment per pool \
+                     (buffer_a, buffer_b, sparse)",
+                    config.max_segments,
+                ),
+            });
+        }
+
         let descriptor = FieldDescriptor::from_field_defs(&field_defs, config.cell_count);
 
         // Compute per-pool segment budgets that respect the global limit.
@@ -696,6 +709,61 @@ mod tests {
         let static_arena = StaticArena::new(&[]).into_shared();
         let result = PingPongArena::new(config, field_defs, static_arena);
         assert!(matches!(result, Err(ArenaError::CapacityExceeded { .. })));
+    }
+
+    #[test]
+    fn new_rejects_max_segments_below_3() {
+        let cell_count = 10u32;
+        let static_arena = StaticArena::new(&[]).into_shared();
+        let field_defs = vec![(
+            FieldId(0),
+            FieldDef {
+                name: "temp".into(),
+                field_type: FieldType::Scalar,
+                mutability: FieldMutability::PerTick,
+                units: None,
+                bounds: None,
+                boundary_behavior: BoundaryBehavior::Clamp,
+            },
+        )];
+
+        for bad_max in [0u16, 1, 2] {
+            let config = ArenaConfig {
+                segment_size: 1024,
+                max_segments: bad_max,
+                max_generation_age: 1,
+                cell_count,
+            };
+            let result = PingPongArena::new(config, field_defs.clone(), static_arena.clone());
+            assert!(
+                matches!(result, Err(ArenaError::InvalidConfig { .. })),
+                "max_segments={bad_max} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn new_accepts_max_segments_of_3() {
+        let cell_count = 10u32;
+        let static_arena = StaticArena::new(&[]).into_shared();
+        let field_defs = vec![(
+            FieldId(0),
+            FieldDef {
+                name: "temp".into(),
+                field_type: FieldType::Scalar,
+                mutability: FieldMutability::PerTick,
+                units: None,
+                bounds: None,
+                boundary_behavior: BoundaryBehavior::Clamp,
+            },
+        )];
+        let config = ArenaConfig {
+            segment_size: 1024,
+            max_segments: 3,
+            max_generation_age: 1,
+            cell_count,
+        };
+        assert!(PingPongArena::new(config, field_defs, static_arena).is_ok());
     }
 
     #[test]

@@ -19,8 +19,14 @@ pub struct ArenaConfig {
     /// and the sparse pool gets the remainder. For example, with the default
     /// of 16: each per-tick buffer gets 5 segments, sparse gets 6.
     ///
+    /// Must be at least 3 (one segment per pool). [`PingPongArena::new`]
+    /// returns [`ArenaError::InvalidConfig`] if this constraint is violated.
+    ///
     /// Default: 16. Each segment is `segment_size * 4` bytes, so 16 segments
     /// at the default size = 1GB total arena capacity.
+    ///
+    /// [`PingPongArena::new`]: crate::PingPongArena::new
+    /// [`ArenaError::InvalidConfig`]: crate::ArenaError::InvalidConfig
     pub max_segments: u16,
 
     /// How many generations a handle remains valid after creation.

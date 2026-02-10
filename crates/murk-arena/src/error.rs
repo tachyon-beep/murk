@@ -33,6 +33,11 @@ pub enum ArenaError {
         /// The field that was not writable.
         field: FieldId,
     },
+    /// Arena configuration is invalid.
+    InvalidConfig {
+        /// What is wrong with the configuration.
+        reason: String,
+    },
 }
 
 impl fmt::Display for ArenaError {
@@ -61,6 +66,9 @@ impl fmt::Display for ArenaError {
             }
             Self::NotWritable { field } => {
                 write!(f, "field {field} is not writable in this context")
+            }
+            Self::InvalidConfig { reason } => {
+                write!(f, "invalid arena config: {reason}")
             }
         }
     }
