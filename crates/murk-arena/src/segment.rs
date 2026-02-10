@@ -131,6 +131,14 @@ impl SegmentList {
     /// Returns `Ok((segment_index, offset))` on success, or
     /// `Err(ArenaError::CapacityExceeded)` if `max_segments` would be exceeded.
     pub fn alloc(&mut self, len: u32) -> Result<(u16, u32), ArenaError> {
+        // Reject allocations that can never fit in a single segment.
+        if len > self.segment_size {
+            return Err(ArenaError::CapacityExceeded {
+                requested: len as usize * std::mem::size_of::<f32>(),
+                capacity: self.segment_size as usize * std::mem::size_of::<f32>(),
+            });
+        }
+
         // Try the current segment first.
         if let Some((offset, _slice)) = self.segments[self.current].alloc(len) {
             return Ok((self.current as u16, offset));
@@ -155,9 +163,10 @@ impl SegmentList {
         }
 
         let mut seg = Segment::new(self.segment_size);
+        // len <= segment_size is guaranteed by the check above.
         let (offset, _slice) = seg
             .alloc(len)
-            .expect("fresh segment must fit single allocation");
+            .expect("len <= segment_size, so fresh segment always fits");
         self.segments.push(seg);
         self.current = self.segments.len() - 1;
         Ok((self.current as u16, offset))
@@ -304,5 +313,20 @@ mod tests {
         }
         let read = list.slice(seg, off, 5);
         assert_eq!(read[0], 42.0);
+    }
+
+    #[test]
+    fn oversized_alloc_returns_error_not_panic() {
+        let mut list = SegmentList::new(100, 4);
+        // Request more than segment_size — must return CapacityExceeded, not panic.
+        let result = list.alloc(101);
+        assert!(matches!(result, Err(ArenaError::CapacityExceeded { .. })));
+    }
+
+    #[test]
+    fn exactly_segment_size_alloc_succeeds() {
+        let mut list = SegmentList::new(100, 4);
+        let result = list.alloc(100);
+        assert!(result.is_ok());
     }
 }

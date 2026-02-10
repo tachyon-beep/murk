@@ -12,7 +12,12 @@ pub struct ArenaConfig {
     /// Must be a power of two and at least 1024.
     pub segment_size: u32,
 
-    /// Maximum number of segments across all pools (per-tick A + B + sparse).
+    /// Maximum number of segments across all three pools combined
+    /// (per-tick buffer A + per-tick buffer B + sparse).
+    ///
+    /// The budget is divided: each per-tick buffer gets `max_segments / 3`,
+    /// and the sparse pool gets the remainder. For example, with the default
+    /// of 16: each per-tick buffer gets 5 segments, sparse gets 6.
     ///
     /// Default: 16. Each segment is `segment_size * 4` bytes, so 16 segments
     /// at the default size = 1GB total arena capacity.

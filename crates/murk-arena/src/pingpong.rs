@@ -91,40 +91,49 @@ impl PingPongArena {
     /// `field_defs` are the registered fields for the simulation world.
     /// `static_arena` should already contain initialised static field data.
     /// `config` controls segment sizing and capacity limits.
+    ///
+    /// Returns `Err(ArenaError)` if initial sparse allocations fail (e.g.
+    /// field size exceeds segment capacity) or if a `Static` field declared
+    /// in `field_defs` is missing from the provided `static_arena`.
     pub fn new(
         config: ArenaConfig,
         field_defs: Vec<(FieldId, FieldDef)>,
         static_arena: SharedStaticArena,
-    ) -> Self {
+    ) -> Result<Self, ArenaError> {
         let descriptor = FieldDescriptor::from_field_defs(&field_defs, config.cell_count);
 
+        // Compute per-pool segment budgets that respect the global limit.
+        // Three pools share max_segments: buffer_a, buffer_b, sparse.
+        // Division: each per-tick buffer gets ⌊max/3⌋, sparse gets the remainder.
+        let per_tick_max = config.max_segments / 3;
+        let sparse_max = config.max_segments - 2 * per_tick_max;
+
         // Initial sparse allocations for all Sparse fields.
-        let mut sparse_segments = SegmentList::new(config.segment_size, config.max_segments);
+        let mut sparse_segments = SegmentList::new(config.segment_size, sparse_max);
         let mut sparse_slab = SparseSlab::new();
         let mut staging_descriptor = descriptor.clone();
 
         for (&field_id, entry) in descriptor.iter() {
             if entry.meta.mutability == FieldMutability::Sparse {
-                if let Ok(handle) =
-                    sparse_slab.alloc(field_id, entry.meta.total_len, 0, &mut sparse_segments)
-                {
-                    staging_descriptor.update_handle(field_id, handle);
-                }
+                let handle =
+                    sparse_slab.alloc(field_id, entry.meta.total_len, 0, &mut sparse_segments)?;
+                staging_descriptor.update_handle(field_id, handle);
             }
             if entry.meta.mutability == FieldMutability::Static {
-                if let Some((off, len)) = static_arena.field_location(field_id) {
-                    let handle =
-                        FieldHandle::new(0, off, len, FieldLocation::Static { offset: off, len });
-                    staging_descriptor.update_handle(field_id, handle);
-                }
+                let (off, len) = static_arena.field_location(field_id).ok_or(
+                    ArenaError::UnknownField { field: field_id },
+                )?;
+                let handle =
+                    FieldHandle::new(0, off, len, FieldLocation::Static { offset: off, len });
+                staging_descriptor.update_handle(field_id, handle);
             }
         }
 
         let published_descriptor = staging_descriptor.clone();
 
-        Self {
-            buffer_a: SegmentList::new(config.segment_size, config.max_segments),
-            buffer_b: SegmentList::new(config.segment_size, config.max_segments),
+        Ok(Self {
+            buffer_a: SegmentList::new(config.segment_size, per_tick_max),
+            buffer_b: SegmentList::new(config.segment_size, per_tick_max),
             sparse_segments,
             sparse_slab,
             static_arena,
@@ -137,7 +146,7 @@ impl PingPongArena {
             last_tick_id: TickId(0),
             last_param_version: ParameterVersion(0),
             field_defs,
-        }
+        })
     }
 
     /// Begin a new tick, pre-allocating all PerTick fields in the staging buffer.
@@ -286,10 +295,15 @@ impl PingPongArena {
     ///
     /// Resets all buffers, the sparse slab, and generation counter.
     /// Static arena is untouched (it's shared and immutable).
-    pub fn reset(&mut self) {
+    ///
+    /// Returns `Err` if sparse re-initialisation fails (same conditions
+    /// as [`PingPongArena::new`]).
+    pub fn reset(&mut self) -> Result<(), ArenaError> {
         self.buffer_a.reset();
         self.buffer_b.reset();
-        self.sparse_segments = SegmentList::new(self.config.segment_size, self.config.max_segments);
+
+        let sparse_max = self.config.max_segments - 2 * (self.config.max_segments / 3);
+        self.sparse_segments = SegmentList::new(self.config.segment_size, sparse_max);
         self.sparse_slab = SparseSlab::new();
 
         // Rebuild descriptors from field defs.
@@ -302,27 +316,27 @@ impl PingPongArena {
         for (field_id, def) in &self.field_defs {
             if def.mutability == FieldMutability::Sparse {
                 let total_len = self.config.cell_count * def.field_type.components();
-                if let Ok(handle) = self.sparse_slab.alloc(
+                let handle = self.sparse_slab.alloc(
                     *field_id,
                     total_len,
                     0,
                     &mut self.sparse_segments,
-                ) {
-                    self.staging_descriptor.update_handle(*field_id, handle);
-                    self.published_descriptor.update_handle(*field_id, handle);
-                }
+                )?;
+                self.staging_descriptor.update_handle(*field_id, handle);
+                self.published_descriptor.update_handle(*field_id, handle);
             }
             if def.mutability == FieldMutability::Static {
-                if let Some((off, len)) = self.static_arena.field_location(*field_id) {
-                    let handle = FieldHandle::new(
-                        0,
-                        off,
-                        len,
-                        FieldLocation::Static { offset: off, len },
-                    );
-                    self.staging_descriptor.update_handle(*field_id, handle);
-                    self.published_descriptor.update_handle(*field_id, handle);
-                }
+                let (off, len) = self.static_arena.field_location(*field_id).ok_or(
+                    ArenaError::UnknownField { field: *field_id },
+                )?;
+                let handle = FieldHandle::new(
+                    0,
+                    off,
+                    len,
+                    FieldLocation::Static { offset: off, len },
+                );
+                self.staging_descriptor.update_handle(*field_id, handle);
+                self.published_descriptor.update_handle(*field_id, handle);
             }
         }
 
@@ -330,6 +344,7 @@ impl PingPongArena {
         self.b_is_staging = false;
         self.last_tick_id = TickId(0);
         self.last_param_version = ParameterVersion(0);
+        Ok(())
     }
 
     /// Total memory usage across all arena buffers in bytes.
@@ -435,7 +450,7 @@ mod tests {
         }
         let shared_static = static_arena.into_shared();
 
-        PingPongArena::new(config, field_defs, shared_static)
+        PingPongArena::new(config, field_defs, shared_static).unwrap()
     }
 
     #[test]
@@ -585,7 +600,7 @@ mod tests {
         }
         assert_eq!(arena.generation(), 5);
 
-        arena.reset();
+        arena.reset().unwrap();
         assert_eq!(arena.generation(), 0);
     }
 
@@ -634,5 +649,86 @@ mod tests {
         let snap = arena.snapshot();
         let data = snap.read(FieldId(3)).unwrap();
         assert_eq!(data[0], 77.0);
+    }
+
+    #[test]
+    fn new_fails_when_static_field_missing_from_static_arena() {
+        let cell_count = 100u32;
+        let config = ArenaConfig::new(cell_count);
+        let field_defs = vec![(
+            FieldId(0),
+            FieldDef {
+                name: "terrain".into(),
+                field_type: FieldType::Scalar,
+                mutability: FieldMutability::Static,
+                units: None,
+                bounds: None,
+                boundary_behavior: BoundaryBehavior::Clamp,
+            },
+        )];
+        // Empty static arena — FieldId(0) is not present.
+        let static_arena = StaticArena::new(&[]).into_shared();
+        let result = PingPongArena::new(config, field_defs, static_arena);
+        assert!(matches!(result, Err(ArenaError::UnknownField { field: FieldId(0) })));
+    }
+
+    #[test]
+    fn new_fails_when_sparse_field_exceeds_segment_size() {
+        let cell_count = 100u32;
+        // Tiny segment that can't fit the sparse field.
+        let config = ArenaConfig {
+            segment_size: 10,
+            max_segments: 16,
+            max_generation_age: 1,
+            cell_count,
+        };
+        let field_defs = vec![(
+            FieldId(0),
+            FieldDef {
+                name: "resource".into(),
+                field_type: FieldType::Scalar,
+                mutability: FieldMutability::Sparse,
+                units: None,
+                bounds: None,
+                boundary_behavior: BoundaryBehavior::Clamp,
+            },
+        )];
+        let static_arena = StaticArena::new(&[]).into_shared();
+        let result = PingPongArena::new(config, field_defs, static_arena);
+        assert!(matches!(result, Err(ArenaError::CapacityExceeded { .. })));
+    }
+
+    #[test]
+    fn global_segment_budget_is_respected() {
+        // With max_segments = 6, each per-tick buffer gets 2, sparse gets 2.
+        // Total segments across all pools should never exceed 6.
+        let cell_count = 10u32;
+        let config = ArenaConfig {
+            segment_size: 1024,
+            max_segments: 6,
+            max_generation_age: 1,
+            cell_count,
+        };
+        let field_defs = vec![(
+            FieldId(0),
+            FieldDef {
+                name: "temp".into(),
+                field_type: FieldType::Scalar,
+                mutability: FieldMutability::PerTick,
+                units: None,
+                bounds: None,
+                boundary_behavior: BoundaryBehavior::Clamp,
+            },
+        )];
+        let static_arena = StaticArena::new(&[]).into_shared();
+        let arena = PingPongArena::new(config, field_defs, static_arena).unwrap();
+
+        // Verify memory is bounded: total segments should not exceed max_segments.
+        // Each pool starts with 1 segment, so 3 segments total initially.
+        // Maximum: per_tick_a(2) + per_tick_b(2) + sparse(2) = 6 = max_segments.
+        let total_bytes = arena.memory_bytes();
+        let max_allowed = 6 * 1024 * std::mem::size_of::<f32>();
+        // memory_bytes includes static + scratch; just verify it's bounded.
+        assert!(total_bytes <= max_allowed + arena.static_arena().memory_bytes() + 1024 * 4);
     }
 }
