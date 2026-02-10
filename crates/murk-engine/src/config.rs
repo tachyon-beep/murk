@@ -179,7 +179,7 @@ impl WorldConfig {
     }
 
     /// Build a [`FieldSet`] from the configured field definitions.
-    fn defined_field_set(&self) -> FieldSet {
+    pub(crate) fn defined_field_set(&self) -> FieldSet {
         (0..self.fields.len())
             .map(|i| FieldId(i as u32))
             .collect()

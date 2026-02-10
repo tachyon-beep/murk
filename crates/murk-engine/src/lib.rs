@@ -1,6 +1,6 @@
 //! Simulation engine orchestrating Murk environments.
 //!
-//! Provides the top-level `Engine` that manages the simulation loop,
+//! Provides the top-level [`TickEngine`] that manages the simulation loop,
 //! coordinating arenas, spaces, propagators, and observation extraction.
 //! Supports both lockstep (callable struct) and realtime-async modes.
 
@@ -11,7 +11,10 @@
 pub mod config;
 pub mod ingress;
 pub mod metrics;
+mod overlay;
+pub mod tick;
 
 pub use config::{BackoffConfig, ConfigError, WorldConfig};
 pub use ingress::{DrainResult, IngressQueue};
 pub use metrics::StepMetrics;
+pub use tick::{TickEngine, TickResult};
