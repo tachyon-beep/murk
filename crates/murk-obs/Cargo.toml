@@ -10,4 +10,6 @@ murk-space = { path = "../murk-space" }
 indexmap = { workspace = true }
 
 [dev-dependencies]
+murk-test-utils = { path = "../murk-test-utils" }
 proptest = { workspace = true }
+smallvec = { workspace = true }
