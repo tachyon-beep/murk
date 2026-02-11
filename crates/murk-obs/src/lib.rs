@@ -22,10 +22,12 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 #![forbid(unsafe_code)]
 
+pub mod cache;
 pub mod metadata;
 pub mod plan;
 pub mod spec;
 
+pub use cache::ObsPlanCache;
 pub use metadata::ObsMetadata;
 pub use plan::{ObsPlan, ObsPlanResult};
 pub use spec::{ObsDtype, ObsEntry, ObsSpec, ObsTransform};

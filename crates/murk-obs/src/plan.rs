@@ -10,7 +10,7 @@
 use indexmap::IndexMap;
 
 use murk_core::error::ObsError;
-use murk_core::{Coord, FieldId, SnapshotAccess, WorldGenerationId};
+use murk_core::{Coord, FieldId, SnapshotAccess, TickId, WorldGenerationId};
 use murk_space::Space;
 
 use crate::metadata::ObsMetadata;
@@ -227,6 +227,11 @@ impl ObsPlan {
     /// buffers must be pre-allocated to [`output_len`](Self::output_len)
     /// and [`mask_len`](Self::mask_len) respectively.
     ///
+    /// `engine_tick` is the current engine tick for computing
+    /// [`ObsMetadata::age_ticks`]. Pass `None` in Lockstep mode
+    /// (age is always 0). In RealtimeAsync mode, pass the current
+    /// engine tick so age reflects snapshot staleness.
+    ///
     /// Returns [`ObsMetadata`] on success.
     ///
     /// # Errors
@@ -236,6 +241,7 @@ impl ObsPlan {
     pub fn execute(
         &self,
         snapshot: &dyn SnapshotAccess,
+        engine_tick: Option<TickId>,
         output: &mut [f32],
         mask: &mut [u8],
     ) -> Result<ObsMetadata, ObsError> {
@@ -316,9 +322,14 @@ impl ObsPlan {
             total_valid as f64 / total_elements as f64
         };
 
+        let age_ticks = match engine_tick {
+            Some(tick) => tick.0.saturating_sub(snapshot.tick_id().0),
+            None => 0,
+        };
+
         Ok(ObsMetadata {
             tick_id: snapshot.tick_id(),
-            age_ticks: 0,
+            age_ticks,
             coverage,
             world_generation_id: snapshot.world_generation_id(),
             parameter_version: snapshot.parameter_version(),
@@ -335,6 +346,7 @@ impl ObsPlan {
     pub fn execute_batch(
         &self,
         snapshots: &[&dyn SnapshotAccess],
+        engine_tick: Option<TickId>,
         output: &mut [f32],
         mask: &mut [u8],
     ) -> Result<Vec<ObsMetadata>, ObsError> {
@@ -367,7 +379,7 @@ impl ObsPlan {
             let mask_start = i * self.mask_len;
             let out_slice = &mut output[out_start..out_start + self.output_len];
             let mask_slice = &mut mask[mask_start..mask_start + self.mask_len];
-            let meta = self.execute(*snap, out_slice, mask_slice)?;
+            let meta = self.execute(*snap, engine_tick, out_slice, mask_slice)?;
             metadata.push(meta);
         }
         Ok(metadata)
@@ -520,7 +532,7 @@ mod tests {
 
         let mut output = vec![0.0f32; result.output_len];
         let mut mask = vec![0u8; result.mask_len];
-        let meta = result.plan.execute(&snap, &mut output, &mut mask).unwrap();
+        let meta = result.plan.execute(&snap, None, &mut output, &mut mask).unwrap();
 
         // Output should match field data in canonical order.
         let expected: Vec<f32> = (1..=9).map(|x| x as f32).collect();
@@ -555,7 +567,7 @@ mod tests {
 
         let mut output = vec![0.0f32; result.output_len];
         let mut mask = vec![0u8; result.mask_len];
-        result.plan.execute(&snap, &mut output, &mut mask).unwrap();
+        result.plan.execute(&snap, None, &mut output, &mut mask).unwrap();
 
         // Each value x should be x/8.
         for (i, &v) in output.iter().enumerate() {
@@ -586,7 +598,7 @@ mod tests {
 
         let mut output = vec![0.0f32; result.output_len];
         let mut mask = vec![0u8; result.mask_len];
-        result.plan.execute(&snap, &mut output, &mut mask).unwrap();
+        result.plan.execute(&snap, None, &mut output, &mut mask).unwrap();
 
         for &v in &output {
             assert!((0.0..=1.0).contains(&v), "value {v} out of [0,1] range");
@@ -614,7 +626,7 @@ mod tests {
 
         let mut output = vec![-1.0f32; result.output_len];
         let mut mask = vec![0u8; result.mask_len];
-        result.plan.execute(&snap, &mut output, &mut mask).unwrap();
+        result.plan.execute(&snap, None, &mut output, &mut mask).unwrap();
 
         // Zero range → all outputs 0.0.
         assert!(output.iter().all(|&v| v == 0.0));
@@ -643,7 +655,7 @@ mod tests {
 
         let mut output = vec![0.0f32; result.output_len];
         let mut mask = vec![0u8; result.mask_len];
-        result.plan.execute(&snap, &mut output, &mut mask).unwrap();
+        result.plan.execute(&snap, None, &mut output, &mut mask).unwrap();
 
         // Rect covers (1,1)=6, (1,2)=7, (2,1)=10, (2,2)=11
         assert_eq!(output, vec![6.0, 7.0, 10.0, 11.0]);
@@ -680,7 +692,7 @@ mod tests {
 
         let mut output = vec![0.0f32; result.output_len];
         let mut mask = vec![0u8; result.mask_len];
-        result.plan.execute(&snap, &mut output, &mut mask).unwrap();
+        result.plan.execute(&snap, None, &mut output, &mut mask).unwrap();
 
         // First 9: field 0, next 9: field 1.
         let expected_a: Vec<f32> = (1..=9).map(|x| x as f32).collect();
@@ -706,7 +718,7 @@ mod tests {
 
         let mut output = vec![0.0f32; result.output_len];
         let mut mask = vec![0u8; result.mask_len];
-        let err = result.plan.execute(&snap, &mut output, &mut mask).unwrap_err();
+        let err = result.plan.execute(&snap, None, &mut output, &mut mask).unwrap_err();
         assert!(matches!(err, ObsError::ExecutionFailed { .. }));
     }
 
@@ -728,7 +740,7 @@ mod tests {
 
         let mut output = vec![0.0f32; 4]; // too small
         let mut mask = vec![0u8; result.mask_len];
-        let err = result.plan.execute(&snap, &mut output, &mut mask).unwrap_err();
+        let err = result.plan.execute(&snap, None, &mut output, &mut mask).unwrap_err();
         assert!(matches!(err, ObsError::ExecutionFailed { .. }));
     }
 
@@ -752,7 +764,7 @@ mod tests {
 
         let mut output = vec![0.0f32; result.output_len];
         let mut mask = vec![0u8; result.mask_len];
-        let meta = result.plan.execute(&snap, &mut output, &mut mask).unwrap();
+        let meta = result.plan.execute(&snap, None, &mut output, &mut mask).unwrap();
 
         assert_eq!(meta.coverage, 1.0);
     }
@@ -779,7 +791,7 @@ mod tests {
 
         let mut output = vec![0.0f32; result.output_len];
         let mut mask = vec![0u8; result.mask_len];
-        let err = result.plan.execute(&snap, &mut output, &mut mask).unwrap_err();
+        let err = result.plan.execute(&snap, None, &mut output, &mut mask).unwrap_err();
         assert!(matches!(err, ObsError::PlanInvalidated { .. }));
     }
 
@@ -802,7 +814,7 @@ mod tests {
 
         let mut output = vec![0.0f32; result.output_len];
         let mut mask = vec![0u8; result.mask_len];
-        result.plan.execute(&snap, &mut output, &mut mask).unwrap();
+        result.plan.execute(&snap, None, &mut output, &mut mask).unwrap();
     }
 
     #[test]
@@ -824,7 +836,7 @@ mod tests {
 
         let mut output = vec![0.0f32; result.output_len];
         let mut mask = vec![0u8; result.mask_len];
-        result.plan.execute(&snap, &mut output, &mut mask).unwrap();
+        result.plan.execute(&snap, None, &mut output, &mut mask).unwrap();
     }
 
     // ── Metadata tests ───────────────────────────────────────
@@ -848,7 +860,7 @@ mod tests {
 
         let mut output = vec![0.0f32; result.output_len];
         let mut mask = vec![0u8; result.mask_len];
-        let meta = result.plan.execute(&snap, &mut output, &mut mask).unwrap();
+        let meta = result.plan.execute(&snap, None, &mut output, &mut mask).unwrap();
 
         assert_eq!(meta.tick_id, TickId(42));
         assert_eq!(meta.age_ticks, 0);
@@ -880,7 +892,7 @@ mod tests {
         let mut mask_single = vec![0u8; result.mask_len];
         let meta_single = result
             .plan
-            .execute(&snap, &mut out_single, &mut mask_single)
+            .execute(&snap, None, &mut out_single, &mut mask_single)
             .unwrap();
 
         // Batch N=1.
@@ -889,7 +901,7 @@ mod tests {
         let snap_ref: &dyn SnapshotAccess = &snap;
         let meta_batch = result
             .plan
-            .execute_batch(&[snap_ref], &mut out_batch, &mut mask_batch)
+            .execute_batch(&[snap_ref], None, &mut out_batch, &mut mask_batch)
             .unwrap();
 
         assert_eq!(out_single, out_batch);
@@ -918,7 +930,7 @@ mod tests {
         let mut mask = vec![0u8; result.mask_len * 2];
         let metas = result
             .plan
-            .execute_batch(&snaps, &mut output, &mut mask)
+            .execute_batch(&snaps, None, &mut output, &mut mask)
             .unwrap();
 
         assert_eq!(metas.len(), 2);
@@ -945,7 +957,7 @@ mod tests {
         let mut mask = vec![0u8; 18];
         let err = result
             .plan
-            .execute_batch(&snaps, &mut output, &mut mask)
+            .execute_batch(&snaps, None, &mut output, &mut mask)
             .unwrap_err();
         assert!(matches!(err, ObsError::ExecutionFailed { .. }));
     }
@@ -969,7 +981,7 @@ mod tests {
         let snap = snapshot_with_field(FieldId(0), vec![1.0; 4]);
         let mut output = vec![0.0f32; result.output_len];
         let mut mask = vec![0u8; result.mask_len];
-        let err = result.plan.execute(&snap, &mut output, &mut mask).unwrap_err();
+        let err = result.plan.execute(&snap, None, &mut output, &mut mask).unwrap_err();
         assert!(matches!(err, ObsError::ExecutionFailed { .. }));
     }
 }
