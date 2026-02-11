@@ -2,7 +2,7 @@
 
 use crate::error::SpaceError;
 use crate::region::{RegionPlan, RegionSpec};
-use murk_core::Coord;
+use murk_core::{Coord, SpaceInstanceId};
 use smallvec::SmallVec;
 use std::any::Any;
 
@@ -66,6 +66,13 @@ pub trait Space: Any + Send + Sync + 'static {
     /// Two calls on the same space instance must return the same sequence.
     /// Used for observation export and replay reproducibility.
     fn canonical_ordering(&self) -> Vec<Coord>;
+
+    /// Unique instance identifier for this space object.
+    ///
+    /// Allocated from a monotonic counter at construction time. Used by
+    /// observation plan caching to detect when a different space instance
+    /// is passed, avoiding stale plan reuse.
+    fn instance_id(&self) -> SpaceInstanceId;
 }
 
 impl dyn Space {

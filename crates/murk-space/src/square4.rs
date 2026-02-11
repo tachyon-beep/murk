@@ -5,7 +5,7 @@ use crate::error::SpaceError;
 use crate::grid2d;
 use crate::region::{RegionPlan, RegionSpec};
 use crate::space::Space;
-use murk_core::Coord;
+use murk_core::{Coord, SpaceInstanceId};
 use smallvec::{smallvec, SmallVec};
 
 /// A two-dimensional square grid with 4-connected neighbourhood.
@@ -23,6 +23,7 @@ pub struct Square4 {
     rows: u32,
     cols: u32,
     edge: EdgeBehavior,
+    instance_id: SpaceInstanceId,
 }
 
 impl Square4 {
@@ -51,7 +52,12 @@ impl Square4 {
                 max: Self::MAX_DIM,
             });
         }
-        Ok(Self { rows, cols, edge })
+        Ok(Self {
+            rows,
+            cols,
+            edge,
+            instance_id: SpaceInstanceId::next(),
+        })
     }
 
     /// Number of rows.
@@ -134,6 +140,10 @@ impl Space for Square4 {
 
     fn canonical_ordering(&self) -> Vec<Coord> {
         grid2d::canonical_ordering_2d(self.rows, self.cols)
+    }
+
+    fn instance_id(&self) -> SpaceInstanceId {
+        self.instance_id
     }
 }
 

@@ -2,6 +2,7 @@
 
 use smallvec::SmallVec;
 use std::fmt;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Identifies a field within a simulation world.
 ///
@@ -35,6 +36,38 @@ impl fmt::Display for SpaceId {
 impl From<u32> for SpaceId {
     fn from(v: u32) -> Self {
         Self(v)
+    }
+}
+
+/// Counter for unique [`SpaceInstanceId`] allocation.
+static SPACE_INSTANCE_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+/// Unique per-instance identifier for a `Space` object.
+///
+/// Allocated from a monotonic atomic counter via [`SpaceInstanceId::next`].
+/// Two distinct space instances always have different IDs, even if they
+/// have identical topology. Used by observation plan caching to avoid
+/// ABA reuse when a space is dropped and a new one is allocated at the
+/// same address.
+///
+/// Cloning a space preserves its instance ID, which is correct because
+/// immutable spaces with the same ID have the same topology.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct SpaceInstanceId(pub u64);
+
+impl SpaceInstanceId {
+    /// Allocate a fresh, unique instance ID.
+    ///
+    /// Each call returns a new ID that has never been returned before
+    /// within this process. Thread-safe.
+    pub fn next() -> Self {
+        Self(SPACE_INSTANCE_COUNTER.fetch_add(1, Ordering::Relaxed))
+    }
+}
+
+impl fmt::Display for SpaceInstanceId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 

@@ -2,9 +2,9 @@
 //!
 //! [`ObsPlanCache`] wraps an [`ObsSpec`] and lazily compiles an
 //! [`ObsPlan`] on first use. Subsequent calls to [`ObsPlanCache::get_or_compile`]
-//! return the cached plan as long as the same space (by pointer identity
-//! and cell count) is provided; otherwise the plan is recompiled
-//! automatically.
+//! return the cached plan as long as the same space instance (by
+//! [`SpaceInstanceId`] and cell count)
+//! is provided; otherwise the plan is recompiled automatically.
 //!
 //! The cache does **not** key on [`WorldGenerationId`](murk_core::WorldGenerationId)
 //! because that counter increments on every tick, which would defeat
@@ -12,7 +12,7 @@
 //! canonical ordering), not on per-tick state.
 
 use murk_core::error::ObsError;
-use murk_core::{SnapshotAccess, TickId};
+use murk_core::{SnapshotAccess, SpaceInstanceId, TickId};
 use murk_space::Space;
 
 use crate::metadata::ObsMetadata;
@@ -23,7 +23,7 @@ use crate::ObsPlan;
 ///
 /// Holds an [`ObsSpec`] and an optional compiled [`ObsPlan`]. On each
 /// call to [`execute`](Self::execute), checks whether the cached plan
-/// was compiled for the same space (by pointer identity and cell count).
+/// was compiled for the same space (by [`SpaceInstanceId`] and cell count).
 /// On mismatch, the plan is recompiled transparently.
 ///
 /// # Example
@@ -40,7 +40,7 @@ use crate::ObsPlan;
 ///
 /// The plan is recompiled when:
 /// - No plan has been compiled yet.
-/// - A different `&dyn Space` object is passed (different pointer).
+/// - A different space instance is passed (different [`SpaceInstanceId`]).
 /// - The same space object's `cell_count()` has changed (topology mutation).
 /// - [`invalidate`](Self::invalidate) is called explicitly.
 ///
@@ -55,18 +55,18 @@ pub struct ObsPlanCache {
 
 /// Fingerprint of a `&dyn Space` for cache invalidation.
 ///
-/// Uses the data pointer (from the fat pointer) plus `cell_count` to
-/// detect when a different space or a mutated-in-place space is passed.
+/// Uses the space's [`SpaceInstanceId`] (monotonic counter, no ABA risk)
+/// plus `cell_count` as a mutation guard.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct SpaceFingerprint {
-    data_ptr: usize,
+    instance_id: SpaceInstanceId,
     cell_count: usize,
 }
 
 impl SpaceFingerprint {
     fn of(space: &dyn Space) -> Self {
         Self {
-            data_ptr: (space as *const dyn Space as *const ()) as usize,
+            instance_id: space.instance_id(),
             cell_count: space.cell_count(),
         }
     }
@@ -94,7 +94,7 @@ impl ObsPlanCache {
     /// Get the cached plan, recompiling if needed.
     ///
     /// Returns the cached plan if one exists and was compiled for the
-    /// same space (by pointer identity and cell count). Otherwise
+    /// same space (by [`SpaceInstanceId`] and cell count). Otherwise
     /// recompiles from the stored [`ObsSpec`].
     pub fn get_or_compile(
         &mut self,
@@ -269,20 +269,20 @@ mod tests {
     #[test]
     fn different_space_same_dimensions_triggers_recompile() {
         // Two distinct space objects with the same dimensions.
-        // Different pointers → recompile, even though topology is identical.
+        // Different instance IDs → recompile, even though topology is identical.
         let space_a = Square4::new(3, 3, EdgeBehavior::Absorb).unwrap();
         let space_b = Square4::new(3, 3, EdgeBehavior::Absorb).unwrap();
         let mut cache = ObsPlanCache::new(spec());
 
         let fp_a = SpaceFingerprint::of(&space_a);
         let fp_b = SpaceFingerprint::of(&space_b);
-        // Distinct objects have different pointers.
-        assert_ne!(fp_a.data_ptr, fp_b.data_ptr);
+        // Distinct objects have different instance IDs (monotonic counter).
+        assert_ne!(fp_a.instance_id, fp_b.instance_id);
 
         cache.get_or_compile(&space_a).unwrap();
         assert!(cache.is_compiled());
 
-        // Different pointer → recompile (conservative but safe).
+        // Different instance ID → recompile (conservative but safe).
         cache.get_or_compile(&space_b).unwrap();
         assert!(cache.is_compiled());
     }
@@ -405,6 +405,7 @@ mod tests {
 
     #[test]
     fn fingerprint_different_objects_differ() {
+        // Monotonic counter guarantees distinct IDs even for identical topology.
         let a = Square4::new(3, 3, EdgeBehavior::Absorb).unwrap();
         let b = Square4::new(3, 3, EdgeBehavior::Absorb).unwrap();
         let fp_a = SpaceFingerprint::of(&a);
@@ -419,5 +420,15 @@ mod tests {
         let fp_s = SpaceFingerprint::of(&small);
         let fp_b = SpaceFingerprint::of(&big);
         assert_ne!(fp_s, fp_b);
+    }
+
+    #[test]
+    fn fingerprint_clone_preserves_id() {
+        // Cloning a space preserves instance_id (same topology, safe to reuse plan).
+        let a = Square4::new(3, 3, EdgeBehavior::Absorb).unwrap();
+        let b = a.clone();
+        let fp_a = SpaceFingerprint::of(&a);
+        let fp_b = SpaceFingerprint::of(&b);
+        assert_eq!(fp_a, fp_b);
     }
 }

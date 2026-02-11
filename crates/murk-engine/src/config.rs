@@ -317,7 +317,7 @@ mod tests {
     fn validate_empty_space_fails() {
         use murk_space::error::SpaceError;
         // Line1D::new(0, ...) returns Err, so we need a custom space with 0 cells.
-        struct EmptySpace;
+        struct EmptySpace(murk_core::SpaceInstanceId);
         impl Space for EmptySpace {
             fn ndim(&self) -> usize {
                 1
@@ -340,10 +340,13 @@ mod tests {
             fn canonical_ordering(&self) -> Vec<murk_core::Coord> {
                 vec![]
             }
+            fn instance_id(&self) -> murk_core::SpaceInstanceId {
+                self.0
+            }
         }
 
         let mut cfg = valid_config();
-        cfg.space = Box::new(EmptySpace);
+        cfg.space = Box::new(EmptySpace(murk_core::SpaceInstanceId::next()));
         match cfg.validate() {
             Err(ConfigError::EmptySpace) => {}
             other => panic!("expected EmptySpace, got {other:?}"),

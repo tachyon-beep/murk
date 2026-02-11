@@ -18,5 +18,8 @@ pub mod traits;
 pub use command::{Command, CommandPayload, Receipt};
 pub use error::{IngressError, ObsError, PropagatorError, StepError};
 pub use field::{BoundaryBehavior, FieldDef, FieldMutability, FieldSet, FieldSetIter, FieldType};
-pub use id::{Coord, FieldId, ParameterKey, ParameterVersion, SpaceId, TickId, WorldGenerationId};
+pub use id::{
+    Coord, FieldId, ParameterKey, ParameterVersion, SpaceId, SpaceInstanceId, TickId,
+    WorldGenerationId,
+};
 pub use traits::{FieldReader, FieldWriter, SnapshotAccess};

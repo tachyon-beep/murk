@@ -4,7 +4,7 @@ use crate::error::SpaceError;
 use crate::line1d;
 use crate::region::{RegionPlan, RegionSpec};
 use crate::space::Space;
-use murk_core::Coord;
+use murk_core::{Coord, SpaceInstanceId};
 use smallvec::SmallVec;
 
 /// A one-dimensional ring lattice (periodic boundary).
@@ -15,6 +15,7 @@ use smallvec::SmallVec;
 #[derive(Debug, Clone)]
 pub struct Ring1D {
     len: u32,
+    instance_id: SpaceInstanceId,
 }
 
 impl Ring1D {
@@ -36,7 +37,10 @@ impl Ring1D {
                 max: Self::MAX_LEN,
             });
         }
-        Ok(Self { len })
+        Ok(Self {
+            len,
+            instance_id: SpaceInstanceId::next(),
+        })
     }
 
     /// Number of cells.
@@ -73,6 +77,10 @@ impl Space for Ring1D {
 
     fn canonical_ordering(&self) -> Vec<Coord> {
         line1d::canonical_ordering_1d(self.len)
+    }
+
+    fn instance_id(&self) -> SpaceInstanceId {
+        self.instance_id
     }
 }
 

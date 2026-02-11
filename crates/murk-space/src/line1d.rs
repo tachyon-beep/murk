@@ -4,7 +4,7 @@ use crate::edge::EdgeBehavior;
 use crate::error::SpaceError;
 use crate::region::{BoundingShape, RegionPlan, RegionSpec};
 use crate::space::Space;
-use murk_core::Coord;
+use murk_core::{Coord, SpaceInstanceId};
 use smallvec::{smallvec, SmallVec};
 use std::collections::VecDeque;
 
@@ -19,6 +19,7 @@ use std::collections::VecDeque;
 pub struct Line1D {
     len: u32,
     edge: EdgeBehavior,
+    instance_id: SpaceInstanceId,
 }
 
 impl Line1D {
@@ -40,7 +41,11 @@ impl Line1D {
                 max: Self::MAX_LEN,
             });
         }
-        Ok(Self { len, edge })
+        Ok(Self {
+            len,
+            edge,
+            instance_id: SpaceInstanceId::next(),
+        })
     }
 
     /// Number of cells.
@@ -274,6 +279,10 @@ impl Space for Line1D {
 
     fn canonical_ordering(&self) -> Vec<Coord> {
         canonical_ordering_1d(self.len)
+    }
+
+    fn instance_id(&self) -> SpaceInstanceId {
+        self.instance_id
     }
 }
 
