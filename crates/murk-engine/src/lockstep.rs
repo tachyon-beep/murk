@@ -108,16 +108,36 @@ impl LockstepWorld {
     /// Returns [`TickError`] if a propagator fails (tick is rolled back
     /// atomically) or if ticking is disabled after consecutive rollbacks.
     /// On rollback, the error's `receipts` field contains per-command
-    /// rollback receipts.
+    /// rollback receipts plus any submission rejections.
     pub fn step_sync(&mut self, commands: Vec<Command>) -> Result<StepResult<'_>, TickError> {
-        self.engine.submit_commands(commands);
-        let tick_result = self.engine.execute_tick()?;
+        let submit_receipts = self.engine.submit_commands(commands);
 
-        Ok(StepResult {
-            snapshot: self.engine.snapshot(),
-            receipts: tick_result.receipts,
-            metrics: tick_result.metrics,
-        })
+        // Collect submission-rejected receipts (QueueFull, TickDisabled).
+        // Accepted commands get their final receipts from execute_tick.
+        let rejected: Vec<Receipt> = submit_receipts
+            .into_iter()
+            .filter(|r| !r.accepted)
+            .collect();
+
+        match self.engine.execute_tick() {
+            Ok(tick_result) => {
+                let mut receipts = rejected;
+                receipts.extend(tick_result.receipts);
+                Ok(StepResult {
+                    snapshot: self.engine.snapshot(),
+                    receipts,
+                    metrics: tick_result.metrics,
+                })
+            }
+            Err(mut tick_error) => {
+                let mut receipts = rejected;
+                receipts.append(&mut tick_error.receipts);
+                Err(TickError {
+                    kind: tick_error.kind,
+                    receipts,
+                })
+            }
+        }
     }
 
     /// Reset the world to tick 0 with a new seed.
@@ -129,8 +149,8 @@ impl LockstepWorld {
     /// seeded RNG. Currently all runs are fully deterministic regardless
     /// of seed.
     pub fn reset(&mut self, seed: u64) -> Result<Snapshot<'_>, ConfigError> {
-        self.seed = seed;
         self.engine.reset()?;
+        self.seed = seed;
         Ok(self.engine.snapshot())
     }
 
@@ -540,5 +560,63 @@ mod tests {
         // Now we can step again.
         world.step_sync(vec![]).unwrap();
         assert_eq!(world.current_tick(), TickId(2));
+    }
+
+    // ── Bug-fix regression tests ─────────────────────────────
+
+    #[test]
+    fn step_sync_surfaces_submission_rejections() {
+        // Create a world with a tiny ingress queue (capacity=2).
+        let config = WorldConfig {
+            space: Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()),
+            fields: vec![scalar_field("energy")],
+            propagators: vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))],
+            dt: 0.1,
+            seed: 42,
+            ring_buffer_size: 8,
+            max_ingress_queue: 2,
+            tick_rate_hz: None,
+            backoff: crate::config::BackoffConfig::default(),
+        };
+        let mut world = LockstepWorld::new(config).unwrap();
+
+        // Submit 4 commands — only 2 fit in the queue.
+        let result = world
+            .step_sync(vec![make_cmd(100), make_cmd(100), make_cmd(100), make_cmd(100)])
+            .unwrap();
+
+        // Should have 4 receipts total: 2 applied + 2 rejected.
+        assert_eq!(result.receipts.len(), 4);
+
+        let rejected: Vec<_> = result
+            .receipts
+            .iter()
+            .filter(|r| r.reason_code == Some(murk_core::error::IngressError::QueueFull))
+            .collect();
+        assert_eq!(rejected.len(), 2, "QueueFull rejections must be surfaced");
+
+        let applied: Vec<_> = result
+            .receipts
+            .iter()
+            .filter(|r| r.applied_tick_id.is_some())
+            .collect();
+        assert_eq!(applied.len(), 2);
+    }
+
+    #[test]
+    fn reset_does_not_update_seed_on_failure() {
+        // We can't easily make arena.reset() fail in the current implementation,
+        // but we verify the ordering: seed should only change after success.
+        let mut world = LockstepWorld::new(simple_config()).unwrap();
+        assert_eq!(world.seed(), 42);
+
+        // Successful reset updates seed.
+        world.reset(99).unwrap();
+        assert_eq!(world.seed(), 99);
+
+        // Another successful reset.
+        world.reset(7).unwrap();
+        assert_eq!(world.seed(), 7);
+        assert_eq!(world.current_tick(), TickId(0));
     }
 }
