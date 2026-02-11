@@ -293,7 +293,16 @@ impl ObsPlan {
 
             // Branch-free gather: pre-computed (field_data_idx, tensor_idx) pairs.
             for op in &entry.gather_ops {
-                let raw = field_data[op.field_data_idx];
+                let raw = *field_data.get(op.field_data_idx).ok_or_else(|| {
+                    ObsError::ExecutionFailed {
+                        reason: format!(
+                            "field {:?} has {} elements but gather requires index {}",
+                            entry.field_id,
+                            field_data.len(),
+                            op.field_data_idx,
+                        ),
+                    }
+                })?;
                 out_slice[op.tensor_idx] = apply_transform(raw, &entry.transform);
             }
 
@@ -938,6 +947,29 @@ mod tests {
             .plan
             .execute_batch(&snaps, &mut output, &mut mask)
             .unwrap_err();
+        assert!(matches!(err, ObsError::ExecutionFailed { .. }));
+    }
+
+    // ── Field length mismatch tests ──────────────────────────
+
+    #[test]
+    fn short_field_buffer_returns_error_not_panic() {
+        let space = square4_space(); // 3x3 = 9 cells
+        let spec = ObsSpec {
+            entries: vec![ObsEntry {
+                field_id: FieldId(0),
+                region: RegionSpec::All,
+                transform: ObsTransform::Identity,
+                dtype: ObsDtype::F32,
+            }],
+        };
+        let result = ObsPlan::compile(&spec, &space).unwrap();
+
+        // Snapshot field has only 4 elements, but plan expects 9.
+        let snap = snapshot_with_field(FieldId(0), vec![1.0; 4]);
+        let mut output = vec![0.0f32; result.output_len];
+        let mut mask = vec![0u8; result.mask_len];
+        let err = result.plan.execute(&snap, &mut output, &mut mask).unwrap_err();
         assert!(matches!(err, ObsError::ExecutionFailed { .. }));
     }
 }
