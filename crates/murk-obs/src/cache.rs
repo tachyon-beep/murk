@@ -1,25 +1,30 @@
-//! Plan cache with automatic generation-based invalidation.
+//! Plan cache with space-topology-based invalidation.
 //!
 //! [`ObsPlanCache`] wraps an [`ObsSpec`] and lazily compiles an
 //! [`ObsPlan`] on first use. Subsequent calls to [`ObsPlanCache::get_or_compile`]
-//! return the cached plan if the snapshot's `world_generation_id`
-//! matches the plan's compiled generation; otherwise the plan is
-//! recompiled automatically.
+//! return the cached plan as long as the same space (by pointer identity
+//! and cell count) is provided; otherwise the plan is recompiled
+//! automatically.
+//!
+//! The cache does **not** key on [`WorldGenerationId`](murk_core::WorldGenerationId)
+//! because that counter increments on every tick, which would defeat
+//! caching. Observation plans depend only on space topology (cell count,
+//! canonical ordering), not on per-tick state.
 
 use murk_core::error::ObsError;
-use murk_core::{SnapshotAccess, TickId, WorldGenerationId};
+use murk_core::{SnapshotAccess, TickId};
 use murk_space::Space;
 
 use crate::metadata::ObsMetadata;
 use crate::spec::ObsSpec;
 use crate::ObsPlan;
 
-/// Cached observation plan with generation-based invalidation.
+/// Cached observation plan with space-topology-based invalidation.
 ///
 /// Holds an [`ObsSpec`] and an optional compiled [`ObsPlan`]. On each
-/// call to [`execute`](Self::execute), checks whether the cached plan's
-/// generation matches the snapshot's generation. On mismatch, the plan
-/// is recompiled transparently.
+/// call to [`execute`](Self::execute), checks whether the cached plan
+/// was compiled for the same space (by pointer identity and cell count).
+/// On mismatch, the plan is recompiled transparently.
 ///
 /// # Example
 ///
@@ -27,20 +32,51 @@ use crate::ObsPlan;
 /// let mut cache = ObsPlanCache::new(spec);
 /// // First call compiles the plan:
 /// let meta = cache.execute(&space, &snapshot, None, &mut output, &mut mask)?;
-/// // Subsequent calls reuse it (same generation):
+/// // Subsequent calls reuse it (same space):
 /// let meta = cache.execute(&space, &snapshot, None, &mut output, &mut mask)?;
 /// ```
+///
+/// # Invalidation
+///
+/// The plan is recompiled when:
+/// - No plan has been compiled yet.
+/// - A different `&dyn Space` object is passed (different pointer).
+/// - The same space object's `cell_count()` has changed (topology mutation).
+/// - [`invalidate`](Self::invalidate) is called explicitly.
+///
+/// The plan is **not** recompiled when:
+/// - The snapshot's `WorldGenerationId` changes (that is per-tick churn,
+///   not a topology change).
 #[derive(Debug)]
 pub struct ObsPlanCache {
     spec: ObsSpec,
     cached: Option<CachedPlan>,
 }
 
-/// Internal: a compiled plan with its generation and layout info.
+/// Fingerprint of a `&dyn Space` for cache invalidation.
+///
+/// Uses the data pointer (from the fat pointer) plus `cell_count` to
+/// detect when a different space or a mutated-in-place space is passed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SpaceFingerprint {
+    data_ptr: usize,
+    cell_count: usize,
+}
+
+impl SpaceFingerprint {
+    fn of(space: &dyn Space) -> Self {
+        Self {
+            data_ptr: (space as *const dyn Space as *const ()) as usize,
+            cell_count: space.cell_count(),
+        }
+    }
+}
+
+/// Internal: a compiled plan with its space fingerprint and layout info.
 #[derive(Debug)]
 struct CachedPlan {
     plan: ObsPlan,
-    generation: WorldGenerationId,
+    fingerprint: SpaceFingerprint,
     output_len: usize,
     mask_len: usize,
     entry_shapes: Vec<Vec<usize>>,
@@ -57,24 +93,25 @@ impl ObsPlanCache {
 
     /// Get the cached plan, recompiling if needed.
     ///
-    /// Returns the plan and its layout info. The plan is recompiled
-    /// if no cached plan exists or if `generation` differs from the
-    /// cached plan's generation.
+    /// Returns the cached plan if one exists and was compiled for the
+    /// same space (by pointer identity and cell count). Otherwise
+    /// recompiles from the stored [`ObsSpec`].
     pub fn get_or_compile(
         &mut self,
         space: &dyn Space,
-        generation: WorldGenerationId,
     ) -> Result<&ObsPlan, ObsError> {
+        let fingerprint = SpaceFingerprint::of(space);
+
         let needs_recompile = match &self.cached {
             None => true,
-            Some(cached) => cached.generation != generation,
+            Some(cached) => cached.fingerprint != fingerprint,
         };
 
         if needs_recompile {
-            let result = ObsPlan::compile_bound(&self.spec, space, generation)?;
+            let result = ObsPlan::compile(&self.spec, space)?;
             self.cached = Some(CachedPlan {
                 plan: result.plan,
-                generation,
+                fingerprint,
                 output_len: result.output_len,
                 mask_len: result.mask_len,
                 entry_shapes: result.entry_shapes,
@@ -85,7 +122,7 @@ impl ObsPlanCache {
     }
 
     /// Execute the observation plan against a snapshot, recompiling if
-    /// the generation has changed.
+    /// the space has changed.
     ///
     /// This is the primary convenience method. It calls
     /// [`get_or_compile`](Self::get_or_compile) then
@@ -102,8 +139,7 @@ impl ObsPlanCache {
         output: &mut [f32],
         mask: &mut [u8],
     ) -> Result<ObsMetadata, ObsError> {
-        let generation = snapshot.world_generation_id();
-        let plan = self.get_or_compile(space, generation)?;
+        let plan = self.get_or_compile(space)?;
         plan.execute(snapshot, engine_tick, output, mask)
     }
 
@@ -126,11 +162,6 @@ impl ObsPlanCache {
     /// Whether a compiled plan is currently cached.
     pub fn is_compiled(&self) -> bool {
         self.cached.is_some()
-    }
-
-    /// The generation of the currently cached plan, if any.
-    pub fn cached_generation(&self) -> Option<WorldGenerationId> {
-        self.cached.as_ref().map(|c| c.generation)
     }
 
     /// Invalidate the cached plan, forcing recompilation on next use.
@@ -179,7 +210,6 @@ mod tests {
         let cache = ObsPlanCache::new(spec());
         assert!(!cache.is_compiled());
         assert_eq!(cache.output_len(), None);
-        assert_eq!(cache.cached_generation(), None);
     }
 
     #[test]
@@ -193,42 +223,68 @@ mod tests {
         cache.execute(&space, &snapshot, None, &mut output, &mut mask).unwrap();
 
         assert!(cache.is_compiled());
-        assert_eq!(cache.cached_generation(), Some(WorldGenerationId(1)));
         assert_eq!(cache.output_len(), Some(9));
     }
 
     #[test]
-    fn same_generation_reuses_plan() {
+    fn same_space_reuses_plan_across_generations() {
         let space = space();
-        let snap1 = snap(1, 10);
-        let snap2 = snap(1, 11);
-        let mut cache = ObsPlanCache::new(spec());
-
-        let mut output = vec![0.0f32; 9];
-        let mut mask = vec![0u8; 9];
-        cache.execute(&space, &snap1, None, &mut output, &mut mask).unwrap();
-        assert_eq!(cache.cached_generation(), Some(WorldGenerationId(1)));
-
-        // Same generation — no recompile.
-        cache.execute(&space, &snap2, None, &mut output, &mut mask).unwrap();
-        assert_eq!(cache.cached_generation(), Some(WorldGenerationId(1)));
-    }
-
-    #[test]
-    fn generation_change_triggers_recompile() {
-        let space = space();
+        // Different WorldGenerationId values — cache should NOT recompile.
         let snap_gen1 = snap(1, 10);
         let snap_gen2 = snap(2, 20);
+        let snap_gen3 = snap(3, 30);
         let mut cache = ObsPlanCache::new(spec());
 
         let mut output = vec![0.0f32; 9];
         let mut mask = vec![0u8; 9];
         cache.execute(&space, &snap_gen1, None, &mut output, &mut mask).unwrap();
-        assert_eq!(cache.cached_generation(), Some(WorldGenerationId(1)));
+        assert!(cache.is_compiled());
 
-        // Different generation → recompile.
+        // Same space, different generation — no recompile.
         cache.execute(&space, &snap_gen2, None, &mut output, &mut mask).unwrap();
-        assert_eq!(cache.cached_generation(), Some(WorldGenerationId(2)));
+        assert!(cache.is_compiled());
+
+        // Third generation — still no recompile.
+        cache.execute(&space, &snap_gen3, None, &mut output, &mut mask).unwrap();
+        assert!(cache.is_compiled());
+    }
+
+    #[test]
+    fn different_space_triggers_recompile() {
+        let space_a = Square4::new(3, 3, EdgeBehavior::Absorb).unwrap();
+        let space_b = Square4::new(4, 4, EdgeBehavior::Absorb).unwrap();
+        let mut cache = ObsPlanCache::new(spec());
+
+        // Compile with 3x3 space (9 cells).
+        cache.get_or_compile(&space_a).unwrap();
+        assert!(cache.is_compiled());
+        assert_eq!(cache.output_len(), Some(9));
+
+        // Different space object with different topology → recompile.
+        cache.get_or_compile(&space_b).unwrap();
+        assert!(cache.is_compiled());
+        assert_eq!(cache.output_len(), Some(16));
+    }
+
+    #[test]
+    fn different_space_same_dimensions_triggers_recompile() {
+        // Two distinct space objects with the same dimensions.
+        // Different pointers → recompile, even though topology is identical.
+        let space_a = Square4::new(3, 3, EdgeBehavior::Absorb).unwrap();
+        let space_b = Square4::new(3, 3, EdgeBehavior::Absorb).unwrap();
+        let mut cache = ObsPlanCache::new(spec());
+
+        let fp_a = SpaceFingerprint::of(&space_a);
+        let fp_b = SpaceFingerprint::of(&space_b);
+        // Distinct objects have different pointers.
+        assert_ne!(fp_a.data_ptr, fp_b.data_ptr);
+
+        cache.get_or_compile(&space_a).unwrap();
+        assert!(cache.is_compiled());
+
+        // Different pointer → recompile (conservative but safe).
+        cache.get_or_compile(&space_b).unwrap();
+        assert!(cache.is_compiled());
     }
 
     #[test]
@@ -244,7 +300,6 @@ mod tests {
 
         cache.invalidate();
         assert!(!cache.is_compiled());
-        assert_eq!(cache.cached_generation(), None);
 
         // Re-executes fine.
         cache.execute(&space, &snapshot, None, &mut output, &mut mask).unwrap();
@@ -316,23 +371,53 @@ mod tests {
     // ── get_or_compile tests ─────────────────────────────────
 
     #[test]
-    fn get_or_compile_returns_bound_plan() {
+    fn get_or_compile_returns_unbound_plan() {
         let space = space();
         let mut cache = ObsPlanCache::new(spec());
 
-        let plan = cache.get_or_compile(&space, WorldGenerationId(42)).unwrap();
-        assert_eq!(plan.compiled_generation(), Some(WorldGenerationId(42)));
+        let plan = cache.get_or_compile(&space).unwrap();
+        // Cache uses compile() not compile_bound(), so no generation binding.
+        assert_eq!(plan.compiled_generation(), None);
     }
 
     #[test]
-    fn get_or_compile_recompiles_on_new_generation() {
+    fn get_or_compile_reuses_for_same_space() {
         let space = space();
         let mut cache = ObsPlanCache::new(spec());
 
-        cache.get_or_compile(&space, WorldGenerationId(1)).unwrap();
-        assert_eq!(cache.cached_generation(), Some(WorldGenerationId(1)));
+        cache.get_or_compile(&space).unwrap();
+        assert!(cache.is_compiled());
 
-        cache.get_or_compile(&space, WorldGenerationId(2)).unwrap();
-        assert_eq!(cache.cached_generation(), Some(WorldGenerationId(2)));
+        // Same space reference → reuse.
+        cache.get_or_compile(&space).unwrap();
+        assert!(cache.is_compiled());
+    }
+
+    // ── SpaceFingerprint tests ───────────────────────────────
+
+    #[test]
+    fn fingerprint_same_object_is_equal() {
+        let space = space();
+        let fp1 = SpaceFingerprint::of(&space);
+        let fp2 = SpaceFingerprint::of(&space);
+        assert_eq!(fp1, fp2);
+    }
+
+    #[test]
+    fn fingerprint_different_objects_differ() {
+        let a = Square4::new(3, 3, EdgeBehavior::Absorb).unwrap();
+        let b = Square4::new(3, 3, EdgeBehavior::Absorb).unwrap();
+        let fp_a = SpaceFingerprint::of(&a);
+        let fp_b = SpaceFingerprint::of(&b);
+        assert_ne!(fp_a, fp_b);
+    }
+
+    #[test]
+    fn fingerprint_different_sizes_differ() {
+        let small = Square4::new(2, 2, EdgeBehavior::Absorb).unwrap();
+        let big = Square4::new(5, 5, EdgeBehavior::Absorb).unwrap();
+        let fp_s = SpaceFingerprint::of(&small);
+        let fp_b = SpaceFingerprint::of(&big);
+        assert_ne!(fp_s, fp_b);
     }
 }
