@@ -53,7 +53,7 @@ static SPACE_INSTANCE_COUNTER: AtomicU64 = AtomicU64::new(1);
 /// Cloning a space preserves its instance ID, which is correct because
 /// immutable spaces with the same ID have the same topology.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct SpaceInstanceId(pub u64);
+pub struct SpaceInstanceId(u64);
 
 impl SpaceInstanceId {
     /// Allocate a fresh, unique instance ID.
