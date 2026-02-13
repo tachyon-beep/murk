@@ -178,6 +178,16 @@ impl LockstepWorld {
     pub fn seed(&self) -> u64 {
         self.seed
     }
+
+    /// Number of consecutive rollbacks since the last successful tick.
+    pub fn consecutive_rollback_count(&self) -> u32 {
+        self.engine.consecutive_rollback_count()
+    }
+
+    /// The spatial topology for this world.
+    pub fn space(&self) -> &dyn murk_space::Space {
+        self.engine.space()
+    }
 }
 
 impl std::fmt::Debug for LockstepWorld {

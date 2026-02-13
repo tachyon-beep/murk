@@ -428,6 +428,10 @@ dependencies = [
  "murk-core",
  "murk-engine",
  "murk-obs",
+ "murk-propagator",
+ "murk-space",
+ "murk-test-utils",
+ "proptest",
 ]
 
 [[package]]

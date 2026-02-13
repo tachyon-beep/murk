@@ -1,0 +1,417 @@
+//! Config builder FFI: create and populate a `WorldConfig` behind an opaque handle.
+//!
+//! C callers build a config incrementally, then pass the handle to
+//! `murk_lockstep_create` which consumes it to construct a world.
+
+use std::ffi::CStr;
+use std::os::raw::c_char;
+use std::sync::Mutex;
+
+use murk_core::{BoundaryBehavior, FieldDef, FieldMutability, FieldType};
+use murk_propagator::Propagator;
+use murk_space::{EdgeBehavior, Line1D, Ring1D, Space, Square4, Square8};
+
+use crate::handle::HandleTable;
+use crate::status::MurkStatus;
+use crate::types::{
+    MurkBoundaryBehavior, MurkEdgeBehavior, MurkFieldMutability, MurkFieldType, MurkSpaceType,
+};
+
+static CONFIGS: Mutex<HandleTable<ConfigBuilder>> = Mutex::new(HandleTable::new());
+
+/// Internal config builder accumulated by FFI calls.
+pub(crate) struct ConfigBuilder {
+    pub space: Option<Box<dyn Space>>,
+    pub fields: Vec<FieldDef>,
+    pub propagators: Vec<Box<dyn Propagator>>,
+    pub dt: f64,
+    pub seed: u64,
+    pub ring_buffer_size: usize,
+    pub max_ingress_queue: usize,
+}
+
+impl Default for ConfigBuilder {
+    fn default() -> Self {
+        Self {
+            space: None,
+            fields: Vec::new(),
+            propagators: Vec::new(),
+            dt: 0.016,
+            seed: 0,
+            ring_buffer_size: 8,
+            max_ingress_queue: 1024,
+        }
+    }
+}
+
+pub(crate) fn configs() -> &'static Mutex<HandleTable<ConfigBuilder>> {
+    &CONFIGS
+}
+
+// ── FFI functions ───────────────────────────────────────────────
+
+/// Create a new config builder. Returns handle via `out`.
+#[no_mangle]
+#[allow(unsafe_code)]
+pub extern "C" fn murk_config_create(out: *mut u64) -> i32 {
+    // SAFETY: caller must pass a valid, aligned, non-null pointer.
+    if out.is_null() {
+        return MurkStatus::InvalidArgument as i32;
+    }
+    let handle = CONFIGS.lock().unwrap().insert(ConfigBuilder::default());
+    unsafe { *out = handle };
+    MurkStatus::Ok as i32
+}
+
+/// Destroy a config builder, releasing its resources.
+#[no_mangle]
+#[allow(unsafe_code)]
+pub extern "C" fn murk_config_destroy(handle: u64) -> i32 {
+    match CONFIGS.lock().unwrap().remove(handle) {
+        Some(_) => MurkStatus::Ok as i32,
+        None => MurkStatus::InvalidHandle as i32,
+    }
+}
+
+/// Set the spatial topology for the config.
+///
+/// `params` is an array of `n_params` f64 values interpreted per space type:
+/// - Line1D: \[length, edge_behavior\]
+/// - Ring1D: \[length\]
+/// - Square4/Square8: \[width, height, edge_behavior\]
+///
+/// Edge behavior: 0=Absorb, 1=Clamp, 2=Wrap.
+#[no_mangle]
+#[allow(unsafe_code)]
+pub extern "C" fn murk_config_set_space(
+    handle: u64,
+    space_type: i32,
+    params: *const f64,
+    n_params: usize,
+) -> i32 {
+    if params.is_null() && n_params > 0 {
+        return MurkStatus::InvalidArgument as i32;
+    }
+    // SAFETY: caller guarantees params points to n_params valid f64 values.
+    let p: &[f64] = if n_params > 0 {
+        unsafe { std::slice::from_raw_parts(params, n_params) }
+    } else {
+        &[]
+    };
+
+    let space: Box<dyn Space> = match space_type {
+        x if x == MurkSpaceType::Line1D as i32 => {
+            if p.len() < 2 {
+                return MurkStatus::InvalidArgument as i32;
+            }
+            let len = p[0] as u32;
+            let edge = match parse_edge_behavior(p[1] as i32) {
+                Some(e) => e,
+                None => return MurkStatus::InvalidArgument as i32,
+            };
+            match Line1D::new(len, edge) {
+                Ok(s) => Box::new(s),
+                Err(_) => return MurkStatus::InvalidArgument as i32,
+            }
+        }
+        x if x == MurkSpaceType::Ring1D as i32 => {
+            if p.is_empty() {
+                return MurkStatus::InvalidArgument as i32;
+            }
+            let len = p[0] as u32;
+            match Ring1D::new(len) {
+                Ok(s) => Box::new(s),
+                Err(_) => return MurkStatus::InvalidArgument as i32,
+            }
+        }
+        x if x == MurkSpaceType::Square4 as i32 => {
+            if p.len() < 3 {
+                return MurkStatus::InvalidArgument as i32;
+            }
+            let w = p[0] as u32;
+            let h = p[1] as u32;
+            let edge = match parse_edge_behavior(p[2] as i32) {
+                Some(e) => e,
+                None => return MurkStatus::InvalidArgument as i32,
+            };
+            match Square4::new(w, h, edge) {
+                Ok(s) => Box::new(s),
+                Err(_) => return MurkStatus::InvalidArgument as i32,
+            }
+        }
+        x if x == MurkSpaceType::Square8 as i32 => {
+            if p.len() < 3 {
+                return MurkStatus::InvalidArgument as i32;
+            }
+            let w = p[0] as u32;
+            let h = p[1] as u32;
+            let edge = match parse_edge_behavior(p[2] as i32) {
+                Some(e) => e,
+                None => return MurkStatus::InvalidArgument as i32,
+            };
+            match Square8::new(w, h, edge) {
+                Ok(s) => Box::new(s),
+                Err(_) => return MurkStatus::InvalidArgument as i32,
+            }
+        }
+        _ => return MurkStatus::InvalidArgument as i32,
+    };
+
+    let mut table = CONFIGS.lock().unwrap();
+    match table.get_mut(handle) {
+        Some(cfg) => {
+            cfg.space = Some(space);
+            MurkStatus::Ok as i32
+        }
+        None => MurkStatus::InvalidHandle as i32,
+    }
+}
+
+/// Add a field definition to the config.
+///
+/// `name` is a null-terminated C string.
+/// `field_type`: 0=Scalar, 1=Vector, 2=Categorical.
+/// `mutability`: 0=Static, 1=PerTick, 2=Sparse.
+/// `dims`: components for Vector, n_values for Categorical, ignored for Scalar.
+/// `boundary_behavior`: 0=Clamp, 1=Reflect, 2=Absorb, 3=Wrap.
+#[no_mangle]
+#[allow(unsafe_code)]
+pub extern "C" fn murk_config_add_field(
+    handle: u64,
+    name: *const c_char,
+    field_type: i32,
+    mutability: i32,
+    dims: u32,
+    boundary_behavior: i32,
+) -> i32 {
+    if name.is_null() {
+        return MurkStatus::InvalidArgument as i32;
+    }
+    // SAFETY: caller guarantees name is a valid null-terminated C string.
+    let name_str = match unsafe { CStr::from_ptr(name) }.to_str() {
+        Ok(s) => s.to_owned(),
+        Err(_) => return MurkStatus::InvalidArgument as i32,
+    };
+
+    let ft = match field_type {
+        x if x == MurkFieldType::Scalar as i32 => FieldType::Scalar,
+        x if x == MurkFieldType::Vector as i32 => FieldType::Vector { dims },
+        x if x == MurkFieldType::Categorical as i32 => FieldType::Categorical { n_values: dims },
+        _ => return MurkStatus::InvalidArgument as i32,
+    };
+
+    let mut_class = match mutability {
+        x if x == MurkFieldMutability::Static as i32 => FieldMutability::Static,
+        x if x == MurkFieldMutability::PerTick as i32 => FieldMutability::PerTick,
+        x if x == MurkFieldMutability::Sparse as i32 => FieldMutability::Sparse,
+        _ => return MurkStatus::InvalidArgument as i32,
+    };
+
+    let bb = match boundary_behavior {
+        x if x == MurkBoundaryBehavior::Clamp as i32 => BoundaryBehavior::Clamp,
+        x if x == MurkBoundaryBehavior::Reflect as i32 => BoundaryBehavior::Reflect,
+        x if x == MurkBoundaryBehavior::Absorb as i32 => BoundaryBehavior::Absorb,
+        x if x == MurkBoundaryBehavior::Wrap as i32 => BoundaryBehavior::Wrap,
+        _ => return MurkStatus::InvalidArgument as i32,
+    };
+
+    let def = FieldDef {
+        name: name_str,
+        field_type: ft,
+        mutability: mut_class,
+        units: None,
+        bounds: None,
+        boundary_behavior: bb,
+    };
+
+    let mut table = CONFIGS.lock().unwrap();
+    match table.get_mut(handle) {
+        Some(cfg) => {
+            cfg.fields.push(def);
+            MurkStatus::Ok as i32
+        }
+        None => MurkStatus::InvalidHandle as i32,
+    }
+}
+
+/// Add a propagator to the config. Takes ownership of the propagator box.
+///
+/// `prop_ptr` is a `Box<dyn Propagator>` as a raw pointer cast to u64
+/// (from `murk_propagator_create`).
+#[no_mangle]
+#[allow(unsafe_code)]
+pub extern "C" fn murk_config_add_propagator(handle: u64, prop_ptr: u64) -> i32 {
+    if prop_ptr == 0 {
+        return MurkStatus::InvalidArgument as i32;
+    }
+    // SAFETY: prop_ptr was produced by Box::into_raw(Box::new(boxed)) in
+    // murk_propagator_create. It's a thin pointer to a Box<dyn Propagator>
+    // and is consumed exactly once here.
+    let prop: Box<dyn Propagator> =
+        *unsafe { Box::from_raw(prop_ptr as *mut Box<dyn Propagator>) };
+
+    let mut table = CONFIGS.lock().unwrap();
+    match table.get_mut(handle) {
+        Some(cfg) => {
+            cfg.propagators.push(prop);
+            MurkStatus::Ok as i32
+        }
+        None => MurkStatus::InvalidHandle as i32,
+    }
+}
+
+/// Set the simulation timestep in seconds.
+#[no_mangle]
+#[allow(unsafe_code)]
+pub extern "C" fn murk_config_set_dt(handle: u64, dt: f64) -> i32 {
+    let mut table = CONFIGS.lock().unwrap();
+    match table.get_mut(handle) {
+        Some(cfg) => {
+            cfg.dt = dt;
+            MurkStatus::Ok as i32
+        }
+        None => MurkStatus::InvalidHandle as i32,
+    }
+}
+
+/// Set the RNG seed.
+#[no_mangle]
+#[allow(unsafe_code)]
+pub extern "C" fn murk_config_set_seed(handle: u64, seed: u64) -> i32 {
+    let mut table = CONFIGS.lock().unwrap();
+    match table.get_mut(handle) {
+        Some(cfg) => {
+            cfg.seed = seed;
+            MurkStatus::Ok as i32
+        }
+        None => MurkStatus::InvalidHandle as i32,
+    }
+}
+
+/// Set the ring buffer size (minimum 2).
+#[no_mangle]
+#[allow(unsafe_code)]
+pub extern "C" fn murk_config_set_ring_buffer_size(handle: u64, size: usize) -> i32 {
+    let mut table = CONFIGS.lock().unwrap();
+    match table.get_mut(handle) {
+        Some(cfg) => {
+            cfg.ring_buffer_size = size;
+            MurkStatus::Ok as i32
+        }
+        None => MurkStatus::InvalidHandle as i32,
+    }
+}
+
+/// Set the maximum ingress queue depth.
+#[no_mangle]
+#[allow(unsafe_code)]
+pub extern "C" fn murk_config_set_max_ingress_queue(handle: u64, size: usize) -> i32 {
+    let mut table = CONFIGS.lock().unwrap();
+    match table.get_mut(handle) {
+        Some(cfg) => {
+            cfg.max_ingress_queue = size;
+            MurkStatus::Ok as i32
+        }
+        None => MurkStatus::InvalidHandle as i32,
+    }
+}
+
+// ── helpers ──────────────────────────────────────────────
+
+fn parse_edge_behavior(v: i32) -> Option<EdgeBehavior> {
+    match v {
+        x if x == MurkEdgeBehavior::Absorb as i32 => Some(EdgeBehavior::Absorb),
+        x if x == MurkEdgeBehavior::Clamp as i32 => Some(EdgeBehavior::Clamp),
+        x if x == MurkEdgeBehavior::Wrap as i32 => Some(EdgeBehavior::Wrap),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::CString;
+
+    #[test]
+    fn create_set_space_add_field_destroy_round_trip() {
+        let mut h: u64 = 0;
+        assert_eq!(murk_config_create(&mut h), MurkStatus::Ok as i32);
+
+        let params = [10.0f64, 0.0]; // Line1D, len=10, Absorb
+        assert_eq!(
+            murk_config_set_space(h, MurkSpaceType::Line1D as i32, params.as_ptr(), 2),
+            MurkStatus::Ok as i32
+        );
+
+        let name = CString::new("energy").unwrap();
+        assert_eq!(
+            murk_config_add_field(
+                h,
+                name.as_ptr(),
+                MurkFieldType::Scalar as i32,
+                MurkFieldMutability::PerTick as i32,
+                0,
+                MurkBoundaryBehavior::Clamp as i32,
+            ),
+            MurkStatus::Ok as i32
+        );
+
+        assert_eq!(
+            murk_config_set_dt(h, 0.1),
+            MurkStatus::Ok as i32
+        );
+
+        assert_eq!(murk_config_destroy(h), MurkStatus::Ok as i32);
+    }
+
+    #[test]
+    fn double_destroy_returns_invalid_handle() {
+        let mut h: u64 = 0;
+        murk_config_create(&mut h);
+        assert_eq!(murk_config_destroy(h), MurkStatus::Ok as i32);
+        assert_eq!(murk_config_destroy(h), MurkStatus::InvalidHandle as i32);
+    }
+
+    #[test]
+    fn use_after_destroy_returns_invalid_handle() {
+        let mut h: u64 = 0;
+        murk_config_create(&mut h);
+        murk_config_destroy(h);
+        assert_eq!(
+            murk_config_set_dt(h, 1.0),
+            MurkStatus::InvalidHandle as i32
+        );
+    }
+
+    #[test]
+    fn invalid_space_type_returns_invalid_argument() {
+        let mut h: u64 = 0;
+        murk_config_create(&mut h);
+        let params = [10.0f64];
+        assert_eq!(
+            murk_config_set_space(h, 999, params.as_ptr(), 1),
+            MurkStatus::InvalidArgument as i32
+        );
+        murk_config_destroy(h);
+    }
+
+    #[test]
+    fn null_config_create_returns_invalid_argument() {
+        assert_eq!(
+            murk_config_create(std::ptr::null_mut()),
+            MurkStatus::InvalidArgument as i32
+        );
+    }
+
+    #[test]
+    fn square4_space_params() {
+        let mut h: u64 = 0;
+        murk_config_create(&mut h);
+        let params = [5.0f64, 5.0, 0.0]; // 5x5, Absorb
+        assert_eq!(
+            murk_config_set_space(h, MurkSpaceType::Square4 as i32, params.as_ptr(), 3),
+            MurkStatus::Ok as i32
+        );
+        murk_config_destroy(h);
+    }
+}

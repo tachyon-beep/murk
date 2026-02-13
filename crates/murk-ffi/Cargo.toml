@@ -4,7 +4,16 @@ version = "0.1.0"
 edition = "2021"
 description = "C FFI bindings for the Murk simulation framework"
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 murk-core = { path = "../murk-core" }
 murk-engine = { path = "../murk-engine" }
 murk-obs = { path = "../murk-obs" }
+murk-space = { path = "../murk-space" }
+murk-propagator = { path = "../murk-propagator" }
+
+[dev-dependencies]
+murk-test-utils = { path = "../murk-test-utils" }
+proptest = { workspace = true }

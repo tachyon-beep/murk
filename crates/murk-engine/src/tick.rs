@@ -374,6 +374,11 @@ impl TickEngine {
     pub fn last_metrics(&self) -> &StepMetrics {
         &self.last_metrics
     }
+
+    /// The spatial topology for this engine.
+    pub fn space(&self) -> &dyn murk_space::Space {
+        self.space.as_ref()
+    }
 }
 
 #[cfg(test)]
