@@ -86,10 +86,14 @@ const _: fn() = || {
 
 impl WorkerEpoch {
     /// Create a new worker epoch in the unpinned state.
+    ///
+    /// `last_quiesce_ns` is seeded to the current monotonic time so
+    /// that the first pin is never misclassified as a stall due to
+    /// elapsed process uptime.
     pub fn new(worker_id: u32) -> Self {
         Self {
             pinned: AtomicU64::new(EPOCH_UNPINNED),
-            last_quiesce_ns: AtomicU64::new(0),
+            last_quiesce_ns: AtomicU64::new(monotonic_nanos()),
             cancel: AtomicBool::new(false),
             worker_id,
         }
@@ -186,9 +190,11 @@ mod tests {
     fn test_worker_pin_unpin() {
         let worker = WorkerEpoch::new(0);
 
-        // Starts unpinned.
+        // Starts unpinned, with a seeded quiesce timestamp.
         assert!(!worker.is_pinned());
         assert_eq!(worker.pinned_epoch(), EPOCH_UNPINNED);
+        let initial_quiesce = worker.last_quiesce_ns();
+        assert!(initial_quiesce > 0, "quiesce time should be seeded at creation");
 
         // Pin to epoch 5.
         worker.pin(5);
@@ -199,7 +205,7 @@ mod tests {
         worker.unpin();
         assert!(!worker.is_pinned());
         assert_eq!(worker.pinned_epoch(), EPOCH_UNPINNED);
-        assert!(worker.last_quiesce_ns() > 0);
+        assert!(worker.last_quiesce_ns() >= initial_quiesce);
     }
 
     #[test]

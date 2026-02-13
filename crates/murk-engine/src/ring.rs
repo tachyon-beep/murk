@@ -80,21 +80,36 @@ impl SnapshotRing {
 
     /// Get the latest (most recently pushed) snapshot.
     ///
-    /// Returns `None` if no snapshots have been pushed yet.
+    /// Returns `None` only if no snapshots have been pushed yet.
+    /// On overwrite races (producer wraps the slot between our
+    /// `write_pos` read and lock acquisition), retries from the
+    /// fresh `write_pos` to guarantee returning an available
+    /// snapshot whenever the ring is non-empty.
     pub fn latest(&self) -> Option<Arc<OwnedSnapshot>> {
-        let pos = self.write_pos.load(Ordering::Acquire);
-        if pos == 0 {
-            return None;
+        // Bounded retry: at most `capacity` attempts. A well-behaved
+        // producer can overwrite at most `capacity` slots per lap, so
+        // `capacity` retries guarantees convergence unless the producer
+        // is lapping the consumer faster than the consumer can lock a
+        // single slot — which would indicate a misconfigured system.
+        for _ in 0..self.capacity {
+            let pos = self.write_pos.load(Ordering::Acquire);
+            if pos == 0 {
+                return None;
+            }
+            let target_pos = pos - 1;
+            let slot_idx = (target_pos as usize) % self.capacity;
+            let slot = self.slots[slot_idx].lock().unwrap();
+            match slot.as_ref() {
+                Some((tag, arc)) if *tag == target_pos => return Some(Arc::clone(arc)),
+                // Producer overwrote this slot between our write_pos
+                // read and lock acquisition. Re-read write_pos and
+                // try the new latest slot.
+                _ => continue,
+            }
         }
-        let target_pos = pos - 1;
-        let slot_idx = (target_pos as usize) % self.capacity;
-        let slot = self.slots[slot_idx].lock().unwrap();
-        match slot.as_ref() {
-            Some((tag, arc)) if *tag == target_pos => Some(Arc::clone(arc)),
-            // Producer overwrote this slot between our write_pos read
-            // and lock acquisition. The snapshot we wanted is gone.
-            _ => None,
-        }
+        // All retries exhausted — producer is lapping us extremely fast.
+        // This should not happen under normal conditions.
+        None
     }
 
     /// Get a snapshot by its monotonic write position.

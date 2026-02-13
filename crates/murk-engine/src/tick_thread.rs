@@ -239,13 +239,9 @@ impl TickThreadState {
             }
 
             let last_q = worker.last_quiesce_ns();
-            // If last_quiesce_ns is 0, the worker hasn't unpinned yet —
-            // use time since epoch start (approximated as "a long time").
-            let hold_ns = if last_q == 0 {
-                now_ns
-            } else {
-                now_ns.saturating_sub(last_q)
-            };
+            // last_quiesce_ns is seeded at construction time, so this
+            // subtraction is always meaningful — no special-casing needed.
+            let hold_ns = now_ns.saturating_sub(last_q);
 
             if hold_ns > self.max_epoch_hold_ns {
                 // First: request cooperative cancellation.
