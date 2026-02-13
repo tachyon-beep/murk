@@ -117,35 +117,11 @@ impl ProductSpace {
 
     /// Sort coordinates by product canonical order (leftmost component slowest).
     ///
-    /// Builds per-component canonical index maps and sorts by the
-    /// resulting rank tuple, matching the odometer iteration order.
+    /// Uses `canonical_rank` for O(1) per-coordinate ranking — no
+    /// full-ordering materialization, so cost scales with the region
+    /// size, not the total space size.
     fn sort_canonical(&self, coords: &mut [Coord]) {
-        use std::collections::HashMap;
-        let index_maps: Vec<HashMap<Coord, usize>> = self
-            .components
-            .iter()
-            .map(|c| {
-                c.canonical_ordering()
-                    .into_iter()
-                    .enumerate()
-                    .map(|(idx, coord)| (coord, idx))
-                    .collect()
-            })
-            .collect();
-
-        coords.sort_by(|a, b| {
-            for i in 0..self.components.len() {
-                let sa = self.split_coord(a, i);
-                let sb = self.split_coord(b, i);
-                let ra = index_maps[i].get(&sa).copied().unwrap_or(usize::MAX);
-                let rb = index_maps[i].get(&sb).copied().unwrap_or(usize::MAX);
-                match ra.cmp(&rb) {
-                    std::cmp::Ordering::Equal => continue,
-                    other => return other,
-                }
-            }
-            std::cmp::Ordering::Equal
-        });
+        coords.sort_by_key(|c| self.canonical_rank(c).unwrap_or(usize::MAX));
     }
 
     /// Compute distance using an alternate metric (not the default L1).
@@ -419,6 +395,21 @@ impl Space for ProductSpace {
             }
         }
         result
+    }
+
+    fn canonical_rank(&self, coord: &Coord) -> Option<usize> {
+        // rank = Σ comp_rank[i] * stride[i]
+        // where stride[i] = product(cell_count[j] for j > i)
+        let n = self.components.len();
+        let mut rank = 0usize;
+        let mut stride = 1usize;
+        for i in (0..n).rev() {
+            let sub = self.split_coord(coord, i);
+            let comp_rank = self.components[i].canonical_rank(&sub)?;
+            rank += comp_rank * stride;
+            stride *= self.components[i].cell_count();
+        }
+        Some(rank)
     }
 
     fn instance_id(&self) -> SpaceInstanceId {

@@ -295,6 +295,19 @@ impl Space for Hex2D {
         out
     }
 
+    fn canonical_rank(&self, coord: &Coord) -> Option<usize> {
+        if coord.len() != 2 {
+            return None;
+        }
+        let q = coord[0];
+        let r = coord[1];
+        if q >= 0 && q < self.cols as i32 && r >= 0 && r < self.rows as i32 {
+            Some(r as usize * self.cols as usize + q as usize)
+        } else {
+            None
+        }
+    }
+
     fn instance_id(&self) -> SpaceInstanceId {
         self.instance_id
     }

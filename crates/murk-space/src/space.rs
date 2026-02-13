@@ -67,6 +67,17 @@ pub trait Space: Any + Send + Sync + 'static {
     /// Used for observation export and replay reproducibility.
     fn canonical_ordering(&self) -> Vec<Coord>;
 
+    /// Position of a coordinate in the canonical ordering.
+    ///
+    /// Returns the index such that `canonical_ordering()[index] == coord`.
+    /// Default implementation performs a linear search; backends should
+    /// override with O(1) arithmetic when possible.
+    fn canonical_rank(&self, coord: &Coord) -> Option<usize> {
+        self.canonical_ordering()
+            .iter()
+            .position(|c| c == coord)
+    }
+
     /// Unique instance identifier for this space object.
     ///
     /// Allocated from a monotonic counter at construction time. Used by

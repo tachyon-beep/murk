@@ -31,6 +31,20 @@ pub(crate) fn check_2d_bounds(
     Ok((r, c))
 }
 
+/// Row-major canonical rank: `rank([r, c]) = r * cols + c`.
+pub(crate) fn canonical_rank_2d(coord: &Coord, rows: u32, cols: u32) -> Option<usize> {
+    if coord.len() != 2 {
+        return None;
+    }
+    let r = coord[0];
+    let c = coord[1];
+    if r >= 0 && r < rows as i32 && c >= 0 && c < cols as i32 {
+        Some(r as usize * cols as usize + c as usize)
+    } else {
+        None
+    }
+}
+
 /// Row-major canonical ordering: `[0,0], [0,1], ..., [rows-1, cols-1]`.
 pub(crate) fn canonical_ordering_2d(rows: u32, cols: u32) -> Vec<Coord> {
     let mut out = Vec::with_capacity((rows as usize) * (cols as usize));

@@ -152,6 +152,10 @@ impl Space for Square8 {
         grid2d::canonical_ordering_2d(self.rows, self.cols)
     }
 
+    fn canonical_rank(&self, coord: &Coord) -> Option<usize> {
+        grid2d::canonical_rank_2d(coord, self.rows, self.cols)
+    }
+
     fn instance_id(&self) -> SpaceInstanceId {
         self.instance_id
     }

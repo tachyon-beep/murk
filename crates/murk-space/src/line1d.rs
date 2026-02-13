@@ -281,6 +281,15 @@ impl Space for Line1D {
         canonical_ordering_1d(self.len)
     }
 
+    fn canonical_rank(&self, coord: &Coord) -> Option<usize> {
+        let i = coord[0];
+        if i >= 0 && i < self.len as i32 {
+            Some(i as usize)
+        } else {
+            None
+        }
+    }
+
     fn instance_id(&self) -> SpaceInstanceId {
         self.instance_id
     }
