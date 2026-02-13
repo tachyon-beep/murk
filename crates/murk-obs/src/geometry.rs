@@ -7,6 +7,17 @@
 
 use murk_space::Space;
 
+/// Grid connectivity type, determines graph-distance metric.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GridConnectivity {
+    /// 4-connected (Square4): graph distance = Manhattan |dr| + |dc|.
+    FourWay,
+    /// 8-connected (Square8): graph distance = Chebyshev max(|dr|, |dc|).
+    EightWay,
+    /// 6-connected hex (Hex2D, axial coords): graph distance = max(|dq|, |dr|, |dq+dr|).
+    Hex,
+}
+
 /// Extracted grid geometry for fast interior/boundary dispatch.
 ///
 /// If the space is a known grid type, we extract its dimensions and
@@ -26,6 +37,8 @@ pub struct GridGeometry {
     pub ndim: usize,
     /// Whether all boundaries wrap (torus topology → all positions interior).
     pub all_wrap: bool,
+    /// Connectivity type for graph-distance computation.
+    pub connectivity: GridConnectivity,
 }
 
 impl GridGeometry {
@@ -43,6 +56,7 @@ impl GridGeometry {
                 coord_strides: vec![sq4.cols() as usize, 1],
                 ndim: 2,
                 all_wrap,
+                connectivity: GridConnectivity::FourWay,
             });
         }
 
@@ -54,6 +68,7 @@ impl GridGeometry {
                 coord_strides: vec![sq8.cols() as usize, 1],
                 ndim: 2,
                 all_wrap,
+                connectivity: GridConnectivity::EightWay,
             });
         }
 
@@ -66,6 +81,7 @@ impl GridGeometry {
                 coord_strides: vec![1, hex.cols() as usize],
                 ndim: 2,
                 all_wrap: false,
+                connectivity: GridConnectivity::Hex,
             });
         }
 
@@ -116,6 +132,33 @@ impl GridGeometry {
             }
         }
         true
+    }
+
+    /// Compute the graph distance from origin for a relative coordinate.
+    ///
+    /// This uses the distance metric appropriate for the grid connectivity:
+    /// - `FourWay`: Manhattan distance `|d0| + |d1| + ...`
+    /// - `EightWay`: Chebyshev distance `max(|d0|, |d1|, ...)`
+    /// - `Hex`: Cube distance `max(|dq|, |dr|, |dq + dr|)` (axial coords)
+    pub fn graph_distance(&self, relative: &[i32]) -> u32 {
+        match self.connectivity {
+            GridConnectivity::FourWay => {
+                relative.iter().map(|&d| d.unsigned_abs()).sum()
+            }
+            GridConnectivity::EightWay => {
+                relative.iter().map(|&d| d.unsigned_abs()).max().unwrap_or(0)
+            }
+            GridConnectivity::Hex => {
+                // Axial coordinates [dq, dr]. Cube distance = max(|dq|, |dr|, |dq+dr|).
+                debug_assert_eq!(relative.len(), 2);
+                let dq = relative[0];
+                let dr = relative[1];
+                let ds = dq + dr; // implicit third axis s = -(q+r)
+                dq.unsigned_abs()
+                    .max(dr.unsigned_abs())
+                    .max(ds.unsigned_abs())
+            }
+        }
     }
 }
 
@@ -240,5 +283,61 @@ mod tests {
         // so center[i] in [3, 16], that's 14 values per axis
         assert_eq!(interior, 196);
         assert!(interior as f64 / 400.0 > 0.45);
+    }
+
+    // ── graph_distance tests ───────────────────────────────
+
+    #[test]
+    fn graph_distance_four_way_manhattan() {
+        let s = Square4::new(10, 10, EdgeBehavior::Absorb).unwrap();
+        let geo = GridGeometry::from_space(&s).unwrap();
+        assert_eq!(geo.graph_distance(&[0, 0]), 0);
+        assert_eq!(geo.graph_distance(&[1, 0]), 1);
+        assert_eq!(geo.graph_distance(&[0, 1]), 1);
+        assert_eq!(geo.graph_distance(&[1, 1]), 2); // Manhattan: |1|+|1|=2
+        assert_eq!(geo.graph_distance(&[-2, 3]), 5);
+    }
+
+    #[test]
+    fn graph_distance_eight_way_chebyshev() {
+        let s = Square8::new(10, 10, EdgeBehavior::Absorb).unwrap();
+        let geo = GridGeometry::from_space(&s).unwrap();
+        assert_eq!(geo.graph_distance(&[0, 0]), 0);
+        assert_eq!(geo.graph_distance(&[1, 1]), 1); // Chebyshev: max(1,1)=1
+        assert_eq!(geo.graph_distance(&[-2, 3]), 3);
+        assert_eq!(geo.graph_distance(&[5, -3]), 5);
+    }
+
+    #[test]
+    fn graph_distance_hex_cube() {
+        let s = Hex2D::new(10, 10).unwrap();
+        let geo = GridGeometry::from_space(&s).unwrap();
+        // Hex distance = max(|dq|, |dr|, |dq+dr|) in axial coords.
+        assert_eq!(geo.graph_distance(&[0, 0]), 0);
+        assert_eq!(geo.graph_distance(&[1, 0]), 1);
+        assert_eq!(geo.graph_distance(&[0, 1]), 1);
+        assert_eq!(geo.graph_distance(&[1, -1]), 1); // Adjacent hex
+        assert_eq!(geo.graph_distance(&[1, 1]), 2); // max(1,1,2)=2
+        assert_eq!(geo.graph_distance(&[-2, -2]), 4); // max(2,2,4)=4
+        assert_eq!(geo.graph_distance(&[2, -1]), 2); // max(2,1,1)=2
+    }
+
+    #[test]
+    fn connectivity_type_correct() {
+        let sq4 = Square4::new(5, 5, EdgeBehavior::Absorb).unwrap();
+        assert_eq!(
+            GridGeometry::from_space(&sq4).unwrap().connectivity,
+            GridConnectivity::FourWay
+        );
+        let sq8 = Square8::new(5, 5, EdgeBehavior::Absorb).unwrap();
+        assert_eq!(
+            GridGeometry::from_space(&sq8).unwrap().connectivity,
+            GridConnectivity::EightWay
+        );
+        let hex = Hex2D::new(5, 5).unwrap();
+        assert_eq!(
+            GridGeometry::from_space(&hex).unwrap().connectivity,
+            GridConnectivity::Hex
+        );
     }
 }

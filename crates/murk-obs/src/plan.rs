@@ -103,6 +103,9 @@ struct TemplateOp {
     /// Precomputed `sum(relative[i] * strides[i])` for interior fast path.
     /// Zero if no `GridGeometry` is available (fallback path only).
     stride_offset: isize,
+    /// Whether this cell is within the disk region (always true for AgentRect).
+    /// For AgentDisk, cells outside the graph-distance radius are excluded.
+    in_disk: bool,
 }
 
 /// Compiled agent-relative entry for the Standard plan class.
@@ -384,6 +387,7 @@ impl ObsPlan {
                         &half_ext,
                         *radius,
                         &geometry,
+                        Some(*radius),
                         output_offset,
                         mask_offset,
                     )?;
@@ -401,6 +405,7 @@ impl ObsPlan {
                         half_extent,
                         radius,
                         &geometry,
+                        None,
                         output_offset,
                         mask_offset,
                     )?;
@@ -432,12 +437,16 @@ impl ObsPlan {
     }
 
     /// Compile a single agent-relative entry into a template.
+    ///
+    /// `disk_radius`: if `Some(r)`, template ops outside graph-distance `r`
+    /// are marked `in_disk = false` (for `AgentDisk`). `None` for `AgentRect`.
     fn compile_agent_entry(
         entry_idx: usize,
         entry: &crate::spec::ObsEntry,
         half_extent: &[u32],
         radius: u32,
         geometry: &Option<GridGeometry>,
+        disk_radius: Option<u32>,
         output_offset: usize,
         mask_offset: usize,
     ) -> Result<(AgentCompiledEntry, Vec<usize>), ObsError> {
@@ -445,8 +454,7 @@ impl ObsPlan {
             half_extent.iter().map(|&he| 2 * he as usize + 1).collect();
         let pre_pool_element_count: usize = pre_pool_shape.iter().product();
 
-        let strides = geometry.as_ref().map(|g| g.coord_strides.as_slice());
-        let template_ops = generate_template_ops(half_extent, strides);
+        let template_ops = generate_template_ops(half_extent, geometry, disk_radius);
 
         let (element_count, output_shape) = if let Some(pool) = &entry.pool {
             if pre_pool_shape.len() != 2 {
@@ -766,6 +774,19 @@ impl ObsPlan {
             });
         }
 
+        // Validate agent center dimensionality.
+        let expected_ndim = space.ndim();
+        for (i, center) in agent_centers.iter().enumerate() {
+            if center.len() != expected_ndim {
+                return Err(ObsError::ExecutionFailed {
+                    reason: format!(
+                        "agent_centers[{i}] has {} dimensions, but space requires {expected_ndim}",
+                        center.len()
+                    ),
+                });
+            }
+        }
+
         // Generation check.
         if let Some(compiled_gen) = self.compiled_generation {
             let snapshot_gen = snapshot.world_generation_id();
@@ -946,16 +967,24 @@ fn execute_agent_entry_direct(
         // FAST PATH: all cells in-bounds, branchless stride arithmetic.
         let geo = geometry.as_ref().unwrap();
         let base_rank = geo.canonical_rank(center) as isize;
+        let mut valid = 0;
         for op in &entry.template_ops {
+            if !op.in_disk {
+                continue;
+            }
             let field_idx = (base_rank + op.stride_offset) as usize;
             out_slice[op.tensor_idx] = apply_transform(field_data[field_idx], &entry.transform);
+            mask_slice[op.tensor_idx] = 1;
+            valid += 1;
         }
-        mask_slice.fill(1);
-        entry.element_count
+        valid
     } else {
         // SLOW PATH: bounds-check each offset (or modular wrap for torus).
         let mut valid = 0;
         for op in &entry.template_ops {
+            if !op.in_disk {
+                continue;
+            }
             let field_idx = resolve_field_index(center, &op.relative, geometry, space);
             if let Some(idx) = field_idx {
                 if idx < field_data.len() {
@@ -988,12 +1017,18 @@ fn execute_agent_entry_pooled(
         let geo = geometry.as_ref().unwrap();
         let base_rank = geo.canonical_rank(center) as isize;
         for op in &entry.template_ops {
+            if !op.in_disk {
+                continue;
+            }
             let field_idx = (base_rank + op.stride_offset) as usize;
             scratch[op.tensor_idx] = field_data[field_idx];
             scratch_mask[op.tensor_idx] = 1;
         }
     } else {
         for op in &entry.template_ops {
+            if !op.in_disk {
+                continue;
+            }
             let field_idx = resolve_field_index(center, &op.relative, geometry, space);
             if let Some(idx) = field_idx {
                 if idx < field_data.len() {
@@ -1029,10 +1064,20 @@ fn execute_agent_entry_pooled(
 ///
 /// If `strides` is provided (from `GridGeometry`), each op gets a precomputed
 /// `stride_offset` for the interior fast path.
-fn generate_template_ops(half_extent: &[u32], strides: Option<&[usize]>) -> Vec<TemplateOp> {
+///
+/// If `disk_radius` is `Some(r)`, cells with graph distance > `r` are marked
+/// `in_disk = false`. The `geometry` is required to compute graph distance.
+/// When `geometry` is `None`, all cells are treated as in-disk (conservative).
+fn generate_template_ops(
+    half_extent: &[u32],
+    geometry: &Option<GridGeometry>,
+    disk_radius: Option<u32>,
+) -> Vec<TemplateOp> {
     let ndim = half_extent.len();
     let shape: Vec<usize> = half_extent.iter().map(|&he| 2 * he as usize + 1).collect();
     let total: usize = shape.iter().product();
+
+    let strides = geometry.as_ref().map(|g| g.coord_strides.as_slice());
 
     let mut ops = Vec::with_capacity(total);
 
@@ -1058,10 +1103,19 @@ fn generate_template_ops(half_extent: &[u32], strides: Option<&[usize]>) -> Vec<
             })
             .unwrap_or(0);
 
+        let in_disk = match disk_radius {
+            Some(r) => match geometry {
+                Some(geo) => geo.graph_distance(&relative) <= r,
+                None => true, // no geometry → conservative (include all)
+            },
+            None => true, // AgentRect → all cells valid
+        };
+
         ops.push(TemplateOp {
             relative,
             tensor_idx,
             stride_offset,
+            in_disk,
         });
     }
 
@@ -1137,7 +1191,7 @@ mod tests {
     use super::*;
     use crate::spec::{ObsDtype, ObsEntry, ObsRegion, ObsSpec, ObsTransform, PoolConfig, PoolKernel};
     use murk_core::{FieldId, ParameterVersion, TickId, WorldGenerationId};
-    use murk_space::{EdgeBehavior, Hex2D, RegionSpec, Square4};
+    use murk_space::{EdgeBehavior, Hex2D, RegionSpec, Square4, Square8};
     use murk_test_utils::MockSnapshot;
 
     fn square4_space() -> Square4 {
@@ -1909,7 +1963,7 @@ mod tests {
             }],
         };
         let result = ObsPlan::compile(&spec, &space).unwrap();
-        assert_eq!(result.output_len, 25); // 5x5
+        assert_eq!(result.output_len, 25); // 5x5 bounding box (tensor shape)
 
         // Interior agent: q=10, r=10
         let center: Coord = smallvec::smallvec![10, 10];
@@ -1920,8 +1974,23 @@ mod tests {
             .execute_agents(&snap, &space, &[center], None, &mut output, &mut mask)
             .unwrap();
 
-        // All 25 cells should be valid (interior agent).
-        assert!(mask.iter().all(|&v| v == 1));
+        // Hex disk of radius 2: 19 of 25 cells are within hex distance.
+        // The 6 corners of the 5x5 bounding box exceed hex distance 2.
+        // Hex distance = max(|dq|, |dr|, |dq+dr|) for axial coordinates.
+        let valid_count = mask.iter().filter(|&&v| v == 1).count();
+        assert_eq!(valid_count, 19);
+
+        // Corners that should be masked out (distance > 2):
+        // tensor_idx 0: dq=-2,dr=-2 → max(2,2,4)=4
+        // tensor_idx 1: dq=-2,dr=-1 → max(2,1,3)=3
+        // tensor_idx 5: dq=-1,dr=-2 → max(1,2,3)=3
+        // tensor_idx 19: dq=+1,dr=+2 → max(1,2,3)=3
+        // tensor_idx 23: dq=+2,dr=+1 → max(2,1,3)=3
+        // tensor_idx 24: dq=+2,dr=+2 → max(2,2,4)=4
+        for &idx in &[0, 1, 5, 19, 23, 24] {
+            assert_eq!(mask[idx], 0, "tensor_idx {idx} should be outside hex disk");
+            assert_eq!(output[idx], 0.0, "tensor_idx {idx} should be zero-padded");
+        }
 
         // Center cell is at tensor_idx = 2*5+2 = 12 (relative [0,0]).
         // Hex2D canonical_rank([q,r]) = r*cols + q = 10*20 + 10 = 210
@@ -2141,5 +2210,152 @@ mod tests {
         // Agent entry: 3x3 centered on (5,5). Center at tensor_idx = 1*3+1 = 4.
         // rank(5,5) = 55
         assert_eq!(output[100 + 4], 55.0);
+    }
+
+    #[test]
+    fn wrong_dimensionality_returns_error() {
+        // 2D space but 1D agent center → should error, not panic.
+        let space = Square4::new(10, 10, EdgeBehavior::Absorb).unwrap();
+        let data: Vec<f32> = (0..100).map(|x| x as f32).collect();
+        let snap = snapshot_with_field(FieldId(0), data);
+
+        let spec = ObsSpec {
+            entries: vec![ObsEntry {
+                field_id: FieldId(0),
+                region: ObsRegion::AgentDisk { radius: 1 },
+                pool: None,
+                transform: ObsTransform::Identity,
+                dtype: ObsDtype::F32,
+            }],
+        };
+        let result = ObsPlan::compile(&spec, &space).unwrap();
+
+        let bad_center: Coord = smallvec::smallvec![5]; // 1D, not 2D
+        let mut output = vec![0.0f32; result.output_len];
+        let mut mask = vec![0u8; result.mask_len];
+        let err = result
+            .plan
+            .execute_agents(&snap, &space, &[bad_center], None, &mut output, &mut mask);
+        assert!(err.is_err());
+        let msg = format!("{}", err.unwrap_err());
+        assert!(msg.contains("dimensions"), "error should mention dimensions: {msg}");
+    }
+
+    #[test]
+    fn agent_disk_square4_filters_corners() {
+        // On a 4-connected grid, AgentDisk radius=2 should use Manhattan distance.
+        // Bounding box is 5x5 = 25, but Manhattan disk has 13 cells (diamond shape).
+        let space = Square4::new(20, 20, EdgeBehavior::Absorb).unwrap();
+        let data: Vec<f32> = (0..400).map(|x| x as f32).collect();
+        let snap = snapshot_with_field(FieldId(0), data);
+
+        let spec = ObsSpec {
+            entries: vec![ObsEntry {
+                field_id: FieldId(0),
+                region: ObsRegion::AgentDisk { radius: 2 },
+                pool: None,
+                transform: ObsTransform::Identity,
+                dtype: ObsDtype::F32,
+            }],
+        };
+        let result = ObsPlan::compile(&spec, &space).unwrap();
+        assert_eq!(result.output_len, 25); // tensor shape is still 5x5
+
+        // Interior agent at (10, 10).
+        let center: Coord = smallvec::smallvec![10, 10];
+        let mut output = vec![0.0f32; 25];
+        let mut mask = vec![0u8; 25];
+        result
+            .plan
+            .execute_agents(&snap, &space, &[center], None, &mut output, &mut mask)
+            .unwrap();
+
+        // Manhattan distance disk of radius 2 on a 5x5 bounding box:
+        //   . . X . .    (row -2: only center col)
+        //   . X X X .    (row -1: 3 cells)
+        //   X X X X X    (row  0: 5 cells)
+        //   . X X X .    (row +1: 3 cells)
+        //   . . X . .    (row +2: only center col)
+        // Total: 1 + 3 + 5 + 3 + 1 = 13 cells
+        let valid_count = mask.iter().filter(|&&v| v == 1).count();
+        assert_eq!(valid_count, 13, "Manhattan disk radius=2 should have 13 cells");
+
+        // Corners should be masked out: (dr,dc) where |dr|+|dc| > 2
+        // tensor_idx 0: dr=-2,dc=-2 → dist=4 → OUT
+        // tensor_idx 4: dr=-2,dc=+2 → dist=4 → OUT
+        // tensor_idx 20: dr=+2,dc=-2 → dist=4 → OUT
+        // tensor_idx 24: dr=+2,dc=+2 → dist=4 → OUT
+        for &idx in &[0, 4, 20, 24] {
+            assert_eq!(mask[idx], 0, "corner tensor_idx {idx} should be outside disk");
+        }
+
+        // Center cell: tensor_idx = 2*5+2 = 12, absolute = row 10 * 20 + col 10 = 210
+        assert_eq!(output[12], 210.0);
+        assert_eq!(mask[12], 1);
+    }
+
+    #[test]
+    fn agent_rect_no_disk_filtering() {
+        // AgentRect should NOT filter any cells — full rectangle is valid.
+        let space = Square4::new(20, 20, EdgeBehavior::Absorb).unwrap();
+        let data: Vec<f32> = (0..400).map(|x| x as f32).collect();
+        let snap = snapshot_with_field(FieldId(0), data);
+
+        let spec = ObsSpec {
+            entries: vec![ObsEntry {
+                field_id: FieldId(0),
+                region: ObsRegion::AgentRect {
+                    half_extent: smallvec::smallvec![2, 2],
+                },
+                pool: None,
+                transform: ObsTransform::Identity,
+                dtype: ObsDtype::F32,
+            }],
+        };
+        let result = ObsPlan::compile(&spec, &space).unwrap();
+
+        let center: Coord = smallvec::smallvec![10, 10];
+        let mut output = vec![0.0f32; 25];
+        let mut mask = vec![0u8; 25];
+        result
+            .plan
+            .execute_agents(&snap, &space, &[center], None, &mut output, &mut mask)
+            .unwrap();
+
+        // All 25 cells should be valid for AgentRect (no disk filtering).
+        assert!(mask.iter().all(|&v| v == 1));
+    }
+
+    #[test]
+    fn agent_disk_square8_chebyshev() {
+        // On an 8-connected grid, AgentDisk radius=1 uses Chebyshev distance.
+        // Bounding box is 3x3 = 9, Chebyshev disk radius=1 = full 3x3 → 9 cells.
+        let space = Square8::new(10, 10, EdgeBehavior::Absorb).unwrap();
+        let data: Vec<f32> = (0..100).map(|x| x as f32).collect();
+        let snap = snapshot_with_field(FieldId(0), data);
+
+        let spec = ObsSpec {
+            entries: vec![ObsEntry {
+                field_id: FieldId(0),
+                region: ObsRegion::AgentDisk { radius: 1 },
+                pool: None,
+                transform: ObsTransform::Identity,
+                dtype: ObsDtype::F32,
+            }],
+        };
+        let result = ObsPlan::compile(&spec, &space).unwrap();
+        assert_eq!(result.output_len, 9);
+
+        let center: Coord = smallvec::smallvec![5, 5];
+        let mut output = vec![0.0f32; 9];
+        let mut mask = vec![0u8; 9];
+        result
+            .plan
+            .execute_agents(&snap, &space, &[center], None, &mut output, &mut mask)
+            .unwrap();
+
+        // Chebyshev distance <= 1 covers full 3x3 = 9 cells (all corners included).
+        let valid_count = mask.iter().filter(|&&v| v == 1).count();
+        assert_eq!(valid_count, 9, "Chebyshev disk radius=1 = full 3x3");
     }
 }
