@@ -9,7 +9,7 @@ use std::sync::Mutex;
 
 use murk_core::{BoundaryBehavior, FieldDef, FieldMutability, FieldType};
 use murk_propagator::Propagator;
-use murk_space::{EdgeBehavior, Line1D, Ring1D, Space, Square4, Square8};
+use murk_space::{EdgeBehavior, Hex2D, Line1D, ProductSpace, Ring1D, Space, Square4, Square8};
 
 use crate::handle::HandleTable;
 use crate::status::MurkStatus;
@@ -73,12 +73,95 @@ pub extern "C" fn murk_config_destroy(handle: u64) -> i32 {
     }
 }
 
+/// Parse a space from its type tag and parameter slice.
+///
+/// Returns `None` if the type or parameters are invalid.
+fn parse_space(space_type: i32, p: &[f64]) -> Option<Box<dyn Space>> {
+    match space_type {
+        x if x == MurkSpaceType::Line1D as i32 => {
+            if p.len() < 2 {
+                return None;
+            }
+            let len = p[0] as u32;
+            let edge = parse_edge_behavior(p[1] as i32)?;
+            Line1D::new(len, edge).ok().map(|s| Box::new(s) as Box<dyn Space>)
+        }
+        x if x == MurkSpaceType::Ring1D as i32 => {
+            if p.is_empty() {
+                return None;
+            }
+            let len = p[0] as u32;
+            Ring1D::new(len).ok().map(|s| Box::new(s) as Box<dyn Space>)
+        }
+        x if x == MurkSpaceType::Square4 as i32 => {
+            if p.len() < 3 {
+                return None;
+            }
+            let w = p[0] as u32;
+            let h = p[1] as u32;
+            let edge = parse_edge_behavior(p[2] as i32)?;
+            Square4::new(w, h, edge).ok().map(|s| Box::new(s) as Box<dyn Space>)
+        }
+        x if x == MurkSpaceType::Square8 as i32 => {
+            if p.len() < 3 {
+                return None;
+            }
+            let w = p[0] as u32;
+            let h = p[1] as u32;
+            let edge = parse_edge_behavior(p[2] as i32)?;
+            Square8::new(w, h, edge).ok().map(|s| Box::new(s) as Box<dyn Space>)
+        }
+        x if x == MurkSpaceType::Hex2D as i32 => {
+            // params = [cols, rows]
+            if p.len() < 2 {
+                return None;
+            }
+            let cols = p[0] as u32;
+            let rows = p[1] as u32;
+            Hex2D::new(rows, cols).ok().map(|s| Box::new(s) as Box<dyn Space>)
+        }
+        x if x == MurkSpaceType::ProductSpace as i32 => {
+            // params = [n_components, type_0, n_params_0, p0_0, ..., type_1, n_params_1, p1_0, ...]
+            if p.is_empty() {
+                return None;
+            }
+            let n_components = p[0] as usize;
+            if n_components == 0 {
+                return None;
+            }
+            let mut components: Vec<Box<dyn Space>> = Vec::with_capacity(n_components);
+            let mut offset = 1;
+            for _ in 0..n_components {
+                if offset + 2 > p.len() {
+                    return None;
+                }
+                let comp_type = p[offset] as i32;
+                let n_comp_params = p[offset + 1] as usize;
+                offset += 2;
+                if offset + n_comp_params > p.len() {
+                    return None;
+                }
+                let comp_params = &p[offset..offset + n_comp_params];
+                offset += n_comp_params;
+                let comp = parse_space(comp_type, comp_params)?;
+                components.push(comp);
+            }
+            ProductSpace::new(components)
+                .ok()
+                .map(|s| Box::new(s) as Box<dyn Space>)
+        }
+        _ => None,
+    }
+}
+
 /// Set the spatial topology for the config.
 ///
 /// `params` is an array of `n_params` f64 values interpreted per space type:
 /// - Line1D: \[length, edge_behavior\]
 /// - Ring1D: \[length\]
 /// - Square4/Square8: \[width, height, edge_behavior\]
+/// - Hex2D: \[cols, rows\]
+/// - ProductSpace: \[n_components, type_0, n_params_0, p0_0, ..., type_1, n_params_1, p1_0, ...\]
 ///
 /// Edge behavior: 0=Absorb, 1=Clamp, 2=Wrap.
 #[no_mangle]
@@ -99,62 +182,9 @@ pub extern "C" fn murk_config_set_space(
         &[]
     };
 
-    let space: Box<dyn Space> = match space_type {
-        x if x == MurkSpaceType::Line1D as i32 => {
-            if p.len() < 2 {
-                return MurkStatus::InvalidArgument as i32;
-            }
-            let len = p[0] as u32;
-            let edge = match parse_edge_behavior(p[1] as i32) {
-                Some(e) => e,
-                None => return MurkStatus::InvalidArgument as i32,
-            };
-            match Line1D::new(len, edge) {
-                Ok(s) => Box::new(s),
-                Err(_) => return MurkStatus::InvalidArgument as i32,
-            }
-        }
-        x if x == MurkSpaceType::Ring1D as i32 => {
-            if p.is_empty() {
-                return MurkStatus::InvalidArgument as i32;
-            }
-            let len = p[0] as u32;
-            match Ring1D::new(len) {
-                Ok(s) => Box::new(s),
-                Err(_) => return MurkStatus::InvalidArgument as i32,
-            }
-        }
-        x if x == MurkSpaceType::Square4 as i32 => {
-            if p.len() < 3 {
-                return MurkStatus::InvalidArgument as i32;
-            }
-            let w = p[0] as u32;
-            let h = p[1] as u32;
-            let edge = match parse_edge_behavior(p[2] as i32) {
-                Some(e) => e,
-                None => return MurkStatus::InvalidArgument as i32,
-            };
-            match Square4::new(w, h, edge) {
-                Ok(s) => Box::new(s),
-                Err(_) => return MurkStatus::InvalidArgument as i32,
-            }
-        }
-        x if x == MurkSpaceType::Square8 as i32 => {
-            if p.len() < 3 {
-                return MurkStatus::InvalidArgument as i32;
-            }
-            let w = p[0] as u32;
-            let h = p[1] as u32;
-            let edge = match parse_edge_behavior(p[2] as i32) {
-                Some(e) => e,
-                None => return MurkStatus::InvalidArgument as i32,
-            };
-            match Square8::new(w, h, edge) {
-                Ok(s) => Box::new(s),
-                Err(_) => return MurkStatus::InvalidArgument as i32,
-            }
-        }
-        _ => return MurkStatus::InvalidArgument as i32,
+    let space = match parse_space(space_type, p) {
+        Some(s) => s,
+        None => return MurkStatus::InvalidArgument as i32,
     };
 
     let mut table = CONFIGS.lock().unwrap();

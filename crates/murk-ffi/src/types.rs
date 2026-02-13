@@ -12,6 +12,10 @@ pub enum MurkSpaceType {
     Square4 = 2,
     /// 2D grid, 8-connected (+ diagonals).
     Square8 = 3,
+    /// 2D hexagonal lattice, 6-connected (pointy-top).
+    Hex2D = 4,
+    /// Cartesian product of arbitrary spaces.
+    ProductSpace = 5,
 }
 
 /// Field allocation strategy across ticks.

@@ -29,6 +29,11 @@ pub enum SpaceError {
         /// The maximum allowed value.
         max: u32,
     },
+    /// A space composition is invalid (e.g. empty component list, overflow).
+    InvalidComposition {
+        /// What went wrong.
+        reason: String,
+    },
 }
 
 impl fmt::Display for SpaceError {
@@ -43,6 +48,9 @@ impl fmt::Display for SpaceError {
             Self::EmptySpace => write!(f, "space must have at least one cell"),
             Self::DimensionTooLarge { name, value, max } => {
                 write!(f, "{name} ({value}) exceeds maximum ({max})")
+            }
+            Self::InvalidComposition { reason } => {
+                write!(f, "invalid composition: {reason}")
             }
         }
     }
