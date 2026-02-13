@@ -19,8 +19,9 @@ use crate::types::MurkWriteMode;
 pub struct MurkWriteDecl {
     /// Field ID to write.
     pub field_id: u32,
-    /// Write mode (Full or Incremental).
-    pub mode: MurkWriteMode,
+    /// Write mode (0 = Full, 1 = Incremental).
+    /// Stored as raw i32 to prevent UB from invalid C discriminators.
+    pub mode: i32,
 }
 
 /// C-side step context — flat struct with function pointers for field access.
@@ -68,8 +69,8 @@ pub struct MurkPropagatorDef {
     pub writes: *const MurkWriteDecl,
     /// Length of `writes` array.
     pub n_writes: usize,
-    /// Step function called each tick.
-    pub step_fn: unsafe extern "C" fn(*mut c_void, *const MurkStepContext) -> i32,
+    /// Step function called each tick (must not be null).
+    pub step_fn: Option<unsafe extern "C" fn(*mut c_void, *const MurkStepContext) -> i32>,
     /// User data pointer passed to `step_fn`.
     pub user_data: *mut c_void,
     /// Scratch memory bytes required.
@@ -223,13 +224,21 @@ pub extern "C" fn murk_propagator_create(
         return MurkStatus::InvalidArgument as i32;
     }
 
+    let step_fn = match def.step_fn {
+        Some(f) => f,
+        None => return MurkStatus::InvalidArgument as i32,
+    };
+
     let name = match unsafe { CStr::from_ptr(def.name) }.to_str() {
         Ok(s) => s.to_owned(),
         Err(_) => return MurkStatus::InvalidArgument as i32,
     };
 
     let mut reads = FieldSet::empty();
-    if !def.reads.is_null() && def.n_reads > 0 {
+    if def.n_reads > 0 {
+        if def.reads.is_null() {
+            return MurkStatus::InvalidArgument as i32;
+        }
         let slice = unsafe { std::slice::from_raw_parts(def.reads, def.n_reads) };
         for &id in slice {
             reads.insert(FieldId(id));
@@ -237,7 +246,10 @@ pub extern "C" fn murk_propagator_create(
     }
 
     let mut reads_previous = FieldSet::empty();
-    if !def.reads_previous.is_null() && def.n_reads_previous > 0 {
+    if def.n_reads_previous > 0 {
+        if def.reads_previous.is_null() {
+            return MurkStatus::InvalidArgument as i32;
+        }
         let slice =
             unsafe { std::slice::from_raw_parts(def.reads_previous, def.n_reads_previous) };
         for &id in slice {
@@ -246,10 +258,18 @@ pub extern "C" fn murk_propagator_create(
     }
 
     let mut writes = Vec::new();
-    if !def.writes.is_null() && def.n_writes > 0 {
+    if def.n_writes > 0 {
+        if def.writes.is_null() {
+            return MurkStatus::InvalidArgument as i32;
+        }
         let slice = unsafe { std::slice::from_raw_parts(def.writes, def.n_writes) };
         for decl in slice {
-            writes.push((FieldId(decl.field_id), decl.mode.to_core()));
+            let mode = match decl.mode {
+                x if x == MurkWriteMode::Full as i32 => WriteMode::Full,
+                x if x == MurkWriteMode::Incremental as i32 => WriteMode::Incremental,
+                _ => return MurkStatus::InvalidArgument as i32,
+            };
+            writes.push((FieldId(decl.field_id), mode));
         }
     }
 
@@ -258,7 +278,7 @@ pub extern "C" fn murk_propagator_create(
         reads,
         reads_previous,
         writes,
-        step_fn: def.step_fn,
+        step_fn,
         user_data: def.user_data,
         scratch: def.scratch_bytes,
     };
@@ -302,7 +322,7 @@ mod tests {
     ) -> (Vec<MurkWriteDecl>, MurkPropagatorDef) {
         let writes = vec![MurkWriteDecl {
             field_id: 0,
-            mode: MurkWriteMode::Full,
+            mode: MurkWriteMode::Full as i32,
         }];
         let def = MurkPropagatorDef {
             name: name.as_ptr(),
@@ -312,7 +332,7 @@ mod tests {
             n_reads_previous: 0,
             writes: writes.as_ptr(),
             n_writes: writes.len(),
-            step_fn,
+            step_fn: Some(step_fn),
             user_data: std::ptr::null_mut(),
             scratch_bytes: 0,
         };
@@ -343,11 +363,11 @@ mod tests {
         let writes = vec![
             MurkWriteDecl {
                 field_id: 2,
-                mode: MurkWriteMode::Full,
+                mode: MurkWriteMode::Full as i32,
             },
             MurkWriteDecl {
                 field_id: 3,
-                mode: MurkWriteMode::Incremental,
+                mode: MurkWriteMode::Incremental as i32,
             },
         ];
         let def = MurkPropagatorDef {
@@ -358,7 +378,7 @@ mod tests {
             n_reads_previous: 0,
             writes: writes.as_ptr(),
             n_writes: 2,
-            step_fn: test_step_fn,
+            step_fn: Some(test_step_fn),
             user_data: std::ptr::null_mut(),
             scratch_bytes: 64,
         };
@@ -386,6 +406,106 @@ mod tests {
         let mut handle: u64 = 0;
         assert_eq!(
             murk_propagator_create(std::ptr::null(), &mut handle),
+            MurkStatus::InvalidArgument as i32
+        );
+    }
+
+    #[test]
+    fn null_step_fn_returns_invalid_argument() {
+        let name = CString::new("bad").unwrap();
+        let writes = vec![MurkWriteDecl {
+            field_id: 0,
+            mode: MurkWriteMode::Full as i32,
+        }];
+        let def = MurkPropagatorDef {
+            name: name.as_ptr(),
+            reads: std::ptr::null(),
+            n_reads: 0,
+            reads_previous: std::ptr::null(),
+            n_reads_previous: 0,
+            writes: writes.as_ptr(),
+            n_writes: 1,
+            step_fn: None,
+            user_data: std::ptr::null_mut(),
+            scratch_bytes: 0,
+        };
+        let mut handle: u64 = 0;
+        assert_eq!(
+            murk_propagator_create(&def, &mut handle),
+            MurkStatus::InvalidArgument as i32
+        );
+    }
+
+    #[test]
+    fn null_reads_with_nonzero_count_returns_invalid_argument() {
+        let name = CString::new("bad_reads").unwrap();
+        let writes = vec![MurkWriteDecl {
+            field_id: 0,
+            mode: MurkWriteMode::Full as i32,
+        }];
+        let def = MurkPropagatorDef {
+            name: name.as_ptr(),
+            reads: std::ptr::null(),
+            n_reads: 3, // mismatch: count > 0 but pointer is null
+            reads_previous: std::ptr::null(),
+            n_reads_previous: 0,
+            writes: writes.as_ptr(),
+            n_writes: 1,
+            step_fn: Some(test_step_fn),
+            user_data: std::ptr::null_mut(),
+            scratch_bytes: 0,
+        };
+        let mut handle: u64 = 0;
+        assert_eq!(
+            murk_propagator_create(&def, &mut handle),
+            MurkStatus::InvalidArgument as i32
+        );
+    }
+
+    #[test]
+    fn null_writes_with_nonzero_count_returns_invalid_argument() {
+        let name = CString::new("bad_writes").unwrap();
+        let def = MurkPropagatorDef {
+            name: name.as_ptr(),
+            reads: std::ptr::null(),
+            n_reads: 0,
+            reads_previous: std::ptr::null(),
+            n_reads_previous: 0,
+            writes: std::ptr::null(),
+            n_writes: 2, // mismatch
+            step_fn: Some(test_step_fn),
+            user_data: std::ptr::null_mut(),
+            scratch_bytes: 0,
+        };
+        let mut handle: u64 = 0;
+        assert_eq!(
+            murk_propagator_create(&def, &mut handle),
+            MurkStatus::InvalidArgument as i32
+        );
+    }
+
+    #[test]
+    fn invalid_write_mode_returns_invalid_argument() {
+        let name = CString::new("bad_mode").unwrap();
+        let writes = vec![MurkWriteDecl {
+            field_id: 0,
+            mode: 999, // invalid write mode
+        }];
+        let def = MurkPropagatorDef {
+            name: name.as_ptr(),
+            reads: std::ptr::null(),
+            n_reads: 0,
+            reads_previous: std::ptr::null(),
+            n_reads_previous: 0,
+            writes: writes.as_ptr(),
+            n_writes: 1,
+            step_fn: Some(test_step_fn),
+            user_data: std::ptr::null_mut(),
+            scratch_bytes: 0,
+        };
+        let mut handle: u64 = 0;
+        assert_eq!(
+            murk_propagator_create(&def, &mut handle),
             MurkStatus::InvalidArgument as i32
         );
     }

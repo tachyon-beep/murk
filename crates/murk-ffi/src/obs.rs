@@ -276,7 +276,7 @@ mod tests {
         let prop_name = CString::new("seq").unwrap();
         let writes = [MurkWriteDecl {
             field_id: 0,
-            mode: MurkWriteMode::Full,
+            mode: MurkWriteMode::Full as i32,
         }];
         let def = MurkPropagatorDef {
             name: prop_name.as_ptr(),
@@ -286,7 +286,7 @@ mod tests {
             n_reads_previous: 0,
             writes: writes.as_ptr(),
             n_writes: 1,
-            step_fn: const_step,
+            step_fn: Some(const_step),
             user_data: std::ptr::null_mut(),
             scratch_bytes: 0,
         };

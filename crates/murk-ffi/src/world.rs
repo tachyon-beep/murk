@@ -403,7 +403,7 @@ mod tests {
         let prop_name = CString::new("const7").unwrap();
         let writes = [MurkWriteDecl {
             field_id: 0,
-            mode: MurkWriteMode::Full,
+            mode: MurkWriteMode::Full as i32,
         }];
         let def = MurkPropagatorDef {
             name: prop_name.as_ptr(),
@@ -413,7 +413,7 @@ mod tests {
             n_reads_previous: 0,
             writes: writes.as_ptr(),
             n_writes: 1,
-            step_fn: const_step_fn,
+            step_fn: Some(const_step_fn),
             user_data: std::ptr::null_mut(),
             scratch_bytes: 0,
         };
@@ -475,7 +475,7 @@ mod tests {
         let world_h = create_test_world();
 
         let cmd = MurkCommand {
-            command_type: MurkCommandType::SetParameter,
+            command_type: MurkCommandType::SetParameter as i32,
             expires_after_tick: 100,
             source_id: 0,
             source_seq: 0,

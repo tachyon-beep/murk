@@ -73,13 +73,3 @@ pub enum MurkEdgeBehavior {
     /// Wrap: periodic boundary.
     Wrap = 2,
 }
-
-impl MurkWriteMode {
-    /// Convert to the core `WriteMode` enum.
-    pub(crate) fn to_core(self) -> murk_propagator::propagator::WriteMode {
-        match self {
-            Self::Full => murk_propagator::propagator::WriteMode::Full,
-            Self::Incremental => murk_propagator::propagator::WriteMode::Incremental,
-        }
-    }
-}

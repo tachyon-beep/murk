@@ -25,8 +25,9 @@ pub enum MurkCommandType {
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct MurkCommand {
-    /// Command variant.
-    pub command_type: MurkCommandType,
+    /// Command variant (0 = SetParameter, 1 = SetField).
+    /// Stored as raw i32 to prevent UB from invalid C discriminators.
+    pub command_type: i32,
     /// Command expires if not applied by this tick.
     pub expires_after_tick: u64,
     /// Optional source identifier (0 = none).
@@ -66,11 +67,11 @@ pub struct MurkReceipt {
 /// Convert a C `MurkCommand` to a Rust `Command`.
 pub(crate) fn convert_command(cmd: &MurkCommand, index: usize) -> Result<Command, MurkStatus> {
     let payload = match cmd.command_type {
-        MurkCommandType::SetParameter => CommandPayload::SetParameter {
+        x if x == MurkCommandType::SetParameter as i32 => CommandPayload::SetParameter {
             key: ParameterKey(cmd.param_key),
             value: cmd.double_value,
         },
-        MurkCommandType::SetField => {
+        x if x == MurkCommandType::SetField as i32 => {
             let ndim = cmd.coord_ndim as usize;
             if ndim == 0 || ndim > 4 {
                 return Err(MurkStatus::InvalidArgument);
@@ -85,6 +86,7 @@ pub(crate) fn convert_command(cmd: &MurkCommand, index: usize) -> Result<Command
                 value: cmd.float_value,
             }
         }
+        _ => return Err(MurkStatus::InvalidArgument),
     };
 
     Ok(Command {
@@ -125,7 +127,7 @@ mod tests {
     #[test]
     fn convert_set_parameter_round_trip() {
         let cmd = MurkCommand {
-            command_type: MurkCommandType::SetParameter,
+            command_type: MurkCommandType::SetParameter as i32,
             expires_after_tick: 100,
             source_id: 5,
             source_seq: 10,
@@ -154,7 +156,7 @@ mod tests {
     #[test]
     fn convert_set_field_round_trip() {
         let cmd = MurkCommand {
-            command_type: MurkCommandType::SetField,
+            command_type: MurkCommandType::SetField as i32,
             expires_after_tick: 50,
             source_id: 0,
             source_seq: 0,
@@ -187,8 +189,29 @@ mod tests {
     #[test]
     fn convert_set_field_zero_ndim_errors() {
         let cmd = MurkCommand {
-            command_type: MurkCommandType::SetField,
+            command_type: MurkCommandType::SetField as i32,
             expires_after_tick: 10,
+            source_id: 0,
+            source_seq: 0,
+            priority_class: 0,
+            field_id: 0,
+            param_key: 0,
+            float_value: 0.0,
+            double_value: 0.0,
+            coord: [0; 4],
+            coord_ndim: 0,
+        };
+        assert_eq!(
+            convert_command(&cmd, 0).unwrap_err(),
+            MurkStatus::InvalidArgument
+        );
+    }
+
+    #[test]
+    fn invalid_command_type_returns_invalid_argument() {
+        let cmd = MurkCommand {
+            command_type: 999,
+            expires_after_tick: 0,
             source_id: 0,
             source_seq: 0,
             priority_class: 0,
