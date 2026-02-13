@@ -13,6 +13,7 @@ murk-engine = { path = "../murk-engine" }
 murk-obs = { path = "../murk-obs" }
 murk-space = { path = "../murk-space" }
 murk-propagator = { path = "../murk-propagator" }
+smallvec = { workspace = true }
 
 [dev-dependencies]
 murk-test-utils = { path = "../murk-test-utils" }

@@ -23,11 +23,14 @@
 #![forbid(unsafe_code)]
 
 pub mod cache;
+pub mod flatbuf;
+pub mod geometry;
 pub mod metadata;
 pub mod plan;
+pub mod pool;
 pub mod spec;
 
 pub use cache::ObsPlanCache;
 pub use metadata::ObsMetadata;
 pub use plan::{ObsPlan, ObsPlanResult};
-pub use spec::{ObsDtype, ObsEntry, ObsSpec, ObsTransform};
+pub use spec::{ObsDtype, ObsEntry, ObsRegion, ObsSpec, ObsTransform, PoolConfig, PoolKernel};

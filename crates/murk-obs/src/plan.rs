@@ -13,8 +13,10 @@ use murk_core::error::ObsError;
 use murk_core::{Coord, FieldId, SnapshotAccess, TickId, WorldGenerationId};
 use murk_space::Space;
 
+use crate::geometry::GridGeometry;
 use crate::metadata::ObsMetadata;
-use crate::spec::{ObsDtype, ObsSpec, ObsTransform};
+use crate::pool::pool_2d;
+use crate::spec::{ObsDtype, ObsRegion, ObsSpec, ObsTransform, PoolConfig};
 
 /// Coverage threshold: warn if valid_ratio < this.
 const COVERAGE_WARN_THRESHOLD: f64 = 0.5;
@@ -35,17 +37,19 @@ pub struct ObsPlanResult {
     pub mask_len: usize,
 }
 
-/// Compiled observation plan — the "Simple plan class".
+/// Compiled observation plan: either Simple or Standard class.
 ///
-/// Holds precomputed gather indices and transform parameters so that
-/// [`execute`](Self::execute) is a branch-free gather loop with zero
-/// spatial computation at runtime.
+/// **Simple** (all `Fixed` regions): pre-computed gather indices, branch-free
+/// loop, zero spatial computation at runtime. Use [`execute`](Self::execute).
+///
+/// **Standard** (any agent-relative region): template-based gather with
+/// interior/boundary dispatch. Use [`execute_agents`](Self::execute_agents).
 #[derive(Debug)]
 pub struct ObsPlan {
-    entries: Vec<CompiledEntry>,
-    /// Total output elements across all entries.
+    strategy: PlanStrategy,
+    /// Total output elements across all entries (per agent for Standard).
     output_len: usize,
-    /// Total mask bytes across all entries.
+    /// Total mask bytes across all entries (per agent for Standard).
     mask_len: usize,
     /// Generation at compile time (for PLAN_INVALIDATED detection).
     compiled_generation: Option<WorldGenerationId>,
@@ -85,13 +89,77 @@ struct CompiledEntry {
     valid_ratio: f64,
 }
 
+/// Relative offset from agent center for template-based gather.
+///
+/// At compile time, the bounding box of an agent-centered region is
+/// decomposed into `TemplateOp`s. At execute time, the agent center
+/// is resolved and each op is applied: `field_data[base_rank + stride_offset]`.
+#[derive(Debug, Clone)]
+struct TemplateOp {
+    /// Offset from center per coordinate axis.
+    relative: Coord,
+    /// Position in the gather bounding-box tensor (row-major).
+    tensor_idx: usize,
+    /// Precomputed `sum(relative[i] * strides[i])` for interior fast path.
+    /// Zero if no `GridGeometry` is available (fallback path only).
+    stride_offset: isize,
+}
+
+/// Compiled agent-relative entry for the Standard plan class.
+///
+/// Stores template data that is instantiated per-agent at execute time.
+/// The bounding box shape comes from the region (e.g., `[2r+1, 2r+1]` for
+/// `AgentDisk`/`AgentRect`), and may be reduced by pooling.
+#[derive(Debug)]
+struct AgentCompiledEntry {
+    field_id: FieldId,
+    pool: Option<PoolConfig>,
+    transform: ObsTransform,
+    #[allow(dead_code)]
+    dtype: ObsDtype,
+    /// Offset into the per-agent output buffer.
+    output_offset: usize,
+    /// Offset into the per-agent mask buffer.
+    mask_offset: usize,
+    /// Post-pool output elements (written to output).
+    element_count: usize,
+    /// Pre-pool bounding-box elements (gather buffer size).
+    pre_pool_element_count: usize,
+    /// Shape of the pre-pool bounding box (e.g., `[7, 7]`).
+    pre_pool_shape: Vec<usize>,
+    /// Template operations (one per cell in bounding box).
+    template_ops: Vec<TemplateOp>,
+    /// Radius for `is_interior` check.
+    radius: u32,
+}
+
+/// Data for the Standard plan class (agent-centered foveation + pooling).
+#[derive(Debug)]
+struct StandardPlanData {
+    /// Entries with `ObsRegion::Fixed` (same output for all agents).
+    fixed_entries: Vec<CompiledEntry>,
+    /// Entries with agent-relative regions (resolved per-agent).
+    agent_entries: Vec<AgentCompiledEntry>,
+    /// Grid geometry for interior/boundary dispatch (`None` → all slow path).
+    geometry: Option<GridGeometry>,
+}
+
+/// Internal plan strategy: Simple (all-fixed) or Standard (agent-centered).
+#[derive(Debug)]
+enum PlanStrategy {
+    /// All entries are `ObsRegion::Fixed`: pre-computed gather indices.
+    Simple(Vec<CompiledEntry>),
+    /// At least one entry is agent-relative: template-based gather.
+    Standard(StandardPlanData),
+}
+
 impl ObsPlan {
     /// Compile an [`ObsSpec`] against a [`Space`].
     ///
-    /// Validates entries, compiles region plans, pre-computes gather
-    /// indices via the space's canonical ordering, and computes output
-    /// layout. Returns an error if the spec is empty, a region fails
-    /// to compile, or coverage is below the 0.35 threshold.
+    /// Detects whether the spec contains agent-relative regions and
+    /// dispatches to the appropriate plan class:
+    /// - All `Fixed` → **Simple** (pre-computed gather)
+    /// - Any `AgentDisk`/`AgentRect` → **Standard** (template-based)
     pub fn compile(spec: &ObsSpec, space: &dyn Space) -> Result<ObsPlanResult, ObsError> {
         if spec.entries.is_empty() {
             return Err(ObsError::InvalidObsSpec {
@@ -99,8 +167,22 @@ impl ObsPlan {
             });
         }
 
-        // Build coord → flat field index lookup from canonical ordering.
-        // This is O(cell_count) and done once per compile.
+        let has_agent = spec.entries.iter().any(|e| {
+            matches!(
+                e.region,
+                ObsRegion::AgentDisk { .. } | ObsRegion::AgentRect { .. }
+            )
+        });
+
+        if has_agent {
+            Self::compile_standard(spec, space)
+        } else {
+            Self::compile_simple(spec, space)
+        }
+    }
+
+    /// Compile a Simple plan (all `Fixed` regions, no agent-relative entries).
+    fn compile_simple(spec: &ObsSpec, space: &dyn Space) -> Result<ObsPlanResult, ObsError> {
         let canonical = space.canonical_ordering();
         let coord_to_field_idx: IndexMap<Coord, usize> = canonical
             .into_iter()
@@ -114,9 +196,27 @@ impl ObsPlan {
         let mut entry_shapes = Vec::with_capacity(spec.entries.len());
 
         for (i, entry) in spec.entries.iter().enumerate() {
+            let fixed_region = match &entry.region {
+                ObsRegion::Fixed(spec) => spec,
+                ObsRegion::AgentDisk { .. } | ObsRegion::AgentRect { .. } => {
+                    return Err(ObsError::InvalidObsSpec {
+                        reason: format!(
+                            "entry {i}: agent-relative region in Simple plan"
+                        ),
+                    });
+                }
+            };
+            if entry.pool.is_some() {
+                return Err(ObsError::InvalidObsSpec {
+                    reason: format!(
+                        "entry {i}: pooling requires a Standard plan (use agent-relative region)"
+                    ),
+                });
+            }
+
             let region_plan =
                 space
-                    .compile_region(&entry.region)
+                    .compile_region(fixed_region)
                     .map_err(|e| ObsError::InvalidObsSpec {
                         reason: format!("entry {i}: region compile failed: {e}"),
                     })?;
@@ -135,8 +235,6 @@ impl ObsPlan {
                 );
             }
 
-            // Pre-compute gather operations: for each coord in the region,
-            // resolve its flat field data index via the canonical ordering map.
             let mut gather_ops = Vec::with_capacity(region_plan.coords.len());
             for (coord_idx, coord) in region_plan.coords.iter().enumerate() {
                 let field_data_idx =
@@ -177,7 +275,7 @@ impl ObsPlan {
         }
 
         let plan = ObsPlan {
-            entries,
+            strategy: PlanStrategy::Simple(entries),
             output_len: output_offset,
             mask_len: mask_offset,
             compiled_generation: None,
@@ -189,6 +287,218 @@ impl ObsPlan {
             entry_shapes,
             plan,
         })
+    }
+
+    /// Compile a Standard plan (has agent-relative entries).
+    ///
+    /// Fixed entries are compiled with pre-computed gather (same for all agents).
+    /// Agent entries are compiled as templates (resolved per-agent at execute time).
+    fn compile_standard(spec: &ObsSpec, space: &dyn Space) -> Result<ObsPlanResult, ObsError> {
+        let canonical = space.canonical_ordering();
+        let coord_to_field_idx: IndexMap<Coord, usize> = canonical
+            .into_iter()
+            .enumerate()
+            .map(|(idx, coord)| (coord, idx))
+            .collect();
+
+        let geometry = GridGeometry::from_space(space);
+        let ndim = space.ndim();
+
+        let mut fixed_entries = Vec::new();
+        let mut agent_entries = Vec::new();
+        let mut output_offset = 0usize;
+        let mut mask_offset = 0usize;
+        let mut entry_shapes = Vec::new();
+
+        for (i, entry) in spec.entries.iter().enumerate() {
+            match &entry.region {
+                ObsRegion::Fixed(region_spec) => {
+                    if entry.pool.is_some() {
+                        return Err(ObsError::InvalidObsSpec {
+                            reason: format!(
+                                "entry {i}: pooling on Fixed regions not supported"
+                            ),
+                        });
+                    }
+
+                    let region_plan = space
+                        .compile_region(region_spec)
+                        .map_err(|e| ObsError::InvalidObsSpec {
+                            reason: format!("entry {i}: region compile failed: {e}"),
+                        })?;
+
+                    let ratio = region_plan.valid_ratio();
+                    if ratio < COVERAGE_ERROR_THRESHOLD {
+                        return Err(ObsError::InvalidComposition {
+                            reason: format!(
+                                "entry {i}: valid_ratio {ratio:.3} < {COVERAGE_ERROR_THRESHOLD}"
+                            ),
+                        });
+                    }
+
+                    let mut gather_ops = Vec::with_capacity(region_plan.coords.len());
+                    for (coord_idx, coord) in region_plan.coords.iter().enumerate() {
+                        let field_data_idx =
+                            *coord_to_field_idx.get(coord).ok_or_else(|| {
+                                ObsError::InvalidObsSpec {
+                                    reason: format!(
+                                        "entry {i}: coord {coord:?} not in canonical ordering"
+                                    ),
+                                }
+                            })?;
+                        let tensor_idx = region_plan.tensor_indices[coord_idx];
+                        gather_ops.push(GatherOp {
+                            field_data_idx,
+                            tensor_idx,
+                        });
+                    }
+
+                    let element_count = region_plan.bounding_shape.total_elements();
+                    let shape = match &region_plan.bounding_shape {
+                        murk_space::BoundingShape::Rect(dims) => dims.clone(),
+                    };
+                    entry_shapes.push(shape);
+
+                    fixed_entries.push(CompiledEntry {
+                        field_id: entry.field_id,
+                        transform: entry.transform.clone(),
+                        dtype: entry.dtype,
+                        output_offset,
+                        mask_offset,
+                        element_count,
+                        gather_ops,
+                        valid_mask: region_plan.valid_mask,
+                        valid_ratio: ratio,
+                    });
+
+                    output_offset += element_count;
+                    mask_offset += element_count;
+                }
+
+                ObsRegion::AgentDisk { radius } => {
+                    let half_ext: smallvec::SmallVec<[u32; 4]> =
+                        (0..ndim).map(|_| *radius).collect();
+                    let (ae, shape) = Self::compile_agent_entry(
+                        i,
+                        entry,
+                        &half_ext,
+                        *radius,
+                        &geometry,
+                        output_offset,
+                        mask_offset,
+                    )?;
+                    entry_shapes.push(shape);
+                    output_offset += ae.element_count;
+                    mask_offset += ae.element_count;
+                    agent_entries.push(ae);
+                }
+
+                ObsRegion::AgentRect { half_extent } => {
+                    let radius = *half_extent.iter().max().unwrap_or(&0);
+                    let (ae, shape) = Self::compile_agent_entry(
+                        i,
+                        entry,
+                        half_extent,
+                        radius,
+                        &geometry,
+                        output_offset,
+                        mask_offset,
+                    )?;
+                    entry_shapes.push(shape);
+                    output_offset += ae.element_count;
+                    mask_offset += ae.element_count;
+                    agent_entries.push(ae);
+                }
+            }
+        }
+
+        let plan = ObsPlan {
+            strategy: PlanStrategy::Standard(StandardPlanData {
+                fixed_entries,
+                agent_entries,
+                geometry,
+            }),
+            output_len: output_offset,
+            mask_len: mask_offset,
+            compiled_generation: None,
+        };
+
+        Ok(ObsPlanResult {
+            output_len: plan.output_len,
+            mask_len: plan.mask_len,
+            entry_shapes,
+            plan,
+        })
+    }
+
+    /// Compile a single agent-relative entry into a template.
+    fn compile_agent_entry(
+        entry_idx: usize,
+        entry: &crate::spec::ObsEntry,
+        half_extent: &[u32],
+        radius: u32,
+        geometry: &Option<GridGeometry>,
+        output_offset: usize,
+        mask_offset: usize,
+    ) -> Result<(AgentCompiledEntry, Vec<usize>), ObsError> {
+        let pre_pool_shape: Vec<usize> =
+            half_extent.iter().map(|&he| 2 * he as usize + 1).collect();
+        let pre_pool_element_count: usize = pre_pool_shape.iter().product();
+
+        let strides = geometry.as_ref().map(|g| g.coord_strides.as_slice());
+        let template_ops = generate_template_ops(half_extent, strides);
+
+        let (element_count, output_shape) = if let Some(pool) = &entry.pool {
+            if pre_pool_shape.len() != 2 {
+                return Err(ObsError::InvalidObsSpec {
+                    reason: format!(
+                        "entry {entry_idx}: pooling requires 2D region, got {}D",
+                        pre_pool_shape.len()
+                    ),
+                });
+            }
+            let h = pre_pool_shape[0];
+            let w = pre_pool_shape[1];
+            let ks = pool.kernel_size;
+            let stride = pool.stride;
+            if ks == 0 || stride == 0 {
+                return Err(ObsError::InvalidObsSpec {
+                    reason: format!(
+                        "entry {entry_idx}: pool kernel_size and stride must be > 0"
+                    ),
+                });
+            }
+            let out_h = if h >= ks { (h - ks) / stride + 1 } else { 0 };
+            let out_w = if w >= ks { (w - ks) / stride + 1 } else { 0 };
+            if out_h == 0 || out_w == 0 {
+                return Err(ObsError::InvalidObsSpec {
+                    reason: format!(
+                        "entry {entry_idx}: pool produces empty output \
+                         (region [{h},{w}], kernel_size {ks}, stride {stride})"
+                    ),
+                });
+            }
+            (out_h * out_w, vec![out_h, out_w])
+        } else {
+            (pre_pool_element_count, pre_pool_shape.clone())
+        };
+
+        Ok((
+            AgentCompiledEntry {
+                field_id: entry.field_id,
+                pool: entry.pool.clone(),
+                transform: entry.transform.clone(),
+                dtype: entry.dtype,
+                output_offset,
+                mask_offset,
+                element_count,
+                pre_pool_element_count,
+                pre_pool_shape,
+                template_ops,
+                radius,
+            },
+            output_shape,
+        ))
     }
 
     /// Compile with generation binding for PLAN_INVALIDATED detection.
@@ -245,6 +555,16 @@ impl ObsPlan {
         output: &mut [f32],
         mask: &mut [u8],
     ) -> Result<ObsMetadata, ObsError> {
+        let entries = match &self.strategy {
+            PlanStrategy::Simple(entries) => entries,
+            PlanStrategy::Standard(_) => {
+                return Err(ObsError::ExecutionFailed {
+                    reason: "Standard plan requires execute_agents(), not execute()"
+                        .into(),
+                });
+            }
+        };
+
         if output.len() < self.output_len {
             return Err(ObsError::ExecutionFailed {
                 reason: format!(
@@ -280,7 +600,7 @@ impl ObsPlan {
         let mut total_valid = 0usize;
         let mut total_elements = 0usize;
 
-        for entry in &self.entries {
+        for entry in entries {
             let field_data =
                 snapshot
                     .read_field(entry.field_id)
@@ -350,6 +670,14 @@ impl ObsPlan {
         output: &mut [f32],
         mask: &mut [u8],
     ) -> Result<Vec<ObsMetadata>, ObsError> {
+        // execute_batch only works with Simple plans.
+        if matches!(self.strategy, PlanStrategy::Standard(_)) {
+            return Err(ObsError::ExecutionFailed {
+                reason: "Standard plan requires execute_agents(), not execute_batch()"
+                    .into(),
+            });
+        }
+
         let batch_size = snapshots.len();
         let expected_out = batch_size * self.output_len;
         let expected_mask = batch_size * self.mask_len;
@@ -384,6 +712,408 @@ impl ObsPlan {
         }
         Ok(metadata)
     }
+
+    /// Execute the Standard plan for `N` agents in one environment.
+    ///
+    /// Each agent gets `output_len()` elements starting at
+    /// `agent_idx * output_len()`. Fixed entries produce the same
+    /// output for all agents; agent-relative entries are resolved
+    /// per-agent using interior/boundary dispatch.
+    ///
+    /// Interior agents (~49% for 20×20 grid, radius 3) use a branchless
+    /// fast path with stride arithmetic. Boundary agents fall back to
+    /// per-cell bounds checking.
+    pub fn execute_agents(
+        &self,
+        snapshot: &dyn SnapshotAccess,
+        space: &dyn Space,
+        agent_centers: &[Coord],
+        engine_tick: Option<TickId>,
+        output: &mut [f32],
+        mask: &mut [u8],
+    ) -> Result<Vec<ObsMetadata>, ObsError> {
+        let standard = match &self.strategy {
+            PlanStrategy::Standard(data) => data,
+            PlanStrategy::Simple(_) => {
+                return Err(ObsError::ExecutionFailed {
+                    reason: "execute_agents requires a Standard plan \
+                             (spec must contain agent-relative entries)"
+                        .into(),
+                });
+            }
+        };
+
+        let n_agents = agent_centers.len();
+        let expected_out = n_agents * self.output_len;
+        let expected_mask = n_agents * self.mask_len;
+
+        if output.len() < expected_out {
+            return Err(ObsError::ExecutionFailed {
+                reason: format!(
+                    "output buffer too small: {} < {}",
+                    output.len(),
+                    expected_out
+                ),
+            });
+        }
+        if mask.len() < expected_mask {
+            return Err(ObsError::ExecutionFailed {
+                reason: format!(
+                    "mask buffer too small: {} < {}",
+                    mask.len(),
+                    expected_mask
+                ),
+            });
+        }
+
+        // Generation check.
+        if let Some(compiled_gen) = self.compiled_generation {
+            let snapshot_gen = snapshot.world_generation_id();
+            if compiled_gen != snapshot_gen {
+                return Err(ObsError::PlanInvalidated {
+                    reason: format!(
+                        "plan compiled for generation {}, snapshot is generation {}",
+                        compiled_gen.0, snapshot_gen.0
+                    ),
+                });
+            }
+        }
+
+        // Pre-read all field data (shared borrows, valid for duration).
+        let mut field_data_map: IndexMap<FieldId, &[f32]> = IndexMap::new();
+        for entry in &standard.fixed_entries {
+            if !field_data_map.contains_key(&entry.field_id) {
+                let data = snapshot
+                    .read_field(entry.field_id)
+                    .ok_or_else(|| ObsError::ExecutionFailed {
+                        reason: format!("field {:?} not in snapshot", entry.field_id),
+                    })?;
+                field_data_map.insert(entry.field_id, data);
+            }
+        }
+        for entry in &standard.agent_entries {
+            if !field_data_map.contains_key(&entry.field_id) {
+                let data = snapshot
+                    .read_field(entry.field_id)
+                    .ok_or_else(|| ObsError::ExecutionFailed {
+                        reason: format!("field {:?} not in snapshot", entry.field_id),
+                    })?;
+                field_data_map.insert(entry.field_id, data);
+            }
+        }
+
+        let mut metadata = Vec::with_capacity(n_agents);
+
+        for (agent_i, center) in agent_centers.iter().enumerate() {
+            let out_start = agent_i * self.output_len;
+            let mask_start = agent_i * self.mask_len;
+            let agent_output = &mut output[out_start..out_start + self.output_len];
+            let agent_mask = &mut mask[mask_start..mask_start + self.mask_len];
+
+            agent_output.fill(0.0);
+            agent_mask.fill(0);
+
+            let mut total_valid = 0usize;
+            let mut total_elements = 0usize;
+
+            // ── Fixed entries (same for all agents) ──────────────
+            for entry in &standard.fixed_entries {
+                let field_data = field_data_map[&entry.field_id];
+                let out_slice = &mut agent_output
+                    [entry.output_offset..entry.output_offset + entry.element_count];
+                let mask_slice = &mut agent_mask
+                    [entry.mask_offset..entry.mask_offset + entry.element_count];
+
+                mask_slice.copy_from_slice(&entry.valid_mask);
+                for op in &entry.gather_ops {
+                    let raw = *field_data.get(op.field_data_idx).ok_or_else(|| {
+                        ObsError::ExecutionFailed {
+                            reason: format!(
+                                "field {:?} has {} elements but gather requires index {}",
+                                entry.field_id,
+                                field_data.len(),
+                                op.field_data_idx,
+                            ),
+                        }
+                    })?;
+                    out_slice[op.tensor_idx] = apply_transform(raw, &entry.transform);
+                }
+
+                total_valid += entry.valid_mask.iter().filter(|&&v| v == 1).count();
+                total_elements += entry.element_count;
+            }
+
+            // ── Agent-relative entries ───────────────────────────
+            for entry in &standard.agent_entries {
+                let field_data = field_data_map[&entry.field_id];
+
+                // Fast path: stride arithmetic works only for non-wrapping
+                // grids where all cells in the bounding box are in-bounds.
+                // Torus (all_wrap) requires modular arithmetic → slow path.
+                let use_fast_path = standard
+                    .geometry
+                    .as_ref()
+                    .map(|geo| !geo.all_wrap && geo.is_interior(center, entry.radius))
+                    .unwrap_or(false);
+
+                let valid = execute_agent_entry(
+                    entry,
+                    center,
+                    field_data,
+                    &standard.geometry,
+                    space,
+                    use_fast_path,
+                    agent_output,
+                    agent_mask,
+                );
+
+                total_valid += valid;
+                total_elements += entry.element_count;
+            }
+
+            let coverage = if total_elements == 0 {
+                0.0
+            } else {
+                total_valid as f64 / total_elements as f64
+            };
+
+            let age_ticks = match engine_tick {
+                Some(tick) => tick.0.saturating_sub(snapshot.tick_id().0),
+                None => 0,
+            };
+
+            metadata.push(ObsMetadata {
+                tick_id: snapshot.tick_id(),
+                age_ticks,
+                coverage,
+                world_generation_id: snapshot.world_generation_id(),
+                parameter_version: snapshot.parameter_version(),
+            });
+        }
+
+        Ok(metadata)
+    }
+
+    /// Whether this plan requires `execute_agents` (Standard) or `execute` (Simple).
+    pub fn is_standard(&self) -> bool {
+        matches!(self.strategy, PlanStrategy::Standard(_))
+    }
+}
+
+/// Execute a single agent-relative entry for one agent.
+///
+/// Returns the number of valid cells written.
+fn execute_agent_entry(
+    entry: &AgentCompiledEntry,
+    center: &Coord,
+    field_data: &[f32],
+    geometry: &Option<GridGeometry>,
+    space: &dyn Space,
+    use_fast_path: bool,
+    agent_output: &mut [f32],
+    agent_mask: &mut [u8],
+) -> usize {
+    if entry.pool.is_some() {
+        execute_agent_entry_pooled(
+            entry, center, field_data, geometry, space, use_fast_path,
+            agent_output, agent_mask,
+        )
+    } else {
+        execute_agent_entry_direct(
+            entry, center, field_data, geometry, space, use_fast_path,
+            agent_output, agent_mask,
+        )
+    }
+}
+
+/// Direct gather (no pooling): gather + transform → output.
+fn execute_agent_entry_direct(
+    entry: &AgentCompiledEntry,
+    center: &Coord,
+    field_data: &[f32],
+    geometry: &Option<GridGeometry>,
+    space: &dyn Space,
+    use_fast_path: bool,
+    agent_output: &mut [f32],
+    agent_mask: &mut [u8],
+) -> usize {
+    let out_slice =
+        &mut agent_output[entry.output_offset..entry.output_offset + entry.element_count];
+    let mask_slice =
+        &mut agent_mask[entry.mask_offset..entry.mask_offset + entry.element_count];
+
+    if use_fast_path {
+        // FAST PATH: all cells in-bounds, branchless stride arithmetic.
+        let geo = geometry.as_ref().unwrap();
+        let base_rank = geo.canonical_rank(center) as isize;
+        for op in &entry.template_ops {
+            let field_idx = (base_rank + op.stride_offset) as usize;
+            out_slice[op.tensor_idx] = apply_transform(field_data[field_idx], &entry.transform);
+        }
+        mask_slice.fill(1);
+        entry.element_count
+    } else {
+        // SLOW PATH: bounds-check each offset (or modular wrap for torus).
+        let mut valid = 0;
+        for op in &entry.template_ops {
+            let field_idx = resolve_field_index(center, &op.relative, geometry, space);
+            if let Some(idx) = field_idx {
+                if idx < field_data.len() {
+                    out_slice[op.tensor_idx] =
+                        apply_transform(field_data[idx], &entry.transform);
+                    mask_slice[op.tensor_idx] = 1;
+                    valid += 1;
+                }
+            }
+        }
+        valid
+    }
+}
+
+/// Pooled gather: gather → scratch → pool → transform → output.
+fn execute_agent_entry_pooled(
+    entry: &AgentCompiledEntry,
+    center: &Coord,
+    field_data: &[f32],
+    geometry: &Option<GridGeometry>,
+    space: &dyn Space,
+    use_fast_path: bool,
+    agent_output: &mut [f32],
+    agent_mask: &mut [u8],
+) -> usize {
+    let mut scratch = vec![0.0f32; entry.pre_pool_element_count];
+    let mut scratch_mask = vec![0u8; entry.pre_pool_element_count];
+
+    if use_fast_path {
+        let geo = geometry.as_ref().unwrap();
+        let base_rank = geo.canonical_rank(center) as isize;
+        for op in &entry.template_ops {
+            let field_idx = (base_rank + op.stride_offset) as usize;
+            scratch[op.tensor_idx] = field_data[field_idx];
+            scratch_mask[op.tensor_idx] = 1;
+        }
+    } else {
+        for op in &entry.template_ops {
+            let field_idx = resolve_field_index(center, &op.relative, geometry, space);
+            if let Some(idx) = field_idx {
+                if idx < field_data.len() {
+                    scratch[op.tensor_idx] = field_data[idx];
+                    scratch_mask[op.tensor_idx] = 1;
+                }
+            }
+        }
+    }
+
+    let pool_config = entry.pool.as_ref().unwrap();
+    let (pooled, pooled_mask, _) =
+        pool_2d(&scratch, &scratch_mask, &entry.pre_pool_shape, pool_config);
+
+    let out_slice =
+        &mut agent_output[entry.output_offset..entry.output_offset + entry.element_count];
+    let mask_slice =
+        &mut agent_mask[entry.mask_offset..entry.mask_offset + entry.element_count];
+
+    let n = pooled.len().min(entry.element_count);
+    for i in 0..n {
+        out_slice[i] = apply_transform(pooled[i], &entry.transform);
+    }
+    mask_slice[..n].copy_from_slice(&pooled_mask[..n]);
+
+    pooled_mask[..n].iter().filter(|&&v| v == 1).count()
+}
+
+/// Generate template operations for a rectangular bounding box.
+///
+/// `half_extent[d]` is the half-size per dimension. The bounding box is
+/// `(2*he[0]+1) × (2*he[1]+1) × ...` in row-major order.
+///
+/// If `strides` is provided (from `GridGeometry`), each op gets a precomputed
+/// `stride_offset` for the interior fast path.
+fn generate_template_ops(half_extent: &[u32], strides: Option<&[usize]>) -> Vec<TemplateOp> {
+    let ndim = half_extent.len();
+    let shape: Vec<usize> = half_extent.iter().map(|&he| 2 * he as usize + 1).collect();
+    let total: usize = shape.iter().product();
+
+    let mut ops = Vec::with_capacity(total);
+
+    for tensor_idx in 0..total {
+        // Decompose tensor_idx into n-d relative coords (row-major).
+        let mut relative = Coord::new();
+        let mut remaining = tensor_idx;
+        // Build in reverse order, then reverse.
+        for d in (0..ndim).rev() {
+            let coord = (remaining % shape[d]) as i32 - half_extent[d] as i32;
+            relative.push(coord);
+            remaining /= shape[d];
+        }
+        relative.reverse();
+
+        let stride_offset = strides
+            .map(|s| {
+                relative
+                    .iter()
+                    .zip(s.iter())
+                    .map(|(&r, &s)| r as isize * s as isize)
+                    .sum::<isize>()
+            })
+            .unwrap_or(0);
+
+        ops.push(TemplateOp {
+            relative,
+            tensor_idx,
+            stride_offset,
+        });
+    }
+
+    ops
+}
+
+/// Resolve the field data index for an absolute coordinate.
+///
+/// Handles three cases:
+/// 1. Torus (all_wrap): modular wrap, always in-bounds.
+/// 2. Grid with geometry: bounds-check then stride arithmetic.
+/// 3. No geometry: fall back to `space.canonical_rank()`.
+fn resolve_field_index(
+    center: &Coord,
+    relative: &Coord,
+    geometry: &Option<GridGeometry>,
+    space: &dyn Space,
+) -> Option<usize> {
+    if let Some(geo) = geometry {
+        if geo.all_wrap {
+            // Torus: wrap coordinates with modular arithmetic.
+            let wrapped: Coord = center
+                .iter()
+                .zip(relative.iter())
+                .zip(geo.coord_dims.iter())
+                .map(|((&c, &r), &d)| {
+                    let d = d as i32;
+                    ((c + r) % d + d) % d
+                })
+                .collect();
+            Some(geo.canonical_rank(&wrapped))
+        } else {
+            let abs_coord: Coord = center
+                .iter()
+                .zip(relative.iter())
+                .map(|(&c, &r)| c + r)
+                .collect();
+            let abs_slice: &[i32] = &abs_coord;
+            if geo.in_bounds(abs_slice) {
+                Some(geo.canonical_rank(abs_slice))
+            } else {
+                None
+            }
+        }
+    } else {
+        let abs_coord: Coord = center
+            .iter()
+            .zip(relative.iter())
+            .map(|(&c, &r)| c + r)
+            .collect();
+        space.canonical_rank(&abs_coord)
+    }
 }
 
 /// Apply a transform to a raw field value.
@@ -405,9 +1135,9 @@ fn apply_transform(raw: f32, transform: &ObsTransform) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::spec::{ObsDtype, ObsEntry, ObsSpec, ObsTransform};
+    use crate::spec::{ObsDtype, ObsEntry, ObsRegion, ObsSpec, ObsTransform, PoolConfig, PoolKernel};
     use murk_core::{FieldId, ParameterVersion, TickId, WorldGenerationId};
-    use murk_space::{EdgeBehavior, RegionSpec, Square4};
+    use murk_space::{EdgeBehavior, Hex2D, RegionSpec, Square4};
     use murk_test_utils::MockSnapshot;
 
     fn square4_space() -> Square4 {
@@ -440,7 +1170,8 @@ mod tests {
         let spec = ObsSpec {
             entries: vec![ObsEntry {
                 field_id: FieldId(0),
-                region: RegionSpec::All,
+                region: ObsRegion::Fixed(RegionSpec::All),
+                pool: None,
                 transform: ObsTransform::Identity,
                 dtype: ObsDtype::F32,
             }],
@@ -457,10 +1188,11 @@ mod tests {
         let spec = ObsSpec {
             entries: vec![ObsEntry {
                 field_id: FieldId(0),
-                region: RegionSpec::Rect {
+                region: ObsRegion::Fixed(RegionSpec::Rect {
                     min: smallvec::smallvec![1, 1],
                     max: smallvec::smallvec![2, 3],
-                },
+                }),
+                pool: None,
                 transform: ObsTransform::Identity,
                 dtype: ObsDtype::F32,
             }],
@@ -478,13 +1210,15 @@ mod tests {
             entries: vec![
                 ObsEntry {
                     field_id: FieldId(0),
-                    region: RegionSpec::All,
+                    region: ObsRegion::Fixed(RegionSpec::All),
+                    pool: None,
                     transform: ObsTransform::Identity,
                     dtype: ObsDtype::F32,
                 },
                 ObsEntry {
                     field_id: FieldId(1),
-                    region: RegionSpec::All,
+                    region: ObsRegion::Fixed(RegionSpec::All),
+                    pool: None,
                     transform: ObsTransform::Identity,
                     dtype: ObsDtype::F32,
                 },
@@ -501,7 +1235,8 @@ mod tests {
         let spec = ObsSpec {
             entries: vec![ObsEntry {
                 field_id: FieldId(0),
-                region: RegionSpec::Coords(vec![smallvec::smallvec![99, 99]]),
+                region: ObsRegion::Fixed(RegionSpec::Coords(vec![smallvec::smallvec![99, 99]])),
+                pool: None,
                 transform: ObsTransform::Identity,
                 dtype: ObsDtype::F32,
             }],
@@ -523,7 +1258,8 @@ mod tests {
         let spec = ObsSpec {
             entries: vec![ObsEntry {
                 field_id: FieldId(0),
-                region: RegionSpec::All,
+                region: ObsRegion::Fixed(RegionSpec::All),
+                pool: None,
                 transform: ObsTransform::Identity,
                 dtype: ObsDtype::F32,
             }],
@@ -555,7 +1291,8 @@ mod tests {
         let spec = ObsSpec {
             entries: vec![ObsEntry {
                 field_id: FieldId(0),
-                region: RegionSpec::All,
+                region: ObsRegion::Fixed(RegionSpec::All),
+                pool: None,
                 transform: ObsTransform::Normalize {
                     min: 0.0,
                     max: 8.0,
@@ -586,7 +1323,8 @@ mod tests {
         let spec = ObsSpec {
             entries: vec![ObsEntry {
                 field_id: FieldId(0),
-                region: RegionSpec::All,
+                region: ObsRegion::Fixed(RegionSpec::All),
+                pool: None,
                 transform: ObsTransform::Normalize {
                     min: 0.0,
                     max: 10.0,
@@ -614,7 +1352,8 @@ mod tests {
         let spec = ObsSpec {
             entries: vec![ObsEntry {
                 field_id: FieldId(0),
-                region: RegionSpec::All,
+                region: ObsRegion::Fixed(RegionSpec::All),
+                pool: None,
                 transform: ObsTransform::Normalize {
                     min: 5.0,
                     max: 5.0,
@@ -642,10 +1381,11 @@ mod tests {
         let spec = ObsSpec {
             entries: vec![ObsEntry {
                 field_id: FieldId(0),
-                region: RegionSpec::Rect {
+                region: ObsRegion::Fixed(RegionSpec::Rect {
                     min: smallvec::smallvec![1, 1],
                     max: smallvec::smallvec![2, 2],
-                },
+                }),
+                pool: None,
                 transform: ObsTransform::Identity,
                 dtype: ObsDtype::F32,
             }],
@@ -675,13 +1415,15 @@ mod tests {
             entries: vec![
                 ObsEntry {
                     field_id: FieldId(0),
-                    region: RegionSpec::All,
+                    region: ObsRegion::Fixed(RegionSpec::All),
+                    pool: None,
                     transform: ObsTransform::Identity,
                     dtype: ObsDtype::F32,
                 },
                 ObsEntry {
                     field_id: FieldId(1),
-                    region: RegionSpec::All,
+                    region: ObsRegion::Fixed(RegionSpec::All),
+                    pool: None,
                     transform: ObsTransform::Identity,
                     dtype: ObsDtype::F32,
                 },
@@ -709,7 +1451,8 @@ mod tests {
         let spec = ObsSpec {
             entries: vec![ObsEntry {
                 field_id: FieldId(0),
-                region: RegionSpec::All,
+                region: ObsRegion::Fixed(RegionSpec::All),
+                pool: None,
                 transform: ObsTransform::Identity,
                 dtype: ObsDtype::F32,
             }],
@@ -731,7 +1474,8 @@ mod tests {
         let spec = ObsSpec {
             entries: vec![ObsEntry {
                 field_id: FieldId(0),
-                region: RegionSpec::All,
+                region: ObsRegion::Fixed(RegionSpec::All),
+                pool: None,
                 transform: ObsTransform::Identity,
                 dtype: ObsDtype::F32,
             }],
@@ -755,7 +1499,8 @@ mod tests {
         let spec = ObsSpec {
             entries: vec![ObsEntry {
                 field_id: FieldId(0),
-                region: RegionSpec::All,
+                region: ObsRegion::Fixed(RegionSpec::All),
+                pool: None,
                 transform: ObsTransform::Identity,
                 dtype: ObsDtype::F32,
             }],
@@ -780,7 +1525,8 @@ mod tests {
         let spec = ObsSpec {
             entries: vec![ObsEntry {
                 field_id: FieldId(0),
-                region: RegionSpec::All,
+                region: ObsRegion::Fixed(RegionSpec::All),
+                pool: None,
                 transform: ObsTransform::Identity,
                 dtype: ObsDtype::F32,
             }],
@@ -804,7 +1550,8 @@ mod tests {
         let spec = ObsSpec {
             entries: vec![ObsEntry {
                 field_id: FieldId(0),
-                region: RegionSpec::All,
+                region: ObsRegion::Fixed(RegionSpec::All),
+                pool: None,
                 transform: ObsTransform::Identity,
                 dtype: ObsDtype::F32,
             }],
@@ -826,7 +1573,8 @@ mod tests {
         let spec = ObsSpec {
             entries: vec![ObsEntry {
                 field_id: FieldId(0),
-                region: RegionSpec::All,
+                region: ObsRegion::Fixed(RegionSpec::All),
+                pool: None,
                 transform: ObsTransform::Identity,
                 dtype: ObsDtype::F32,
             }],
@@ -851,7 +1599,8 @@ mod tests {
         let spec = ObsSpec {
             entries: vec![ObsEntry {
                 field_id: FieldId(0),
-                region: RegionSpec::All,
+                region: ObsRegion::Fixed(RegionSpec::All),
+                pool: None,
                 transform: ObsTransform::Identity,
                 dtype: ObsDtype::F32,
             }],
@@ -880,7 +1629,8 @@ mod tests {
         let spec = ObsSpec {
             entries: vec![ObsEntry {
                 field_id: FieldId(0),
-                region: RegionSpec::All,
+                region: ObsRegion::Fixed(RegionSpec::All),
+                pool: None,
                 transform: ObsTransform::Identity,
                 dtype: ObsDtype::F32,
             }],
@@ -915,7 +1665,8 @@ mod tests {
         let spec = ObsSpec {
             entries: vec![ObsEntry {
                 field_id: FieldId(0),
-                region: RegionSpec::All,
+                region: ObsRegion::Fixed(RegionSpec::All),
+                pool: None,
                 transform: ObsTransform::Identity,
                 dtype: ObsDtype::F32,
             }],
@@ -944,7 +1695,8 @@ mod tests {
         let spec = ObsSpec {
             entries: vec![ObsEntry {
                 field_id: FieldId(0),
-                region: RegionSpec::All,
+                region: ObsRegion::Fixed(RegionSpec::All),
+                pool: None,
                 transform: ObsTransform::Identity,
                 dtype: ObsDtype::F32,
             }],
@@ -970,7 +1722,8 @@ mod tests {
         let spec = ObsSpec {
             entries: vec![ObsEntry {
                 field_id: FieldId(0),
-                region: RegionSpec::All,
+                region: ObsRegion::Fixed(RegionSpec::All),
+                pool: None,
                 transform: ObsTransform::Identity,
                 dtype: ObsDtype::F32,
             }],
@@ -983,5 +1736,410 @@ mod tests {
         let mut mask = vec![0u8; result.mask_len];
         let err = result.plan.execute(&snap, None, &mut output, &mut mask).unwrap_err();
         assert!(matches!(err, ObsError::ExecutionFailed { .. }));
+    }
+
+    // ── Standard plan (agent-centered) tests ─────────────────
+
+    #[test]
+    fn standard_plan_detected_from_agent_region() {
+        let space = Square4::new(10, 10, EdgeBehavior::Absorb).unwrap();
+        let spec = ObsSpec {
+            entries: vec![ObsEntry {
+                field_id: FieldId(0),
+                region: ObsRegion::AgentRect {
+                    half_extent: smallvec::smallvec![2, 2],
+                },
+                pool: None,
+                transform: ObsTransform::Identity,
+                dtype: ObsDtype::F32,
+            }],
+        };
+        let result = ObsPlan::compile(&spec, &space).unwrap();
+        assert!(result.plan.is_standard());
+        // 5x5 = 25 elements
+        assert_eq!(result.output_len, 25);
+        assert_eq!(result.entry_shapes, vec![vec![5, 5]]);
+    }
+
+    #[test]
+    fn execute_on_standard_plan_errors() {
+        let space = Square4::new(10, 10, EdgeBehavior::Absorb).unwrap();
+        let data: Vec<f32> = (0..100).map(|x| x as f32).collect();
+        let snap = snapshot_with_field(FieldId(0), data);
+
+        let spec = ObsSpec {
+            entries: vec![ObsEntry {
+                field_id: FieldId(0),
+                region: ObsRegion::AgentDisk { radius: 2 },
+                pool: None,
+                transform: ObsTransform::Identity,
+                dtype: ObsDtype::F32,
+            }],
+        };
+        let result = ObsPlan::compile(&spec, &space).unwrap();
+
+        let mut output = vec![0.0f32; result.output_len];
+        let mut mask = vec![0u8; result.mask_len];
+        let err = result
+            .plan
+            .execute(&snap, None, &mut output, &mut mask)
+            .unwrap_err();
+        assert!(matches!(err, ObsError::ExecutionFailed { .. }));
+    }
+
+    #[test]
+    fn interior_boundary_equivalence() {
+        // An INTERIOR agent using Standard plan should produce identical
+        // output to a Simple plan with an explicit Rect at the same position.
+        let space = Square4::new(20, 20, EdgeBehavior::Absorb).unwrap();
+        let data: Vec<f32> = (0..400).map(|x| x as f32).collect();
+        let snap = snapshot_with_field(FieldId(0), data);
+
+        let radius = 3u32;
+        let center: Coord = smallvec::smallvec![10, 10]; // interior
+
+        // Standard plan: AgentRect centered on agent.
+        let standard_spec = ObsSpec {
+            entries: vec![ObsEntry {
+                field_id: FieldId(0),
+                region: ObsRegion::AgentRect {
+                    half_extent: smallvec::smallvec![radius, radius],
+                },
+                pool: None,
+                transform: ObsTransform::Identity,
+                dtype: ObsDtype::F32,
+            }],
+        };
+        let std_result = ObsPlan::compile(&standard_spec, &space).unwrap();
+        let mut std_output = vec![0.0f32; std_result.output_len];
+        let mut std_mask = vec![0u8; std_result.mask_len];
+        std_result
+            .plan
+            .execute_agents(&snap, &space, &[center.clone()], None, &mut std_output, &mut std_mask)
+            .unwrap();
+
+        // Simple plan: explicit Rect covering the same area.
+        let r = radius as i32;
+        let simple_spec = ObsSpec {
+            entries: vec![ObsEntry {
+                field_id: FieldId(0),
+                region: ObsRegion::Fixed(RegionSpec::Rect {
+                    min: smallvec::smallvec![10 - r, 10 - r],
+                    max: smallvec::smallvec![10 + r, 10 + r],
+                }),
+                pool: None,
+                transform: ObsTransform::Identity,
+                dtype: ObsDtype::F32,
+            }],
+        };
+        let simple_result = ObsPlan::compile(&simple_spec, &space).unwrap();
+        let mut simple_output = vec![0.0f32; simple_result.output_len];
+        let mut simple_mask = vec![0u8; simple_result.mask_len];
+        simple_result
+            .plan
+            .execute(&snap, None, &mut simple_output, &mut simple_mask)
+            .unwrap();
+
+        // Same shape, same values.
+        assert_eq!(std_result.output_len, simple_result.output_len);
+        assert_eq!(std_output, simple_output);
+        assert_eq!(std_mask, simple_mask);
+    }
+
+    #[test]
+    fn boundary_agent_gets_padding() {
+        // Agent at corner (0,0) with radius 2: many cells out-of-bounds.
+        let space = Square4::new(10, 10, EdgeBehavior::Absorb).unwrap();
+        let data: Vec<f32> = (0..100).map(|x| x as f32 + 1.0).collect();
+        let snap = snapshot_with_field(FieldId(0), data);
+
+        let spec = ObsSpec {
+            entries: vec![ObsEntry {
+                field_id: FieldId(0),
+                region: ObsRegion::AgentRect {
+                    half_extent: smallvec::smallvec![2, 2],
+                },
+                pool: None,
+                transform: ObsTransform::Identity,
+                dtype: ObsDtype::F32,
+            }],
+        };
+        let result = ObsPlan::compile(&spec, &space).unwrap();
+        let center: Coord = smallvec::smallvec![0, 0];
+        let mut output = vec![0.0f32; result.output_len];
+        let mut mask = vec![0u8; result.mask_len];
+        let metas = result
+            .plan
+            .execute_agents(&snap, &space, &[center], None, &mut output, &mut mask)
+            .unwrap();
+
+        // 5x5 = 25 cells total. Agent at (0,0) with radius 2:
+        // Only cells with row in [0,2] and col in [0,2] are valid (3x3 = 9).
+        let valid_count: usize = mask.iter().filter(|&&v| v == 1).count();
+        assert_eq!(valid_count, 9);
+
+        // Coverage should be 9/25
+        assert!((metas[0].coverage - 9.0 / 25.0).abs() < 1e-6);
+
+        // Check that the top-left corner of the bounding box (relative [-2,-2])
+        // is padding (mask=0, value=0).
+        assert_eq!(mask[0], 0); // relative (-2,-2) → absolute (-2,-2) → out of bounds
+        assert_eq!(output[0], 0.0);
+
+        // The cell at relative (0,0) is at tensor_idx = 2*5+2 = 12
+        // Absolute (0,0) → field value = 1.0
+        assert_eq!(mask[12], 1);
+        assert_eq!(output[12], 1.0);
+    }
+
+    #[test]
+    fn hex_foveation_interior() {
+        // Test agent-centered observation on Hex2D grid.
+        let space = Hex2D::new(20, 20).unwrap(); // 20 rows, 20 cols
+        let data: Vec<f32> = (0..400).map(|x| x as f32).collect();
+        let snap = snapshot_with_field(FieldId(0), data);
+
+        let spec = ObsSpec {
+            entries: vec![ObsEntry {
+                field_id: FieldId(0),
+                region: ObsRegion::AgentDisk { radius: 2 },
+                pool: None,
+                transform: ObsTransform::Identity,
+                dtype: ObsDtype::F32,
+            }],
+        };
+        let result = ObsPlan::compile(&spec, &space).unwrap();
+        assert_eq!(result.output_len, 25); // 5x5
+
+        // Interior agent: q=10, r=10
+        let center: Coord = smallvec::smallvec![10, 10];
+        let mut output = vec![0.0f32; result.output_len];
+        let mut mask = vec![0u8; result.mask_len];
+        result
+            .plan
+            .execute_agents(&snap, &space, &[center], None, &mut output, &mut mask)
+            .unwrap();
+
+        // All 25 cells should be valid (interior agent).
+        assert!(mask.iter().all(|&v| v == 1));
+
+        // Center cell is at tensor_idx = 2*5+2 = 12 (relative [0,0]).
+        // Hex2D canonical_rank([q,r]) = r*cols + q = 10*20 + 10 = 210
+        assert_eq!(output[12], 210.0);
+
+        // Cell at relative [1, 0] (dq=+1, dr=0) → absolute [11, 10]
+        // rank = 10*20 + 11 = 211
+        // In row-major bounding box: dim0_idx=3, dim1_idx=2 → tensor_idx = 3*5+2 = 17
+        assert_eq!(output[17], 211.0);
+    }
+
+    #[test]
+    fn wrap_space_all_interior() {
+        // Wrapped (torus) space: all agents are interior.
+        let space = Square4::new(10, 10, EdgeBehavior::Wrap).unwrap();
+        let data: Vec<f32> = (0..100).map(|x| x as f32).collect();
+        let snap = snapshot_with_field(FieldId(0), data);
+
+        let spec = ObsSpec {
+            entries: vec![ObsEntry {
+                field_id: FieldId(0),
+                region: ObsRegion::AgentRect {
+                    half_extent: smallvec::smallvec![2, 2],
+                },
+                pool: None,
+                transform: ObsTransform::Identity,
+                dtype: ObsDtype::F32,
+            }],
+        };
+        let result = ObsPlan::compile(&spec, &space).unwrap();
+
+        // Agent at corner (0,0) — still interior on torus.
+        let center: Coord = smallvec::smallvec![0, 0];
+        let mut output = vec![0.0f32; result.output_len];
+        let mut mask = vec![0u8; result.mask_len];
+        result
+            .plan
+            .execute_agents(&snap, &space, &[center], None, &mut output, &mut mask)
+            .unwrap();
+
+        // All 25 cells valid (torus wraps).
+        assert!(mask.iter().all(|&v| v == 1));
+        assert_eq!(output[12], 0.0); // center (0,0) → rank 0
+    }
+
+    #[test]
+    fn execute_agents_multiple() {
+        let space = Square4::new(10, 10, EdgeBehavior::Absorb).unwrap();
+        let data: Vec<f32> = (0..100).map(|x| x as f32).collect();
+        let snap = snapshot_with_field(FieldId(0), data);
+
+        let spec = ObsSpec {
+            entries: vec![ObsEntry {
+                field_id: FieldId(0),
+                region: ObsRegion::AgentRect {
+                    half_extent: smallvec::smallvec![1, 1],
+                },
+                pool: None,
+                transform: ObsTransform::Identity,
+                dtype: ObsDtype::F32,
+            }],
+        };
+        let result = ObsPlan::compile(&spec, &space).unwrap();
+        assert_eq!(result.output_len, 9); // 3x3
+
+        // Two agents: one interior, one at edge.
+        let centers = vec![
+            smallvec::smallvec![5, 5], // interior
+            smallvec::smallvec![0, 5], // top edge
+        ];
+        let n = centers.len();
+        let mut output = vec![0.0f32; result.output_len * n];
+        let mut mask = vec![0u8; result.mask_len * n];
+        let metas = result
+            .plan
+            .execute_agents(&snap, &space, &centers, None, &mut output, &mut mask)
+            .unwrap();
+
+        assert_eq!(metas.len(), 2);
+
+        // Agent 0 (interior): all 9 cells valid, center = (5,5) → rank 55
+        assert!(mask[..9].iter().all(|&v| v == 1));
+        assert_eq!(output[4], 55.0); // center at tensor_idx = 1*3+1 = 4
+
+        // Agent 1 (top edge): row -1 is out of bounds → 3 cells masked
+        let agent1_mask = &mask[9..18];
+        let valid_count: usize = agent1_mask.iter().filter(|&&v| v == 1).count();
+        assert_eq!(valid_count, 6); // 2 rows in-bounds × 3 cols
+    }
+
+    #[test]
+    fn execute_agents_with_normalize() {
+        let space = Square4::new(10, 10, EdgeBehavior::Absorb).unwrap();
+        let data: Vec<f32> = (0..100).map(|x| x as f32).collect();
+        let snap = snapshot_with_field(FieldId(0), data);
+
+        let spec = ObsSpec {
+            entries: vec![ObsEntry {
+                field_id: FieldId(0),
+                region: ObsRegion::AgentRect {
+                    half_extent: smallvec::smallvec![1, 1],
+                },
+                pool: None,
+                transform: ObsTransform::Normalize {
+                    min: 0.0,
+                    max: 99.0,
+                },
+                dtype: ObsDtype::F32,
+            }],
+        };
+        let result = ObsPlan::compile(&spec, &space).unwrap();
+
+        let center: Coord = smallvec::smallvec![5, 5];
+        let mut output = vec![0.0f32; result.output_len];
+        let mut mask = vec![0u8; result.mask_len];
+        result
+            .plan
+            .execute_agents(&snap, &space, &[center], None, &mut output, &mut mask)
+            .unwrap();
+
+        // Center (5,5) rank=55, normalized = 55/99 ≈ 0.5556
+        let expected = 55.0 / 99.0;
+        assert!((output[4] - expected as f32).abs() < 1e-5);
+    }
+
+    #[test]
+    fn execute_agents_with_pooling() {
+        let space = Square4::new(20, 20, EdgeBehavior::Absorb).unwrap();
+        let data: Vec<f32> = (0..400).map(|x| x as f32).collect();
+        let snap = snapshot_with_field(FieldId(0), data);
+
+        // AgentRect with half_extent=3 → 7x7 bounding box.
+        // Mean pool 2x2 stride 2 → floor((7-2)/2)+1 = 3 per dim → 3x3 = 9 output.
+        let spec = ObsSpec {
+            entries: vec![ObsEntry {
+                field_id: FieldId(0),
+                region: ObsRegion::AgentRect {
+                    half_extent: smallvec::smallvec![3, 3],
+                },
+                pool: Some(PoolConfig {
+                    kernel: PoolKernel::Mean,
+                    kernel_size: 2,
+                    stride: 2,
+                }),
+                transform: ObsTransform::Identity,
+                dtype: ObsDtype::F32,
+            }],
+        };
+        let result = ObsPlan::compile(&spec, &space).unwrap();
+        assert_eq!(result.output_len, 9);  // 3x3
+        assert_eq!(result.entry_shapes, vec![vec![3, 3]]);
+
+        // Interior agent at (10, 10): all cells valid.
+        let center: Coord = smallvec::smallvec![10, 10];
+        let mut output = vec![0.0f32; result.output_len];
+        let mut mask = vec![0u8; result.mask_len];
+        result
+            .plan
+            .execute_agents(&snap, &space, &[center], None, &mut output, &mut mask)
+            .unwrap();
+
+        // All pooled cells should be valid.
+        assert!(mask.iter().all(|&v| v == 1));
+
+        // Verify first pooled cell: mean of top-left 2x2 of the 7x7 gather.
+        // Gather bounding box starts at (10-3, 10-3) = (7, 7).
+        // Top-left 2x2: (7,7)=147, (7,8)=148, (8,7)=167, (8,8)=168
+        // Mean = (147+148+167+168)/4 = 157.5
+        assert!((output[0] - 157.5).abs() < 1e-4);
+    }
+
+    #[test]
+    fn mixed_fixed_and_agent_entries() {
+        let space = Square4::new(10, 10, EdgeBehavior::Absorb).unwrap();
+        let data: Vec<f32> = (0..100).map(|x| x as f32).collect();
+        let snap = snapshot_with_field(FieldId(0), data);
+
+        let spec = ObsSpec {
+            entries: vec![
+                // Fixed entry: full grid (100 elements).
+                ObsEntry {
+                    field_id: FieldId(0),
+                    region: ObsRegion::Fixed(RegionSpec::All),
+                    pool: None,
+                    transform: ObsTransform::Identity,
+                    dtype: ObsDtype::F32,
+                },
+                // Agent entry: 3x3 rect around agent.
+                ObsEntry {
+                    field_id: FieldId(0),
+                    region: ObsRegion::AgentRect {
+                        half_extent: smallvec::smallvec![1, 1],
+                    },
+                    pool: None,
+                    transform: ObsTransform::Identity,
+                    dtype: ObsDtype::F32,
+                },
+            ],
+        };
+        let result = ObsPlan::compile(&spec, &space).unwrap();
+        assert!(result.plan.is_standard());
+        assert_eq!(result.output_len, 109); // 100 + 9
+
+        let center: Coord = smallvec::smallvec![5, 5];
+        let mut output = vec![0.0f32; result.output_len];
+        let mut mask = vec![0u8; result.mask_len];
+        result
+            .plan
+            .execute_agents(&snap, &space, &[center], None, &mut output, &mut mask)
+            .unwrap();
+
+        // Fixed entry: first 100 elements match field data.
+        let expected: Vec<f32> = (0..100).map(|x| x as f32).collect();
+        assert_eq!(&output[..100], &expected[..]);
+        assert!(mask[..100].iter().all(|&v| v == 1));
+
+        // Agent entry: 3x3 centered on (5,5). Center at tensor_idx = 1*3+1 = 4.
+        // rank(5,5) = 55
+        assert_eq!(output[100 + 4], 55.0);
     }
 }

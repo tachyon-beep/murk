@@ -1,11 +1,12 @@
 //! PyObsPlan: observation plan compilation and execution with NumPy zero-copy.
 
-use numpy::{PyArray1, PyArrayMethods, PyUntypedArrayMethods};
+use numpy::{PyArray1, PyArrayMethods, PyReadonlyArray2, PyUntypedArrayMethods};
 use pyo3::prelude::*;
 
 use murk_ffi::{
-    murk_obsplan_compile, murk_obsplan_destroy, murk_obsplan_execute, murk_obsplan_mask_len,
-    murk_obsplan_output_len, MurkObsEntry, MurkObsResult,
+    murk_obsplan_compile, murk_obsplan_destroy, murk_obsplan_execute,
+    murk_obsplan_execute_agents, murk_obsplan_mask_len, murk_obsplan_output_len, MurkObsEntry,
+    MurkObsResult,
 };
 
 use crate::error::check_status;
@@ -24,13 +25,30 @@ impl ObsEntry {
     ///
     /// Args:
     ///     field_id: Field index to observe.
-    ///     region_type: 0 = All (only option in v1).
+    ///     region_type: 0=All, 5=AgentDisk, 6=AgentRect.
     ///     transform_type: 0 = Identity, 1 = Normalize.
     ///     normalize_min: Lower bound for Normalize transform.
     ///     normalize_max: Upper bound for Normalize transform.
     ///     dtype: 0 = F32.
+    ///     region_params: List of int32 region parameters (up to 8).
+    ///         For AgentDisk (5): [radius].
+    ///         For AgentRect (6): [half_extent_0, half_extent_1, ...].
+    ///     pool_kernel: 0=None, 1=Mean, 2=Max, 3=Min, 4=Sum.
+    ///     pool_kernel_size: Pooling window size (ignored if pool_kernel=0).
+    ///     pool_stride: Pooling stride (ignored if pool_kernel=0).
     #[new]
-    #[pyo3(signature = (field_id, region_type=0, transform_type=0, normalize_min=0.0, normalize_max=1.0, dtype=0))]
+    #[pyo3(signature = (
+        field_id,
+        region_type=0,
+        transform_type=0,
+        normalize_min=0.0,
+        normalize_max=1.0,
+        dtype=0,
+        region_params=None,
+        pool_kernel=0,
+        pool_kernel_size=0,
+        pool_stride=0,
+    ))]
     fn new(
         field_id: u32,
         region_type: i32,
@@ -38,8 +56,27 @@ impl ObsEntry {
         normalize_min: f32,
         normalize_max: f32,
         dtype: i32,
-    ) -> Self {
-        ObsEntry {
+        region_params: Option<Vec<i32>>,
+        pool_kernel: i32,
+        pool_kernel_size: i32,
+        pool_stride: i32,
+    ) -> PyResult<Self> {
+        let mut params = [0i32; 8];
+        let n_params = if let Some(ref rp) = region_params {
+            if rp.len() > 8 {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "region_params must have at most 8 elements",
+                ));
+            }
+            for (i, &v) in rp.iter().enumerate() {
+                params[i] = v;
+            }
+            rp.len() as i32
+        } else {
+            0
+        };
+
+        Ok(ObsEntry {
             inner: MurkObsEntry {
                 field_id,
                 region_type,
@@ -47,8 +84,13 @@ impl ObsEntry {
                 normalize_min,
                 normalize_max,
                 dtype,
+                region_params: params,
+                n_region_params: n_params,
+                pool_kernel,
+                pool_kernel_size,
+                pool_stride,
             },
-        }
+        })
     }
 }
 
@@ -167,6 +209,90 @@ impl ObsPlan {
         check_status(status)?;
 
         Ok((result.tick_id, result.age_ticks))
+    }
+
+    /// Execute the observation plan for N agents, filling pre-allocated numpy buffers.
+    ///
+    /// Args:
+    ///     world: The world to observe.
+    ///     agent_centers: C-contiguous int32 array of shape (N, ndim) with agent positions.
+    ///     output: Pre-allocated C-contiguous float32 array of shape (N * output_len,).
+    ///     mask: Pre-allocated C-contiguous uint8 array of shape (N * mask_len,).
+    ///
+    /// Returns:
+    ///     List of (tick_id, age_ticks) tuples, one per agent.
+    ///
+    /// Raises:
+    ///     ValueError: If arrays are not C-contiguous or have wrong shape.
+    #[allow(unsafe_code)]
+    fn execute_agents<'py>(
+        &self,
+        py: Python<'py>,
+        world: &World,
+        agent_centers: PyReadonlyArray2<'py, i32>,
+        output: &Bound<'py, PyArray1<f32>>,
+        mask: &Bound<'py, PyArray1<u8>>,
+    ) -> PyResult<Vec<(u64, u64)>> {
+        let plan_h = self.require_handle()?;
+        let world_h = world.handle()?;
+
+        if !agent_centers.is_c_contiguous() {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "agent_centers array must be C-contiguous",
+            ));
+        }
+        if !output.is_c_contiguous() {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "output array must be C-contiguous",
+            ));
+        }
+        if !mask.is_c_contiguous() {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "mask array must be C-contiguous",
+            ));
+        }
+
+        let shape = agent_centers.shape();
+        let n_agents = shape[0] as i32;
+        let ndim = shape[1] as i32;
+
+        if n_agents <= 0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "agent_centers must have at least one agent",
+            ));
+        }
+
+        // Pointer addresses as usize for Ungil closure.
+        let centers_addr = agent_centers.as_ptr() as usize;
+        let out_addr = unsafe { output.as_array_mut().as_mut_ptr() } as usize;
+        let out_len = output.len();
+        let mask_addr = unsafe { mask.as_array_mut().as_mut_ptr() } as usize;
+        let mask_len = mask.len();
+
+        let n = n_agents as usize;
+        let mut results = vec![MurkObsResult::default(); n];
+        let results_addr = results.as_mut_ptr() as usize;
+
+        let status = py.allow_threads(|| {
+            murk_obsplan_execute_agents(
+                world_h,
+                plan_h,
+                centers_addr as *const i32,
+                ndim,
+                n_agents,
+                out_addr as *mut f32,
+                out_len,
+                mask_addr as *mut u8,
+                mask_len,
+                results_addr as *mut MurkObsResult,
+            )
+        });
+        check_status(status)?;
+
+        Ok(results
+            .iter()
+            .map(|r| (r.tick_id, r.age_ticks))
+            .collect())
     }
 
     /// Number of f32 elements in the output buffer.

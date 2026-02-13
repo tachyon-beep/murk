@@ -460,6 +460,7 @@ dependencies = [
  "murk-space",
  "murk-test-utils",
  "proptest",
+ "smallvec",
 ]
 
 [[package]]

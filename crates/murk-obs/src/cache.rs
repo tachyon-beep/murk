@@ -12,7 +12,7 @@
 //! canonical ordering), not on per-tick state.
 
 use murk_core::error::ObsError;
-use murk_core::{SnapshotAccess, SpaceInstanceId, TickId};
+use murk_core::{Coord, SnapshotAccess, SpaceInstanceId, TickId};
 use murk_space::Space;
 
 use crate::metadata::ObsMetadata;
@@ -143,6 +143,24 @@ impl ObsPlanCache {
         plan.execute(snapshot, engine_tick, output, mask)
     }
 
+    /// Execute the Standard plan for `N` agents, recompiling if the
+    /// space has changed.
+    ///
+    /// Convenience wrapper over [`get_or_compile`](Self::get_or_compile)
+    /// + [`ObsPlan::execute_agents`].
+    pub fn execute_agents(
+        &mut self,
+        space: &dyn Space,
+        snapshot: &dyn SnapshotAccess,
+        agent_centers: &[Coord],
+        engine_tick: Option<TickId>,
+        output: &mut [f32],
+        mask: &mut [u8],
+    ) -> Result<Vec<ObsMetadata>, ObsError> {
+        let plan = self.get_or_compile(space)?;
+        plan.execute_agents(snapshot, space, agent_centers, engine_tick, output, mask)
+    }
+
     /// Output length of the currently cached plan, or `None` if no
     /// plan has been compiled yet.
     pub fn output_len(&self) -> Option<usize> {
@@ -173,7 +191,7 @@ impl ObsPlanCache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::spec::{ObsDtype, ObsEntry, ObsTransform};
+    use crate::spec::{ObsDtype, ObsEntry, ObsRegion, ObsTransform};
     use murk_core::{FieldId, ParameterVersion, TickId, WorldGenerationId};
     use murk_space::{EdgeBehavior, RegionSpec, Square4};
     use murk_test_utils::MockSnapshot;
@@ -186,7 +204,8 @@ mod tests {
         ObsSpec {
             entries: vec![ObsEntry {
                 field_id: FieldId(0),
-                region: RegionSpec::All,
+                region: ObsRegion::Fixed(RegionSpec::All),
+                pool: None,
                 transform: ObsTransform::Identity,
                 dtype: ObsDtype::F32,
             }],

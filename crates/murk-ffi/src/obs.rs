@@ -6,9 +6,11 @@
 use std::sync::Mutex;
 
 use murk_core::id::FieldId;
+use murk_core::Coord;
 use murk_obs::cache::ObsPlanCache;
-use murk_obs::spec::{ObsDtype, ObsEntry, ObsSpec, ObsTransform};
+use murk_obs::spec::{ObsDtype, ObsEntry, ObsRegion, ObsSpec, ObsTransform, PoolConfig, PoolKernel};
 use murk_space::RegionSpec;
+use smallvec::SmallVec;
 
 use crate::handle::HandleTable;
 use crate::status::MurkStatus;
@@ -21,12 +23,24 @@ struct ObsPlanState {
 }
 
 /// C-compatible observation entry for plan compilation.
+///
+/// Region type values:
+/// - 0: All (whole grid)
+/// - 5: AgentDisk (radius in `region_params[0]`)
+/// - 6: AgentRect (half-extents in `region_params[0..n_region_params]`)
+///
+/// Pool kernel values:
+/// - 0: None (no pooling)
+/// - 1: Mean
+/// - 2: Max
+/// - 3: Min
+/// - 4: Sum
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct MurkObsEntry {
     /// Field ID to observe.
     pub field_id: u32,
-    /// Region type: 0 = All (only option for v1).
+    /// Region type: 0=All, 5=AgentDisk, 6=AgentRect.
     pub region_type: i32,
     /// Transform type: 0 = Identity, 1 = Normalize.
     pub transform_type: i32,
@@ -36,6 +50,16 @@ pub struct MurkObsEntry {
     pub normalize_max: f32,
     /// Output data type: 0 = F32.
     pub dtype: i32,
+    /// Region parameters (interpretation depends on region_type).
+    pub region_params: [i32; 8],
+    /// Number of valid entries in `region_params`.
+    pub n_region_params: i32,
+    /// Pooling kernel: 0=None, 1=Mean, 2=Max, 3=Min, 4=Sum.
+    pub pool_kernel: i32,
+    /// Pooling window size (ignored if pool_kernel == 0).
+    pub pool_kernel_size: i32,
+    /// Pooling stride (ignored if pool_kernel == 0).
+    pub pool_stride: i32,
 }
 
 /// Result metadata from observation plan execution.
@@ -74,9 +98,31 @@ pub extern "C" fn murk_obsplan_compile(
     let mut obs_entries = Vec::with_capacity(n_entries);
     for e in entry_slice {
         let region = match e.region_type {
-            0 => RegionSpec::All,
+            0 => ObsRegion::Fixed(RegionSpec::All),
+            5 => {
+                // AgentDisk: radius in region_params[0].
+                if e.n_region_params < 1 {
+                    return MurkStatus::InvalidArgument as i32;
+                }
+                ObsRegion::AgentDisk {
+                    radius: e.region_params[0] as u32,
+                }
+            }
+            6 => {
+                // AgentRect: half-extents in region_params[0..n].
+                let n = e.n_region_params as usize;
+                if n == 0 || n > 8 {
+                    return MurkStatus::InvalidArgument as i32;
+                }
+                let half_extent: SmallVec<[u32; 4]> = e.region_params[..n]
+                    .iter()
+                    .map(|&v| v as u32)
+                    .collect();
+                ObsRegion::AgentRect { half_extent }
+            }
             _ => return MurkStatus::InvalidArgument as i32,
         };
+
         let transform = match e.transform_type {
             0 => ObsTransform::Identity,
             1 => ObsTransform::Normalize {
@@ -89,9 +135,30 @@ pub extern "C" fn murk_obsplan_compile(
             0 => ObsDtype::F32,
             _ => return MurkStatus::InvalidArgument as i32,
         };
+
+        let pool = match e.pool_kernel {
+            0 => None,
+            k @ 1..=4 => {
+                let kernel = match k {
+                    1 => PoolKernel::Mean,
+                    2 => PoolKernel::Max,
+                    3 => PoolKernel::Min,
+                    4 => PoolKernel::Sum,
+                    _ => unreachable!(),
+                };
+                Some(PoolConfig {
+                    kernel,
+                    kernel_size: e.pool_kernel_size as usize,
+                    stride: e.pool_stride as usize,
+                })
+            }
+            _ => return MurkStatus::InvalidArgument as i32,
+        };
+
         obs_entries.push(ObsEntry {
             field_id: FieldId(e.field_id),
             region,
+            pool,
             transform,
             dtype,
         });
@@ -184,6 +251,87 @@ pub extern "C" fn murk_obsplan_execute(
                         tick_id: meta.tick_id.0,
                         age_ticks: meta.age_ticks,
                     };
+                }
+            }
+            MurkStatus::Ok as i32
+        }
+        Err(e) => MurkStatus::from(&e) as i32,
+    }
+}
+
+/// Execute an observation plan for N agents, filling caller-allocated buffers.
+///
+/// `agent_centers` is a flat array of `n_agents * ndim` i32 values.
+/// `output` must have at least `n_agents * murk_obsplan_output_len()` elements.
+/// `mask` must have at least `n_agents * murk_obsplan_mask_len()` bytes.
+/// `results_out` may be null; if non-null, must point to `n_agents` results.
+#[no_mangle]
+#[allow(unsafe_code)]
+pub extern "C" fn murk_obsplan_execute_agents(
+    world_handle: u64,
+    plan_handle: u64,
+    agent_centers: *const i32,
+    ndim: i32,
+    n_agents: i32,
+    output: *mut f32,
+    output_len: usize,
+    mask: *mut u8,
+    mask_len: usize,
+    results_out: *mut MurkObsResult,
+) -> i32 {
+    if output.is_null() || mask.is_null() || agent_centers.is_null() {
+        return MurkStatus::InvalidArgument as i32;
+    }
+    if n_agents <= 0 || ndim <= 0 {
+        return MurkStatus::InvalidArgument as i32;
+    }
+    let n = n_agents as usize;
+    let dim = ndim as usize;
+
+    // SAFETY: agent_centers points to n * dim valid i32 values.
+    let centers_flat = unsafe { std::slice::from_raw_parts(agent_centers, n * dim) };
+    let centers: Vec<Coord> = centers_flat
+        .chunks_exact(dim)
+        .map(|chunk| chunk.iter().copied().collect())
+        .collect();
+
+    let mut plans = OBS_PLANS.lock().unwrap();
+    let plan_state = match plans.get_mut(plan_handle) {
+        Some(s) => s,
+        None => return MurkStatus::InvalidHandle as i32,
+    };
+
+    // SAFETY: output/mask point to output_len/mask_len valid elements.
+    let out_slice = unsafe { std::slice::from_raw_parts_mut(output, output_len) };
+    let mask_slice = unsafe { std::slice::from_raw_parts_mut(mask, mask_len) };
+
+    let world_arc = {
+        let w_table = worlds().lock().unwrap();
+        match w_table.get(world_handle).cloned() {
+            Some(arc) => arc,
+            None => return MurkStatus::InvalidHandle as i32,
+        }
+    };
+    let world = world_arc.lock().unwrap();
+    let snap = world.snapshot();
+
+    match plan_state.cache.execute_agents(
+        world.space(),
+        &snap,
+        &centers,
+        None,
+        out_slice,
+        mask_slice,
+    ) {
+        Ok(metas) => {
+            if !results_out.is_null() {
+                for (i, meta) in metas.iter().enumerate() {
+                    unsafe {
+                        *results_out.add(i) = MurkObsResult {
+                            tick_id: meta.tick_id.0,
+                            age_ticks: meta.age_ticks,
+                        };
+                    }
                 }
             }
             MurkStatus::Ok as i32
@@ -328,6 +476,11 @@ mod tests {
             normalize_min: 0.0,
             normalize_max: 0.0,
             dtype: 0,
+            region_params: [0; 8],
+            n_region_params: 0,
+            pool_kernel: 0,
+            pool_kernel_size: 0,
+            pool_stride: 0,
         };
         let mut plan_h: u64 = 0;
         let status = murk_obsplan_compile(world_h, &entry, 1, &mut plan_h);
@@ -383,6 +536,11 @@ mod tests {
             normalize_min: 0.0,
             normalize_max: 0.0,
             dtype: 0,
+            region_params: [0; 8],
+            n_region_params: 0,
+            pool_kernel: 0,
+            pool_kernel_size: 0,
+            pool_stride: 0,
         };
         let mut plan_h: u64 = 0;
         murk_obsplan_compile(world_h, &entry, 1, &mut plan_h);
@@ -425,6 +583,11 @@ mod tests {
             normalize_min: 0.0,
             normalize_max: 0.0,
             dtype: 0,
+            region_params: [0; 8],
+            n_region_params: 0,
+            pool_kernel: 0,
+            pool_kernel_size: 0,
+            pool_stride: 0,
         };
         let mut plan_h: u64 = 0;
         murk_obsplan_compile(world_h, &entry, 1, &mut plan_h);
@@ -467,6 +630,11 @@ mod tests {
             normalize_min: 0.0,
             normalize_max: 0.0,
             dtype: 0,
+            region_params: [0; 8],
+            n_region_params: 0,
+            pool_kernel: 0,
+            pool_kernel_size: 0,
+            pool_stride: 0,
         };
         let mut plan_h: u64 = 0;
         murk_obsplan_compile(world_h, &entry, 1, &mut plan_h);

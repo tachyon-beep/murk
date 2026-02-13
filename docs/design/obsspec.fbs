@@ -13,7 +13,6 @@ namespace murk.obs;
 enum TransformType : byte {
     Identity = 0,
     Normalize = 1,
-    Pool = 2,       // v1.5: pooling/downsampling
     Foveate = 3     // v1.5: multi-resolution foveation
 }
 
@@ -23,7 +22,18 @@ enum RegionType : byte {
     Disk = 1,        // topology-aware disk (center + radius)
     Rect = 2,        // axis-aligned bounding box (min + max coords)
     Neighbours = 3,  // BFS expansion (center + depth)
-    Coords = 4       // explicit coordinate list
+    Coords = 4,      // explicit coordinate list
+    AgentDisk = 5,   // agent-centered disk (radius, resolved per-agent at execute time)
+    AgentRect = 6    // agent-centered rect (half-extents, resolved per-agent at execute time)
+}
+
+/// Pooling kernel type for spatial downsampling.
+enum PoolKernel : byte {
+    None = 0,
+    Mean = 1,
+    Max = 2,
+    Min = 3,
+    Sum = 4
 }
 
 /// Output element dtype.
@@ -47,6 +57,8 @@ table ObsEntry {
     ///   Rect: [min_x, min_y, ..., max_x, max_y, ...] (2*ndim values)
     ///   Neighbours: [center_x, center_y, ..., depth] (ndim+1 values)
     ///   Coords: [x0, y0, ..., x1, y1, ...] (n*ndim values, flattened)
+    ///   AgentDisk: [radius]
+    ///   AgentRect: [half_extent_0, half_extent_1, ...]
     region_params: [int32];
 
     /// Transform type. Interpretation of transform_params depends on this.
@@ -55,9 +67,17 @@ table ObsEntry {
     /// Transform parameters (interpretation depends on transform_type):
     ///   Identity: empty
     ///   Normalize: [min, max]
-    ///   Pool: [kernel_size, stride] (v1.5)
     ///   Foveate: [n_shells, r0, r1, ..., pool0, pool1, ...] (v1.5)
     transform_params: [float64];
+
+    /// Spatial pooling kernel. Applied after gathering, before element-wise transform.
+    pool_kernel: PoolKernel = None;
+
+    /// Pooling window size (ignored if pool_kernel == None).
+    pool_kernel_size: uint32 = 0;
+
+    /// Pooling stride (ignored if pool_kernel == None).
+    pool_stride: uint32 = 0;
 
     /// Output dtype. Default F32.
     dtype: DType = F32;

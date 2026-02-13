@@ -38,8 +38,9 @@ pub use config::{
 };
 pub use metrics::{murk_step_metrics, murk_step_metrics_propagator, MurkStepMetrics};
 pub use obs::{
-    murk_obsplan_compile, murk_obsplan_destroy, murk_obsplan_execute, murk_obsplan_mask_len,
-    murk_obsplan_output_len, MurkObsEntry, MurkObsResult,
+    murk_obsplan_compile, murk_obsplan_destroy, murk_obsplan_execute,
+    murk_obsplan_execute_agents, murk_obsplan_mask_len, murk_obsplan_output_len, MurkObsEntry,
+    MurkObsResult,
 };
 pub use propagator::{
     murk_propagator_create, MurkPropagatorDef, MurkStepContext, MurkWriteDecl,
