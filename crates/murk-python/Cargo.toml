@@ -2,7 +2,13 @@
 name = "murk-python"
 version = "0.1.0"
 edition = "2021"
-description = "Python bindings for the Murk simulation framework (PyO3 stub)"
+description = "Python bindings for the Murk simulation framework (PyO3)"
+
+[lib]
+name = "_murk"
+crate-type = ["cdylib"]
 
 [dependencies]
 murk-ffi = { path = "../murk-ffi" }
+pyo3 = { version = "0.23", features = ["extension-module", "abi3-py39"] }
+numpy = "0.23"

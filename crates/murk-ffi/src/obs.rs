@@ -101,18 +101,21 @@ pub extern "C" fn murk_obsplan_compile(
     };
 
     // Get the space from the world to trigger initial compilation.
-    let w_table = worlds().lock().unwrap();
-    let world = match w_table.get(world_handle) {
-        Some(w) => w,
-        None => return MurkStatus::InvalidHandle as i32,
+    let world_arc = {
+        let w_table = worlds().lock().unwrap();
+        match w_table.get(world_handle).cloned() {
+            Some(arc) => arc,
+            None => return MurkStatus::InvalidHandle as i32,
+        }
     };
+    let world = world_arc.lock().unwrap();
 
     let mut cache = ObsPlanCache::new(spec);
     // Compile eagerly so we detect errors now rather than at execute time.
     if let Err(e) = cache.get_or_compile(world.space()) {
         return MurkStatus::from(&e) as i32;
     }
-    drop(w_table);
+    drop(world);
 
     let state = ObsPlanState { cache };
     let handle = OBS_PLANS.lock().unwrap().insert(state);
@@ -159,11 +162,14 @@ pub extern "C" fn murk_obsplan_execute(
     let out_slice = unsafe { std::slice::from_raw_parts_mut(output, output_len) };
     let mask_slice = unsafe { std::slice::from_raw_parts_mut(mask, mask_len) };
 
-    let w_table = worlds().lock().unwrap();
-    let world = match w_table.get(world_handle) {
-        Some(w) => w,
-        None => return MurkStatus::InvalidHandle as i32,
+    let world_arc = {
+        let w_table = worlds().lock().unwrap();
+        match w_table.get(world_handle).cloned() {
+            Some(arc) => arc,
+            None => return MurkStatus::InvalidHandle as i32,
+        }
     };
+    let world = world_arc.lock().unwrap();
 
     let snap = world.snapshot();
 
