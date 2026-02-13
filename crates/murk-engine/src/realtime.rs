@@ -38,7 +38,7 @@ use murk_core::Coord;
 use murk_obs::{ObsMetadata, ObsPlan};
 use murk_space::Space;
 
-use crate::config::{AsyncConfig, ConfigError, WorldConfig};
+use crate::config::{AsyncConfig, BackoffConfig, ConfigError, WorldConfig};
 use crate::egress::{ObsResult, ObsTask};
 use crate::epoch::{EpochCounter, WorkerEpoch};
 use crate::ring::SnapshotRing;
@@ -118,6 +118,7 @@ pub struct RealtimeAsyncWorld {
     /// Never contended: only accessed during reset() which takes &mut self.
     recovered_engine: Mutex<Option<TickEngine>>,
     config: AsyncConfig,
+    backoff_config: BackoffConfig,
     seed: u64,
     tick_rate_hz: f64,
     /// Shared space for agent-relative observations and engine reconstruction.
@@ -186,6 +187,7 @@ impl RealtimeAsyncWorld {
         let tick_workers = Arc::clone(&worker_epochs);
         let tick_shutdown = Arc::clone(&shutdown_flag);
         let tick_stopped_flag = Arc::clone(&tick_stopped);
+        let stored_backoff = backoff_config.clone();
         let tick_thread = thread::Builder::new()
             .name("murk-tick".into())
             .spawn(move || {
@@ -228,6 +230,7 @@ impl RealtimeAsyncWorld {
             state: ShutdownState::Running,
             recovered_engine: Mutex::new(None),
             config: async_config,
+            backoff_config: stored_backoff,
             seed,
             tick_rate_hz,
             space,
@@ -519,7 +522,11 @@ impl RealtimeAsyncWorld {
             .ok_or(ConfigError::InvalidTickRate { value: 0.0 })?;
 
         // Reset the engine (clears arena, ingress, tick counter).
-        engine.reset()?;
+        // If reset fails, restore the engine so a subsequent reset can retry.
+        if let Err(e) = engine.reset() {
+            *self.recovered_engine.lock().unwrap() = Some(engine);
+            return Err(e);
+        }
 
         // Fresh shared state.
         let worker_count = self.config.resolved_worker_count();
@@ -547,7 +554,7 @@ impl RealtimeAsyncWorld {
         let tick_rate_hz = self.tick_rate_hz;
         let max_epoch_hold_ms = self.config.max_epoch_hold_ms;
         let cancel_grace_ms = self.config.cancel_grace_ms;
-        let backoff_config = crate::config::BackoffConfig::default();
+        let backoff_config = self.backoff_config.clone();
         self.tick_thread = Some(
             thread::Builder::new()
                 .name("murk-tick".into())
