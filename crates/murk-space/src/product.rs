@@ -398,6 +398,9 @@ impl Space for ProductSpace {
     }
 
     fn canonical_rank(&self, coord: &Coord) -> Option<usize> {
+        if coord.len() != self.total_ndim {
+            return None;
+        }
         // rank = Σ comp_rank[i] * stride[i]
         // where stride[i] = product(cell_count[j] for j > i)
         let n = self.components.len();

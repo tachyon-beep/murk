@@ -282,6 +282,9 @@ impl Space for Line1D {
     }
 
     fn canonical_rank(&self, coord: &Coord) -> Option<usize> {
+        if coord.len() != 1 {
+            return None;
+        }
         let i = coord[0];
         if i >= 0 && i < self.len as i32 {
             Some(i as usize)
