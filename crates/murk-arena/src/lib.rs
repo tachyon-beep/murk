@@ -51,6 +51,6 @@ pub mod write;
 pub use config::ArenaConfig;
 pub use error::ArenaError;
 pub use pingpong::{PingPongArena, TickGuard};
-pub use read::Snapshot;
+pub use read::{OwnedSnapshot, Snapshot};
 pub use scratch::ScratchRegion;
 pub use static_arena::{SharedStaticArena, StaticArena};

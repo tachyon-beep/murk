@@ -11,6 +11,7 @@ use crate::error::ArenaError;
 /// Segments are the fundamental storage unit of the arena. Each segment is
 /// a pre-allocated `Vec<f32>` with a cursor that advances on each allocation.
 /// Segments are never freed during runtime — only reset or dropped at shutdown.
+#[derive(Clone)]
 pub struct Segment {
     /// Backing storage. Allocated to full capacity at creation.
     data: Vec<f32>,
@@ -212,6 +213,17 @@ impl SegmentList {
     }
 }
 
+impl Clone for SegmentList {
+    fn clone(&self) -> Self {
+        Self {
+            segments: self.segments[..=self.current].to_vec(),
+            segment_size: self.segment_size,
+            max_segments: self.max_segments,
+            current: self.current,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -328,5 +340,65 @@ mod tests {
         let mut list = SegmentList::new(100, 4);
         let result = list.alloc(100);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_segment_clone_preserves_data() {
+        let mut seg = Segment::new(1024);
+        let (offset, data) = seg.alloc(5).unwrap();
+        data[0] = 1.0;
+        data[4] = 5.0;
+
+        let cloned = seg.clone();
+        let read = cloned.slice(offset, 5);
+        assert_eq!(read[0], 1.0);
+        assert_eq!(read[4], 5.0);
+        assert_eq!(cloned.used(), 5);
+        assert_eq!(cloned.capacity(), 1024);
+    }
+
+    #[test]
+    fn test_segment_clone_independent() {
+        let mut seg = Segment::new(1024);
+        let (_offset, data) = seg.alloc(5).unwrap();
+        data[0] = 1.0;
+
+        let mut cloned = seg.clone();
+        // Mutate original — clone should be unaffected.
+        let data = seg.slice_mut(0, 5);
+        data[0] = 99.0;
+        assert_eq!(cloned.slice(0, 5)[0], 1.0);
+
+        // Mutate clone — original should be unaffected.
+        let cdata = cloned.slice_mut(0, 5);
+        cdata[0] = 77.0;
+        assert_eq!(seg.slice(0, 5)[0], 99.0);
+    }
+
+    #[test]
+    fn test_segment_list_clone_preserves_slices() {
+        let mut list = SegmentList::new(100, 4);
+        let (seg0, off0) = list.alloc(80).unwrap();
+        list.slice_mut(seg0, off0, 80)[0] = 42.0;
+        let (seg1, off1) = list.alloc(80).unwrap(); // overflows to segment 1
+        list.slice_mut(seg1, off1, 80)[0] = 99.0;
+
+        let cloned = list.clone();
+        assert_eq!(cloned.segment_count(), 2);
+        assert_eq!(cloned.slice(seg0, off0, 80)[0], 42.0);
+        assert_eq!(cloned.slice(seg1, off1, 80)[0], 99.0);
+    }
+
+    #[test]
+    fn test_segment_list_clone_independent() {
+        let mut list = SegmentList::new(100, 4);
+        let (seg, off) = list.alloc(10).unwrap();
+        list.slice_mut(seg, off, 10)[0] = 42.0;
+
+        let cloned = list.clone();
+        // Mutate original.
+        list.slice_mut(seg, off, 10)[0] = 0.0;
+        // Clone is unaffected.
+        assert_eq!(cloned.slice(seg, off, 10)[0], 42.0);
     }
 }

@@ -12,6 +12,8 @@
 //! 3. `publish()` — swap buffers, update generation
 //! 4. `snapshot()` — borrow published buffer as a `Snapshot`
 
+use std::sync::Arc;
+
 use murk_core::id::{FieldId, ParameterVersion, TickId, WorldGenerationId};
 use murk_core::{FieldDef, FieldMutability};
 
@@ -19,7 +21,7 @@ use crate::config::ArenaConfig;
 use crate::descriptor::FieldDescriptor;
 use crate::error::ArenaError;
 use crate::handle::{FieldHandle, FieldLocation};
-use crate::read::Snapshot;
+use crate::read::{OwnedSnapshot, Snapshot};
 use crate::scratch::ScratchRegion;
 use crate::segment::SegmentList;
 use crate::sparse::SparseSlab;
@@ -293,6 +295,28 @@ impl PingPongArena {
             &self.sparse_segments,
             &self.static_arena,
             &self.published_descriptor,
+            self.last_tick_id,
+            WorldGenerationId(self.generation as u64),
+            self.last_param_version,
+        )
+    }
+
+    /// Get an owned, thread-safe snapshot of the published generation.
+    ///
+    /// Unlike [`PingPongArena::snapshot()`], the returned `OwnedSnapshot` owns
+    /// clones of the segment data and can be sent across thread boundaries.
+    /// Used by RealtimeAsync mode to populate the snapshot ring buffer.
+    pub fn owned_snapshot(&self) -> OwnedSnapshot {
+        let published_segments = if self.b_is_staging {
+            &self.buffer_a
+        } else {
+            &self.buffer_b
+        };
+        OwnedSnapshot::new(
+            published_segments.clone(),
+            self.sparse_segments.clone(),
+            Arc::clone(&self.static_arena),
+            self.published_descriptor.clone(),
             self.last_tick_id,
             WorldGenerationId(self.generation as u64),
             self.last_param_version,
@@ -764,6 +788,63 @@ mod tests {
             cell_count,
         };
         assert!(PingPongArena::new(config, field_defs, static_arena).is_ok());
+    }
+
+    #[test]
+    fn test_owned_snapshot_from_arena() {
+        let mut arena = make_arena();
+
+        // Tick 1: write temperature.
+        {
+            let mut guard = arena.begin_tick().unwrap();
+            let data = guard.writer.write(FieldId(0)).unwrap();
+            data[0] = 42.0;
+            data[99] = 99.0;
+        }
+        arena.publish(TickId(1), ParameterVersion(0));
+
+        let owned = arena.owned_snapshot();
+        let data = owned.read_field(FieldId(0)).unwrap();
+        assert_eq!(data[0], 42.0);
+        assert_eq!(data[99], 99.0);
+
+        // Static field should also be readable.
+        let terrain = owned.read_field(FieldId(2)).unwrap();
+        assert_eq!(terrain[50], 50.0);
+
+        // Metadata should match.
+        assert_eq!(owned.tick_id(), TickId(1));
+    }
+
+    #[test]
+    fn test_owned_snapshot_survives_mutation() {
+        let mut arena = make_arena();
+
+        // Tick 1.
+        {
+            let mut guard = arena.begin_tick().unwrap();
+            let data = guard.writer.write(FieldId(0)).unwrap();
+            data[0] = 42.0;
+        }
+        arena.publish(TickId(1), ParameterVersion(0));
+
+        let owned = arena.owned_snapshot();
+
+        // Tick 2: mutate the arena.
+        {
+            let mut guard = arena.begin_tick().unwrap();
+            let data = guard.writer.write(FieldId(0)).unwrap();
+            data[0] = 999.0;
+        }
+        arena.publish(TickId(2), ParameterVersion(0));
+
+        // OwnedSnapshot from tick 1 should be unaffected.
+        assert_eq!(owned.read_field(FieldId(0)).unwrap()[0], 42.0);
+        assert_eq!(owned.tick_id(), TickId(1));
+
+        // New snapshot should see tick 2 data.
+        let snap = arena.snapshot();
+        assert_eq!(snap.read_field(FieldId(0)).unwrap()[0], 999.0);
     }
 
     #[test]

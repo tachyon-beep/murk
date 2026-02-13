@@ -10,14 +10,18 @@
 #![forbid(unsafe_code)]
 
 pub mod config;
+pub mod epoch;
 pub mod ingress;
 pub mod lockstep;
 pub mod metrics;
 mod overlay;
+pub mod ring;
 pub mod tick;
 
 pub use config::{BackoffConfig, ConfigError, WorldConfig};
+pub use epoch::{EpochCounter, WorkerEpoch, EPOCH_UNPINNED};
 pub use ingress::{DrainResult, DrainedCommand, IngressQueue};
 pub use lockstep::{LockstepWorld, StepResult};
 pub use metrics::StepMetrics;
+pub use ring::SnapshotRing;
 pub use tick::{TickEngine, TickError, TickResult};

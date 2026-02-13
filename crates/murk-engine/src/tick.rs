@@ -355,6 +355,14 @@ impl TickEngine {
         self.arena.snapshot()
     }
 
+    /// Get an owned, thread-safe snapshot of the current published generation.
+    ///
+    /// Unlike [`TickEngine::snapshot()`], the returned `OwnedSnapshot` owns
+    /// clones of the segment data and can be sent across thread boundaries.
+    pub fn owned_snapshot(&self) -> murk_arena::OwnedSnapshot {
+        self.arena.owned_snapshot()
+    }
+
     /// Current tick ID.
     pub fn current_tick(&self) -> TickId {
         self.current_tick
