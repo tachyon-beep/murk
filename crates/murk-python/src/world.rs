@@ -4,7 +4,7 @@
 //! threads can run while the simulation ticks. This prevents lock-ordering
 //! deadlocks between the GIL and FFI-internal mutexes (WORLDS, CONFIGS).
 
-use numpy::{PyArray1, PyArrayMethods};
+use numpy::{PyArray1, PyArrayMethods, PyUntypedArrayMethods};
 use pyo3::prelude::*;
 
 use murk_ffi::{
@@ -41,7 +41,15 @@ impl World {
             let s = murk_lockstep_create(cfg_handle, &mut wh);
             (s, wh)
         });
-        check_status(status)?;
+        if let Err(e) = check_status(status) {
+            // Free trampoline allocations that were taken from config.
+            let mut world = World {
+                handle: None,
+                trampoline_data,
+            };
+            world.free_trampolines();
+            return Err(e);
+        }
         Ok(World {
             handle: Some(world_handle),
             trampoline_data,
@@ -134,7 +142,10 @@ impl World {
     ///
     /// Args:
     ///     field_id: Field index to read.
-    ///     output: Pre-allocated numpy float32 array to fill.
+    ///     output: Pre-allocated **C-contiguous** numpy float32 array to fill.
+    ///
+    /// Raises:
+    ///     ValueError: If `output` is not C-contiguous.
     #[allow(unsafe_code)]
     fn read_field<'py>(
         &self,
@@ -143,8 +154,13 @@ impl World {
         output: &Bound<'py, PyArray1<f32>>,
     ) -> PyResult<()> {
         let h = self.require_handle()?;
+        if !output.is_c_contiguous() {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "output array must be C-contiguous",
+            ));
+        }
         let buf_addr = unsafe { output.as_array_mut().as_mut_ptr() } as usize;
-        let buf_len = output.len()?;
+        let buf_len = output.len();
         // Release GIL: murk_snapshot_read_field locks WORLDS.
         let status = py.allow_threads(|| {
             murk_snapshot_read_field(h, field_id, buf_addr as *mut f32, buf_len)

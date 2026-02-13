@@ -273,6 +273,13 @@ fn trampoline_inner(
         let item = write_arrays.get_item(i)?;
         let arr = item.downcast::<numpy::PyArray1<f32>>()?;
         let readonly = unsafe { arr.as_slice()? };
+        if readonly.len() != len {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "propagator writes[{i}]: expected length {len}, got {}. \
+                 Do not resize write arrays inside the propagator.",
+                readonly.len()
+            )));
+        }
         let dest = unsafe { std::slice::from_raw_parts_mut(addr as *mut f32, len) };
         dest.copy_from_slice(readonly);
     }

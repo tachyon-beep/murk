@@ -1,6 +1,6 @@
 //! PyObsPlan: observation plan compilation and execution with NumPy zero-copy.
 
-use numpy::{PyArray1, PyArrayMethods};
+use numpy::{PyArray1, PyArrayMethods, PyUntypedArrayMethods};
 use pyo3::prelude::*;
 
 use murk_ffi::{
@@ -114,11 +114,14 @@ impl ObsPlan {
     ///
     /// Args:
     ///     world: The world to observe.
-    ///     output: Pre-allocated float32 array of shape (output_len,).
-    ///     mask: Pre-allocated uint8 array of shape (mask_len,).
+    ///     output: Pre-allocated **C-contiguous** float32 array of shape (output_len,).
+    ///     mask: Pre-allocated **C-contiguous** uint8 array of shape (mask_len,).
     ///
     /// Returns:
     ///     Tuple of (tick_id, age_ticks).
+    ///
+    /// Raises:
+    ///     ValueError: If `output` or `mask` is not C-contiguous.
     #[allow(unsafe_code)]
     fn execute<'py>(
         &self,
@@ -130,11 +133,22 @@ impl ObsPlan {
         let plan_h = self.require_handle()?;
         let world_h = world.handle()?;
 
+        if !output.is_c_contiguous() {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "output array must be C-contiguous",
+            ));
+        }
+        if !mask.is_c_contiguous() {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "mask array must be C-contiguous",
+            ));
+        }
+
         // Convert pointers to usize so the closure is Ungil.
         let out_addr = unsafe { output.as_array_mut().as_mut_ptr() } as usize;
-        let out_len = output.len()?;
+        let out_len = output.len();
         let mask_addr = unsafe { mask.as_array_mut().as_mut_ptr() } as usize;
-        let mask_len = mask.len()?;
+        let mask_len = mask.len();
 
         let mut result = MurkObsResult::default();
         let result_addr = &mut result as *mut MurkObsResult as usize;
