@@ -115,6 +115,39 @@ impl ProductSpace {
         out
     }
 
+    /// Sort coordinates by product canonical order (leftmost component slowest).
+    ///
+    /// Builds per-component canonical index maps and sorts by the
+    /// resulting rank tuple, matching the odometer iteration order.
+    fn sort_canonical(&self, coords: &mut [Coord]) {
+        use std::collections::HashMap;
+        let index_maps: Vec<HashMap<Coord, usize>> = self
+            .components
+            .iter()
+            .map(|c| {
+                c.canonical_ordering()
+                    .into_iter()
+                    .enumerate()
+                    .map(|(idx, coord)| (coord, idx))
+                    .collect()
+            })
+            .collect();
+
+        coords.sort_by(|a, b| {
+            for i in 0..self.components.len() {
+                let sa = self.split_coord(a, i);
+                let sb = self.split_coord(b, i);
+                let ra = index_maps[i].get(&sa).copied().unwrap_or(usize::MAX);
+                let rb = index_maps[i].get(&sb).copied().unwrap_or(usize::MAX);
+                match ra.cmp(&rb) {
+                    std::cmp::Ordering::Equal => continue,
+                    other => return other,
+                }
+            }
+            std::cmp::Ordering::Equal
+        });
+    }
+
     /// Compute distance using an alternate metric (not the default L1).
     pub fn metric_distance(&self, a: &Coord, b: &Coord, metric: &ProductMetric) -> f64 {
         let per_comp: Vec<f64> = (0..self.components.len())
@@ -333,7 +366,7 @@ impl Space for ProductSpace {
                     }
                 }
                 let mut sorted: Vec<Coord> = coords.clone();
-                sorted.sort();
+                self.sort_canonical(&mut sorted);
                 sorted.dedup();
                 let cell_count = sorted.len();
                 let tensor_indices: Vec<usize> = (0..cell_count).collect();
@@ -402,6 +435,17 @@ impl ProductSpace {
                 bounds: format!("expected {}D coordinate", self.total_ndim),
             });
         }
+        // Validate center is in-bounds for each component.
+        for i in 0..self.components.len() {
+            let sub = self.split_coord(center, i);
+            let ordering = self.components[i].canonical_ordering();
+            if !ordering.contains(&sub) {
+                return Err(SpaceError::CoordOutOfBounds {
+                    coord: center.clone(),
+                    bounds: format!("component {i} coordinate {:?} out of bounds", sub),
+                });
+            }
+        }
 
         let mut visited: HashSet<Coord> = HashSet::new();
         let mut queue: VecDeque<(Coord, u32)> = VecDeque::new();
@@ -423,7 +467,7 @@ impl ProductSpace {
             }
         }
 
-        result.sort();
+        self.sort_canonical(&mut result);
         let cell_count = result.len();
         let tensor_indices: Vec<usize> = (0..cell_count).collect();
         let valid_mask = vec![1u8; cell_count];
@@ -631,6 +675,71 @@ mod tests {
         );
         assert!(s.downcast_ref::<ProductSpace>().is_some());
         assert!(s.downcast_ref::<Hex2D>().is_none());
+    }
+
+    // ── Regression tests ─────────────────────────────────────────
+
+    #[test]
+    fn disk_coords_match_canonical_order() {
+        // Verify BFS disk result is sorted by product canonical order,
+        // not raw lexicographic order (which diverges for Hex2D r-then-q).
+        let hex = Hex2D::new(5, 5).unwrap();
+        let line = Line1D::new(5, crate::EdgeBehavior::Absorb).unwrap();
+        let s = ProductSpace::new(vec![Box::new(hex), Box::new(line)]).unwrap();
+        let plan = s
+            .compile_region(&RegionSpec::Disk {
+                center: smallvec![2, 2, 2],
+                radius: 1,
+            })
+            .unwrap();
+        // Check that disk coords are a subsequence of canonical ordering.
+        let canonical = s.canonical_ordering();
+        let mut last_pos = None;
+        for coord in &plan.coords {
+            let pos = canonical.iter().position(|c| c == coord)
+                .expect("disk coord not in canonical ordering");
+            if let Some(lp) = last_pos {
+                assert!(pos > lp, "coords not in canonical order: {:?}", plan.coords);
+            }
+            last_pos = Some(pos);
+        }
+    }
+
+    #[test]
+    fn coords_region_matches_canonical_order() {
+        // Verify Coords region is sorted by product canonical order.
+        let hex = Hex2D::new(5, 5).unwrap();
+        let line = Line1D::new(5, crate::EdgeBehavior::Absorb).unwrap();
+        let s = ProductSpace::new(vec![Box::new(hex), Box::new(line)]).unwrap();
+        let plan = s
+            .compile_region(&RegionSpec::Coords(vec![
+                smallvec![1, 0, 3],
+                smallvec![0, 1, 2],  // Hex canonical: (0,1) > (1,0) since r-then-q
+                smallvec![2, 0, 0],
+            ]))
+            .unwrap();
+        let canonical = s.canonical_ordering();
+        let mut last_pos = None;
+        for coord in &plan.coords {
+            let pos = canonical.iter().position(|c| c == coord).unwrap();
+            if let Some(lp) = last_pos {
+                assert!(pos > lp, "coords not in canonical order: {:?}", plan.coords);
+            }
+            last_pos = Some(pos);
+        }
+    }
+
+    #[test]
+    fn disk_oob_center_rejected() {
+        let hex = Hex2D::new(5, 5).unwrap();
+        let line = Line1D::new(5, crate::EdgeBehavior::Absorb).unwrap();
+        let s = ProductSpace::new(vec![Box::new(hex), Box::new(line)]).unwrap();
+        // Center q=999 is out of bounds for Hex2D(5,5).
+        let result = s.compile_region(&RegionSpec::Disk {
+            center: smallvec![999, 0, 2],
+            radius: 1,
+        });
+        assert!(result.is_err());
     }
 
     // ── Property tests ──────────────────────────────────────────

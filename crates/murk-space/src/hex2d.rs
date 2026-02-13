@@ -128,8 +128,12 @@ impl Hex2D {
         center_r: i32,
         radius: u32,
     ) -> RegionPlan {
-        let r = radius as i32;
-        let side = 2 * r + 1;
+        // Clamp effective radius to grid bounds to avoid overflow.
+        // No cell can be further than (rows + cols) from center.
+        let max_useful = (self.rows as u64 + self.cols as u64).min(i32::MAX as u64) as u32;
+        let eff_radius = radius.min(max_useful);
+        let r = eff_radius as i32;
+        let side = 2i64 * r as i64 + 1;
         let bounding_size = (side * side) as usize;
         let mut valid_mask = vec![0u8; bounding_size];
         let mut coords = Vec::new();
@@ -146,7 +150,7 @@ impl Hex2D {
                 if q < 0 || q >= self.cols as i32 || rv < 0 || rv >= self.rows as i32 {
                     continue;
                 }
-                let tensor_idx = ((dr + r) * side + (dq + r)) as usize;
+                let tensor_idx = ((dr + r) as i64 * side + (dq + r) as i64) as usize;
                 valid_mask[tensor_idx] = 1;
                 coords.push(smallvec![q, rv]);
                 tensor_indices.push(tensor_idx);
@@ -460,6 +464,19 @@ mod tests {
         // Corner: many cells clipped by boundary.
         assert!(plan.cell_count < 19);
         assert!(plan.cell_count >= 1);
+    }
+
+    #[test]
+    fn compile_region_disk_huge_radius_does_not_overflow() {
+        // Radius larger than grid — should clamp and return all cells.
+        let s = Hex2D::new(3, 3).unwrap();
+        let plan = s
+            .compile_region(&RegionSpec::Disk {
+                center: c(1, 1),
+                radius: u32::MAX,
+            })
+            .unwrap();
+        assert_eq!(plan.cell_count, 9);
     }
 
     #[test]
