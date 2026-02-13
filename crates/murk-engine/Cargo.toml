@@ -10,7 +10,9 @@ murk-arena = { path = "../murk-arena" }
 murk-space = { path = "../murk-space" }
 murk-propagator = { path = "../murk-propagator" }
 murk-obs = { path = "../murk-obs" }
+crossbeam-channel = { workspace = true }
 indexmap = { workspace = true }
+smallvec = { workspace = true }
 
 [dev-dependencies]
 murk-test-utils = { path = "../murk-test-utils" }

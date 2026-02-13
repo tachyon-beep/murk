@@ -15,6 +15,7 @@ members = [
 ]
 
 [workspace.dependencies]
+crossbeam-channel = "0.5"
 indexmap = "2"
 proptest = "1"
 criterion = { version = "0.5", features = ["html_reports"] }

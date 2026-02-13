@@ -46,6 +46,47 @@ impl Default for BackoffConfig {
     }
 }
 
+// ── AsyncConfig ───────────────────────────────────────────────────
+
+/// Configuration for [`RealtimeAsyncWorld`](crate::realtime::RealtimeAsyncWorld).
+///
+/// Controls the egress worker pool size and epoch-hold budget that
+/// governs the shutdown state machine and stalled-worker detection.
+#[derive(Clone, Debug)]
+pub struct AsyncConfig {
+    /// Number of egress worker threads. `None` = auto-detect
+    /// (`available_parallelism / 2`, clamped to `[2, 16]`).
+    pub worker_count: Option<usize>,
+    /// Maximum milliseconds a worker may hold an epoch pin before being
+    /// considered stalled and forcibly unpinned. Default: 100.
+    pub max_epoch_hold_ms: u64,
+    /// Grace period (ms) after cancellation before the worker is
+    /// forcibly unpinned. Default: 10.
+    pub cancel_grace_ms: u64,
+}
+
+impl Default for AsyncConfig {
+    fn default() -> Self {
+        Self {
+            worker_count: None,
+            max_epoch_hold_ms: 100,
+            cancel_grace_ms: 10,
+        }
+    }
+}
+
+impl AsyncConfig {
+    /// Resolve the actual worker count, applying auto-detection if `None`.
+    pub fn resolved_worker_count(&self) -> usize {
+        self.worker_count.unwrap_or_else(|| {
+            let cpus = std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(4);
+            (cpus / 2).clamp(2, 16)
+        })
+    }
+}
+
 // ── ConfigError ────────────────────────────────────────────────────
 
 /// Errors detected during [`WorldConfig::validate()`].
