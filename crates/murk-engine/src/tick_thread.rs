@@ -167,7 +167,10 @@ impl TickThreadState {
     }
 
     /// Main tick loop. Runs until `shutdown_flag` is set.
-    pub fn run(&mut self) {
+    ///
+    /// Consumes self and returns the `TickEngine` so that the caller
+    /// can recover it for `reset()` via `JoinHandle<TickEngine>`.
+    pub fn run(mut self) -> TickEngine {
         loop {
             if self.shutdown_flag.load(Ordering::Acquire) {
                 break;
@@ -216,6 +219,7 @@ impl TickThreadState {
 
         // Signal that the tick thread has stopped.
         self.tick_stopped.store(true, Ordering::Release);
+        self.engine
     }
 
     /// Drain all pending command batches from the channel.
@@ -230,7 +234,7 @@ impl TickThreadState {
     /// Check for stalled workers and force-unpin them.
     /// Returns `true` if any worker was force-unpinned.
     fn check_stalled_workers(&self) -> bool {
-        let now_ns = monotonic_nanos();
+        let now_ns = crate::epoch::monotonic_nanos();
         let mut had_rejection = false;
 
         for worker in self.worker_epochs.iter() {
@@ -238,10 +242,11 @@ impl TickThreadState {
                 continue;
             }
 
-            let last_q = worker.last_quiesce_ns();
-            // last_quiesce_ns is seeded at construction time, so this
-            // subtraction is always meaningful — no special-casing needed.
-            let hold_ns = now_ns.saturating_sub(last_q);
+            // Use pin_start_ns (set when pin() was called) to measure
+            // actual pin hold duration, not time-since-last-unpin which
+            // would include idle time between tasks.
+            let pin_start = worker.pin_start_ns();
+            let hold_ns = now_ns.saturating_sub(pin_start);
 
             if hold_ns > self.max_epoch_hold_ns {
                 // First: request cooperative cancellation.
@@ -271,14 +276,6 @@ impl TickThreadState {
             std::thread::sleep(Duration::from_millis(10));
         }
     }
-}
-
-/// Returns monotonic nanoseconds since process start.
-fn monotonic_nanos() -> u64 {
-    use std::sync::OnceLock;
-    static EPOCH: OnceLock<Instant> = OnceLock::new();
-    let epoch = EPOCH.get_or_init(Instant::now);
-    Instant::now().duration_since(*epoch).as_nanos() as u64
 }
 
 #[cfg(test)]

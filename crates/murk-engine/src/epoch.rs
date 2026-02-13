@@ -66,8 +66,12 @@ pub struct WorkerEpoch {
     /// `EPOCH_UNPINNED` means not holding any generation.
     pinned: AtomicU64,
 
+    /// Monotonic timestamp (nanos) when `pin()` was called.
+    /// Used for stalled-worker detection: the tick thread computes
+    /// `now - pin_start_ns` to get the actual pin hold duration.
+    pin_start_ns: AtomicU64,
+
     /// Monotonic timestamp (nanos) of the last unpin.
-    /// Used for stalled-worker detection.
     last_quiesce_ns: AtomicU64,
 
     /// Cooperative cancellation flag.
@@ -91,16 +95,20 @@ impl WorkerEpoch {
     /// that the first pin is never misclassified as a stall due to
     /// elapsed process uptime.
     pub fn new(worker_id: u32) -> Self {
+        let now = monotonic_nanos();
         Self {
             pinned: AtomicU64::new(EPOCH_UNPINNED),
-            last_quiesce_ns: AtomicU64::new(monotonic_nanos()),
+            pin_start_ns: AtomicU64::new(now),
+            last_quiesce_ns: AtomicU64::new(now),
             cancel: AtomicBool::new(false),
             worker_id,
         }
     }
 
     /// Pin this worker to the given epoch before accessing a snapshot.
+    /// Records the pin-start timestamp for stall detection.
     pub fn pin(&self, epoch: u64) {
+        self.pin_start_ns.store(monotonic_nanos(), Ordering::Release);
         self.pinned.store(epoch, Ordering::Release);
     }
 
@@ -120,6 +128,12 @@ impl WorkerEpoch {
     /// The epoch this worker is pinned to, or `EPOCH_UNPINNED`.
     pub fn pinned_epoch(&self) -> u64 {
         self.pinned.load(Ordering::Acquire)
+    }
+
+    /// Monotonic nanoseconds when `pin()` was last called.
+    /// Used by the tick thread to measure actual pin hold duration.
+    pub fn pin_start_ns(&self) -> u64 {
+        self.pin_start_ns.load(Ordering::Acquire)
     }
 
     /// Monotonic nanoseconds of the last unpin event.
@@ -158,7 +172,11 @@ pub fn min_pinned_epoch(workers: &[WorkerEpoch]) -> u64 {
 ///
 /// Uses `OnceLock<Instant>` to lazily initialise a baseline. NOT wall-clock
 /// time — only for relative duration comparisons (stall detection).
-fn monotonic_nanos() -> u64 {
+///
+/// This is the single source of truth for monotonic timestamps in the
+/// engine. All callers (epoch, tick_thread, egress) must use this
+/// function to avoid clock-skew between independent `OnceLock` statics.
+pub(crate) fn monotonic_nanos() -> u64 {
     static EPOCH: OnceLock<Instant> = OnceLock::new();
     let epoch = EPOCH.get_or_init(Instant::now);
     Instant::now().duration_since(*epoch).as_nanos() as u64
@@ -251,6 +269,32 @@ mod tests {
         assert!(
             std::mem::align_of::<WorkerEpoch>() >= 128,
             "WorkerEpoch must be cache-line aligned (>= 128 bytes)"
+        );
+    }
+
+    #[test]
+    fn test_pin_start_ns_records_pin_time() {
+        let worker = WorkerEpoch::new(0);
+
+        // pin_start_ns is seeded at construction (not zero).
+        let initial = worker.pin_start_ns();
+        assert!(initial > 0, "pin_start_ns should be seeded at construction");
+
+        // Sleep briefly then pin — pin_start_ns should advance.
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        worker.pin(42);
+        let after_pin = worker.pin_start_ns();
+        assert!(
+            after_pin > initial,
+            "pin_start_ns should advance on pin(): initial={initial}, after={after_pin}"
+        );
+
+        // Unpin should NOT change pin_start_ns (only updates last_quiesce_ns).
+        worker.unpin();
+        let after_unpin = worker.pin_start_ns();
+        assert_eq!(
+            after_pin, after_unpin,
+            "pin_start_ns should not change on unpin()"
         );
     }
 }

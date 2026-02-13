@@ -27,7 +27,7 @@
 //! ```
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -109,17 +109,18 @@ pub struct RealtimeAsyncWorld {
     obs_tx: Option<crossbeam_channel::Sender<ObsTask>>,
     shutdown_flag: Arc<AtomicBool>,
     tick_stopped: Arc<AtomicBool>,
-    tick_thread: Option<JoinHandle<()>>,
+    tick_thread: Option<JoinHandle<TickEngine>>,
     worker_threads: Vec<JoinHandle<()>>,
     state: ShutdownState,
-    /// Retained for potential `reset()` reconstruction.
-    #[allow(dead_code)]
+    /// Recovered from tick thread on shutdown, used for `reset()`.
+    /// Wrapped in Mutex so RealtimeAsyncWorld is Sync (TickEngine
+    /// contains Vec<Box<dyn Propagator>> which is Send but not Sync).
+    /// Never contended: only accessed during reset() which takes &mut self.
+    recovered_engine: Mutex<Option<TickEngine>>,
     config: AsyncConfig,
     seed: u64,
-    /// Retained for potential `reset()` reconstruction.
-    #[allow(dead_code)]
     tick_rate_hz: f64,
-    /// Retained for `reset()` — needs to reconstruct a WorldConfig.
+    /// Shared space for agent-relative observations and engine reconstruction.
     space: Arc<dyn Space>,
 }
 
@@ -179,7 +180,7 @@ impl RealtimeAsyncWorld {
         // Task channel for egress workers: bounded(worker_count * 4).
         let (obs_tx, obs_rx) = crossbeam_channel::bounded(worker_count * 4);
 
-        // Spawn tick thread.
+        // Spawn tick thread — returns TickEngine on exit for reset().
         let tick_ring = Arc::clone(&ring);
         let tick_epoch = Arc::clone(&epoch_counter);
         let tick_workers = Arc::clone(&worker_epochs);
@@ -188,7 +189,7 @@ impl RealtimeAsyncWorld {
         let tick_thread = thread::Builder::new()
             .name("murk-tick".into())
             .spawn(move || {
-                let mut state = TickThreadState::new(
+                let state = TickThreadState::new(
                     engine,
                     tick_ring,
                     tick_epoch,
@@ -201,33 +202,18 @@ impl RealtimeAsyncWorld {
                     cancel_grace_ms,
                     &backoff_config,
                 );
-                state.run();
+                state.run()
             })
             .expect("failed to spawn tick thread");
 
         // Spawn egress worker threads.
-        let mut worker_threads = Vec::with_capacity(worker_count);
-        for i in 0..worker_count {
-            let obs_rx = obs_rx.clone();
-            let ring = Arc::clone(&ring);
-            let epoch = Arc::clone(&epoch_counter);
-            // Each worker gets its own WorkerEpoch by index.
-            let worker_epochs_ref = Arc::clone(&worker_epochs);
-            let handle = thread::Builder::new()
-                .name(format!("murk-egress-{i}"))
-                .spawn(move || {
-                    // Safety: WorkerEpoch is Send+Sync, we access by index.
-                    crate::egress::worker_loop_indexed(
-                        obs_rx,
-                        ring,
-                        epoch,
-                        worker_epochs_ref,
-                        i,
-                    );
-                })
-                .expect("failed to spawn egress worker");
-            worker_threads.push(handle);
-        }
+        let worker_threads = Self::spawn_egress_workers(
+            worker_count,
+            &obs_rx,
+            &ring,
+            &epoch_counter,
+            &worker_epochs,
+        );
 
         Ok(Self {
             ring,
@@ -240,6 +226,7 @@ impl RealtimeAsyncWorld {
             tick_thread: Some(tick_thread),
             worker_threads,
             state: ShutdownState::Running,
+            recovered_engine: Mutex::new(None),
             config: async_config,
             seed,
             tick_rate_hz,
@@ -382,6 +369,37 @@ impl RealtimeAsyncWorld {
         }
     }
 
+    /// Spawn egress worker threads (shared between `new` and `reset`).
+    fn spawn_egress_workers(
+        worker_count: usize,
+        obs_rx: &crossbeam_channel::Receiver<ObsTask>,
+        ring: &Arc<SnapshotRing>,
+        epoch_counter: &Arc<EpochCounter>,
+        worker_epochs: &Arc<[WorkerEpoch]>,
+    ) -> Vec<JoinHandle<()>> {
+        let mut worker_threads = Vec::with_capacity(worker_count);
+        for i in 0..worker_count {
+            let obs_rx = obs_rx.clone();
+            let ring = Arc::clone(ring);
+            let epoch = Arc::clone(epoch_counter);
+            let worker_epochs_ref = Arc::clone(worker_epochs);
+            let handle = thread::Builder::new()
+                .name(format!("murk-egress-{i}"))
+                .spawn(move || {
+                    crate::egress::worker_loop_indexed(
+                        obs_rx,
+                        ring,
+                        epoch,
+                        worker_epochs_ref,
+                        i,
+                    );
+                })
+                .expect("failed to spawn egress worker");
+            worker_threads.push(handle);
+        }
+        worker_threads
+    }
+
     /// Get the latest snapshot directly from the ring.
     pub fn latest_snapshot(&self) -> Option<Arc<OwnedSnapshot>> {
         self.ring.latest()
@@ -451,7 +469,13 @@ impl RealtimeAsyncWorld {
         self.state = ShutdownState::Dropped;
 
         let tick_joined = if let Some(handle) = self.tick_thread.take() {
-            handle.join().is_ok()
+            match handle.join() {
+                Ok(engine) => {
+                    *self.recovered_engine.lock().unwrap() = Some(engine);
+                    true
+                }
+                Err(_) => false,
+            }
         } else {
             true
         };
@@ -473,30 +497,90 @@ impl RealtimeAsyncWorld {
         }
     }
 
-    /// Reset the world: stop, reset engine state, restart all threads.
+    /// Reset the world: stop all threads, reset engine state, restart.
+    ///
+    /// This is the RL episode-boundary operation. The engine is recovered
+    /// from the tick thread, reset in-place, then respawned with fresh
+    /// channels and worker threads.
     pub fn reset(&mut self, seed: u64) -> Result<(), ConfigError> {
-        // Shutdown if still running.
+        // Shutdown if still running (recovers engine via JoinHandle).
         if self.state != ShutdownState::Dropped {
             self.shutdown();
         }
 
         self.seed = seed;
 
-        // We can't easily reset and restart — the engine was moved into
-        // the tick thread and consumed. For reset, we need to construct
-        // a new world entirely. This is acceptable since reset is rare
-        // (episode boundaries) and the cost is ~1ms.
-        //
-        // However, we don't have the original WorldConfig fields here.
-        // The plan specifies reset should "stop, reset engine, restart."
-        // Since TickEngine was consumed, we'll need to track enough state
-        // to reconstruct. For now, return an error indicating the limitation.
-        //
-        // A proper implementation would store the WorldConfig components
-        // needed for reconstruction.
-        Err(ConfigError::InvalidTickRate {
-            value: 0.0, // placeholder
-        })
+        // Recover the engine from the previous tick thread.
+        let mut engine = self
+            .recovered_engine
+            .lock()
+            .unwrap()
+            .take()
+            .ok_or(ConfigError::InvalidTickRate { value: 0.0 })?;
+
+        // Reset the engine (clears arena, ingress, tick counter).
+        engine.reset()?;
+
+        // Fresh shared state.
+        let worker_count = self.config.resolved_worker_count();
+        self.ring = Arc::new(SnapshotRing::new(self.ring.capacity()));
+        self.epoch_counter = Arc::new(EpochCounter::new());
+        self.worker_epochs = (0..worker_count as u32)
+            .map(WorkerEpoch::new)
+            .collect::<Vec<_>>()
+            .into();
+        self.shutdown_flag = Arc::new(AtomicBool::new(false));
+        self.tick_stopped = Arc::new(AtomicBool::new(false));
+
+        // Fresh channels.
+        let (cmd_tx, cmd_rx) = crossbeam_channel::bounded(64);
+        let (obs_tx, obs_rx) = crossbeam_channel::bounded(worker_count * 4);
+        self.cmd_tx = Some(cmd_tx);
+        self.obs_tx = Some(obs_tx);
+
+        // Respawn tick thread.
+        let tick_ring = Arc::clone(&self.ring);
+        let tick_epoch = Arc::clone(&self.epoch_counter);
+        let tick_workers = Arc::clone(&self.worker_epochs);
+        let tick_shutdown = Arc::clone(&self.shutdown_flag);
+        let tick_stopped_flag = Arc::clone(&self.tick_stopped);
+        let tick_rate_hz = self.tick_rate_hz;
+        let max_epoch_hold_ms = self.config.max_epoch_hold_ms;
+        let cancel_grace_ms = self.config.cancel_grace_ms;
+        let backoff_config = crate::config::BackoffConfig::default();
+        self.tick_thread = Some(
+            thread::Builder::new()
+                .name("murk-tick".into())
+                .spawn(move || {
+                    let state = TickThreadState::new(
+                        engine,
+                        tick_ring,
+                        tick_epoch,
+                        tick_workers,
+                        cmd_rx,
+                        tick_shutdown,
+                        tick_stopped_flag,
+                        tick_rate_hz,
+                        max_epoch_hold_ms,
+                        cancel_grace_ms,
+                        &backoff_config,
+                    );
+                    state.run()
+                })
+                .expect("failed to spawn tick thread"),
+        );
+
+        // Respawn egress workers.
+        self.worker_threads = Self::spawn_egress_workers(
+            worker_count,
+            &obs_rx,
+            &self.ring,
+            &self.epoch_counter,
+            &self.worker_epochs,
+        );
+
+        self.state = ShutdownState::Running;
+        Ok(())
     }
 
     /// The shared space used for agent-relative observations.
@@ -770,5 +854,40 @@ mod tests {
             "shutdown took too long: {}ms",
             report.total_ms
         );
+    }
+
+    #[test]
+    fn reset_lifecycle() {
+        let mut world =
+            RealtimeAsyncWorld::new(test_config(), AsyncConfig::default()).unwrap();
+
+        // Wait for some ticks.
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while world.current_epoch() < 5 {
+            if Instant::now() > deadline {
+                panic!("epoch didn't reach 5 within 2s");
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let epoch_before = world.current_epoch();
+        assert!(epoch_before >= 5);
+
+        // Reset with a new seed.
+        world.reset(99).unwrap();
+
+        // After reset, epoch should restart from 0.
+        assert_eq!(world.current_epoch(), 0);
+
+        // The world should produce new snapshots.
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while world.latest_snapshot().is_none() {
+            if Instant::now() > deadline {
+                panic!("no snapshot after reset within 2s");
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(world.current_epoch() > 0, "should be ticking after reset");
+
+        world.shutdown();
     }
 }

@@ -77,13 +77,19 @@ impl Default for AsyncConfig {
 
 impl AsyncConfig {
     /// Resolve the actual worker count, applying auto-detection if `None`.
+    ///
+    /// Explicit values are clamped to `[1, 64]`. Zero workers would
+    /// create an unusable world (no egress threads to service observations).
     pub fn resolved_worker_count(&self) -> usize {
-        self.worker_count.unwrap_or_else(|| {
-            let cpus = std::thread::available_parallelism()
-                .map(|n| n.get())
-                .unwrap_or(4);
-            (cpus / 2).clamp(2, 16)
-        })
+        match self.worker_count {
+            Some(n) => n.clamp(1, 64),
+            None => {
+                let cpus = std::thread::available_parallelism()
+                    .map(|n| n.get())
+                    .unwrap_or(4);
+                (cpus / 2).clamp(2, 16)
+            }
+        }
     }
 }
 
@@ -402,5 +408,30 @@ mod tests {
             Err(ConfigError::NoFields) => {}
             other => panic!("expected NoFields, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn async_config_resolved_worker_count_clamps_zero() {
+        let cfg = AsyncConfig {
+            worker_count: Some(0),
+            ..AsyncConfig::default()
+        };
+        assert_eq!(cfg.resolved_worker_count(), 1);
+    }
+
+    #[test]
+    fn async_config_resolved_worker_count_clamps_large() {
+        let cfg = AsyncConfig {
+            worker_count: Some(200),
+            ..AsyncConfig::default()
+        };
+        assert_eq!(cfg.resolved_worker_count(), 64);
+    }
+
+    #[test]
+    fn async_config_resolved_worker_count_auto() {
+        let cfg = AsyncConfig::default();
+        let count = cfg.resolved_worker_count();
+        assert!(count >= 2 && count <= 16, "auto count {count} out of [2,16]");
     }
 }
