@@ -266,12 +266,22 @@ pub fn decode_frame(r: &mut dyn Read) -> Result<Option<Frame>, ReplayError> {
         // Read optional source_id (presence flag + value)
         let source_id = match read_u8(r)? {
             0 => None,
-            _ => Some(read_u64_le(r)?),
+            1 => Some(read_u64_le(r)?),
+            flag => {
+                return Err(ReplayError::MalformedFrame {
+                    detail: format!("invalid source_id presence flag: {flag}"),
+                })
+            }
         };
         // Read optional source_seq (presence flag + value)
         let source_seq = match read_u8(r)? {
             0 => None,
-            _ => Some(read_u64_le(r)?),
+            1 => Some(read_u64_le(r)?),
+            flag => {
+                return Err(ReplayError::MalformedFrame {
+                    detail: format!("invalid source_seq presence flag: {flag}"),
+                })
+            }
         };
 
         commands.push(SerializedCommand {
@@ -1006,5 +1016,83 @@ mod tests {
         let got_zero = decode_frame(&mut buf_zero.as_slice()).unwrap().unwrap();
         assert_eq!(got_none.commands[0].source_id, None);
         assert_eq!(got_zero.commands[0].source_id, Some(0));
+    }
+
+    // ── P2: Invalid presence flag rejection ─────────────────────
+
+    #[test]
+    fn invalid_source_id_presence_flag_rejected() {
+        // Build a valid frame, then corrupt the source_id presence flag byte.
+        let frame = Frame {
+            tick_id: 1,
+            commands: vec![SerializedCommand {
+                payload_type: PAYLOAD_DESPAWN,
+                payload: 1u64.to_le_bytes().to_vec(),
+                priority_class: 1,
+                source_id: None,
+                source_seq: None,
+            }],
+            snapshot_hash: 0,
+        };
+
+        let mut buf = Vec::new();
+        encode_frame(&mut buf, &frame).unwrap();
+
+        // The source_id presence flag is the byte right after priority_class.
+        // Layout per command: payload_type(1) + len(4) + payload(8) + priority_class(1)
+        //   = 14 bytes into the command area.
+        // Frame starts: tick_id(8) + command_count(4) = 12 bytes header.
+        // So the source_id flag is at offset 12 + 14 = 26.
+        let flag_offset = 12 + 1 + 4 + 8 + 1; // tick(8)+count(4) + type(1)+len(4)+payload(8)+prio(1)
+        assert_eq!(buf[flag_offset], 0, "sanity: should be the None flag");
+        buf[flag_offset] = 2; // invalid flag value
+
+        let result = decode_frame(&mut buf.as_slice());
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ReplayError::MalformedFrame { detail } => {
+                assert!(
+                    detail.contains("invalid source_id presence flag"),
+                    "wrong detail: {detail}"
+                );
+            }
+            other => panic!("expected MalformedFrame, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn invalid_source_seq_presence_flag_rejected() {
+        // Build a frame with source_id=None, then corrupt the source_seq flag.
+        let frame = Frame {
+            tick_id: 1,
+            commands: vec![SerializedCommand {
+                payload_type: PAYLOAD_DESPAWN,
+                payload: 1u64.to_le_bytes().to_vec(),
+                priority_class: 1,
+                source_id: None,
+                source_seq: None,
+            }],
+            snapshot_hash: 0,
+        };
+
+        let mut buf = Vec::new();
+        encode_frame(&mut buf, &frame).unwrap();
+
+        // source_seq flag is one byte after the source_id flag (since source_id=None).
+        let seq_flag_offset = 12 + 1 + 4 + 8 + 1 + 1;
+        assert_eq!(buf[seq_flag_offset], 0, "sanity: should be the None flag");
+        buf[seq_flag_offset] = 0xFF; // invalid flag value
+
+        let result = decode_frame(&mut buf.as_slice());
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ReplayError::MalformedFrame { detail } => {
+                assert!(
+                    detail.contains("invalid source_seq presence flag"),
+                    "wrong detail: {detail}"
+                );
+            }
+            other => panic!("expected MalformedFrame, got {other:?}"),
+        }
     }
 }

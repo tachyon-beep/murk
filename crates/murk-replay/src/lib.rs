@@ -44,4 +44,8 @@ pub use writer::ReplayWriter;
 pub const MAGIC: [u8; 4] = *b"MURK";
 
 /// Current binary format version.
-pub const FORMAT_VERSION: u8 = 1;
+///
+/// History:
+/// - v1: source_id and source_seq encoded as bare u64 (0 = not set)
+/// - v2: source_id and source_seq use presence-flag encoding (u8 flag + optional u64)
+pub const FORMAT_VERSION: u8 = 2;
