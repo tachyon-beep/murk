@@ -60,25 +60,20 @@ generational allocation for deterministic, zero-GC memory management.
 
 ### Rust
 
+```bash
+cargo run --example quickstart -p murk-engine
+```
+
+See [`crates/murk-engine/examples/quickstart.rs`](crates/murk-engine/examples/quickstart.rs)
+for a complete working example: space creation, field definitions, a diffusion
+propagator, command injection, snapshot reading, and world reset.
+
 ```rust
-use murk_engine::{LockstepWorld, WorldConfig};
-use murk_space::{Square4, EdgeBehavior};
-use murk_core::Command;
-
-// Configure a 100×100 grid world
-let config = WorldConfig {
-    space: Box::new(Square4::new(100, 100, EdgeBehavior::Absorb).unwrap()),
-    fields: vec![/* field definitions */],
-    propagators: vec![/* propagator pipeline */],
-    dt: 0.1,
-    seed: 42,
-    ..Default::default()
-};
-
-// Create and step the world
+// The essential pattern:
+let config = WorldConfig { space, fields, propagators, dt: 0.1, seed: 42, .. };
 let mut world = LockstepWorld::new(config)?;
-let result = world.step_sync(vec![])?;
-let obs = result.snapshot.read_field(field_id, coord);
+let result = world.step_sync(commands)?;
+let heat = result.snapshot.read(FieldId(0)).unwrap();
 ```
 
 ### Python
