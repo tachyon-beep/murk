@@ -6,6 +6,7 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 description = "Python bindings for the Murk simulation framework (PyO3)"
+publish = false
 
 [lib]
 name = "_murk"

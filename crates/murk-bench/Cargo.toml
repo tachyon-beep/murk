@@ -6,6 +6,7 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 description = "Benchmarks for the Murk simulation framework"
+publish = false
 
 [dependencies]
 murk-core = { path = "../murk-core" }
