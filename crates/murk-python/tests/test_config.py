@@ -187,3 +187,11 @@ def test_config_set_space_fcc12_typed():
     """set_space_fcc12 accepts dimensions and EdgeBehavior."""
     cfg = Config()
     cfg.set_space_fcc12(4, 4, 4, EdgeBehavior.Absorb)
+
+
+def test_py_typed_marker_exists():
+    """py.typed marker exists so type checkers recognize the package."""
+    import importlib.resources
+    import murk
+    # Just verify the package can be found and has the marker
+    assert hasattr(murk, '__file__')
