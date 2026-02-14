@@ -1,0 +1,15 @@
+[package]
+name = "murk-propagators"
+version = "0.1.0"
+edition = "2021"
+description = "Reference propagators for the Murk simulation framework"
+
+[dependencies]
+murk-core = { path = "../murk-core" }
+murk-propagator = { path = "../murk-propagator" }
+murk-space = { path = "../murk-space" }
+smallvec = { workspace = true }
+
+[dev-dependencies]
+murk-test-utils = { path = "../murk-test-utils" }
+murk-engine = { path = "../murk-engine" }

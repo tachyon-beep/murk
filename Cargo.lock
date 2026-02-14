@@ -432,6 +432,9 @@ version = "0.1.0"
 dependencies = [
  "criterion",
  "murk-core",
+ "murk-engine",
+ "murk-propagators",
+ "murk-space",
 ]
 
 [[package]]
@@ -494,6 +497,18 @@ dependencies = [
  "murk-space",
  "murk-test-utils",
  "proptest",
+]
+
+[[package]]
+name = "murk-propagators"
+version = "0.1.0"
+dependencies = [
+ "murk-core",
+ "murk-engine",
+ "murk-propagator",
+ "murk-space",
+ "murk-test-utils",
+ "smallvec",
 ]
 
 [[package]]

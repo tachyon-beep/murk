@@ -11,6 +11,7 @@ members = [
     "crates/murk-ffi",
     "crates/murk-python",
     "crates/murk-test-utils",
+    "crates/murk-propagators",
     "crates/murk-bench",
 ]
 

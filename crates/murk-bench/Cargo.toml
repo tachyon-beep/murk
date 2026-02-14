@@ -6,10 +6,16 @@ description = "Benchmarks for the Murk simulation framework"
 
 [dependencies]
 murk-core = { path = "../murk-core" }
+murk-engine = { path = "../murk-engine" }
+murk-propagators = { path = "../murk-propagators" }
+murk-space = { path = "../murk-space" }
 
 [dev-dependencies]
 criterion = { workspace = true }
 
 [[bench]]
-name = "placeholder"
+name = "reference_profile"
 harness = false
+
+[[example]]
+name = "lockstep_rl"
