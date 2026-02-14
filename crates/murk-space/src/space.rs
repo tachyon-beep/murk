@@ -9,7 +9,7 @@ use std::any::Any;
 /// Central spatial abstraction for Murk simulations.
 ///
 /// All propagators, observations, and region queries flow through this trait.
-/// Concrete backends (Line1D, Ring1D, Square4, Hex2D, ProductSpace) implement
+/// Concrete backends (Line1D, Ring1D, Square4, Hex2D, Fcc12, ProductSpace) implement
 /// it to define their topology.
 ///
 /// # Object Safety

@@ -26,6 +26,18 @@
 5. Wrap `dim/2` distance ambiguity documented (§6)
 6. Phase 1 step table aligned with revised O(1) canonical_rank (§11)
 
+**Revision 4 (2026-02-14):** Five hardening fixes after third review:
+1. §8 and §11 step 1.4 updated: distance uses `axis_distance_u32`
+   (FCC-specific integer helper), not `grid2d::axis_distance` (§6, §8, §11)
+2. `axis_distance_u32` gains `debug_assert!` guards for `len > 0` and
+   `diff < len` — cheap insurance against misuse in debug builds (§6)
+3. L1 parity proof simplified: `n ≡ |n| (mod 2)` argument replaces
+   the `≥` inequality that was true but doing no logical work (§2.3)
+4. `canonical_ordering()` gains `debug_assert_eq!(out.len(), self.cell_count)`
+   as alarm bell if formula or loop ever drift apart (§4.1)
+5. Two extra tests: Wrap distance tie at `dim/2`, Clamp-equals-Absorb
+   contract for boundary neighbour sets (§10.2)
+
 ## 1. Motivation
 
 Murk's existing 2D backends (Square4, Square8, Hex2D) serve grid-world and
@@ -102,9 +114,9 @@ changes exactly two axes, not one. Two lower bounds combine:
 The geodesic is the tighter of the two: `max(max_abs, half_L1)`.
 
 **Why L1 is always even between valid cells:** Both endpoints satisfy
-`(x+y+z) % 2 == 0`, so `(a.x+a.y+a.z) - (b.x+b.y+b.z)` is even.
-Since `|dx| + |dy| + |dz| ≥ |dx + dy + dz|` and both have the same
-parity, L1 is even. The division by 2 is exact.
+`(x+y+z) % 2 == 0`, so `dx + dy + dz` is even. Since
+`n ≡ |n| (mod 2)`, we have `|dx| + |dy| + |dz| ≡ dx + dy + dz ≡ 0
+(mod 2)`. L1 is even. The division by 2 is exact.
 
 **Counterexample showing L∞ is wrong:** From `(0,0,0)` to `(2,2,2)`:
 - L∞ says 2
@@ -317,6 +329,9 @@ fn canonical_ordering(&self) -> Vec<Coord> {
             }
         }
     }
+    debug_assert_eq!(out.len(), self.cell_count,
+        "canonical_ordering produced {} cells but cell_count is {}",
+        out.len(), self.cell_count);
     out
 }
 ```
@@ -486,7 +501,9 @@ as `u32`:
 
 ```rust
 fn axis_distance_u32(a: i32, b: i32, len: u32, edge: EdgeBehavior) -> u32 {
+    debug_assert!(len > 0, "axis_distance_u32 called with zero-length axis");
     let diff = (a - b).unsigned_abs();
+    debug_assert!(diff < len, "axis_distance_u32: diff {diff} >= len {len} (out-of-bounds coord?)");
     match edge {
         EdgeBehavior::Wrap => diff.min(len - diff),
         EdgeBehavior::Absorb | EdgeBehavior::Clamp => diff,
@@ -623,13 +640,14 @@ For **neighbours**, we use `resolve_axis_fcc` (defined in §5) which
 returns `(Option<i32>, bool)` — the resolved value plus a clamped flag.
 If any axis was clamped, the entire offset is dropped to preserve parity.
 
-For **distance**, we reuse `grid2d::axis_distance` directly since it
-only computes the per-axis absolute displacement (no parity concern).
-It's already `pub(crate)` in `grid2d.rs`, same crate.
+For **distance**, we use `axis_distance_u32` (defined in §6), an
+FCC-specific integer helper that stays in `u32` throughout. This
+parallels `grid2d::axis_distance` but avoids the `f64` round-trip,
+since FCC graph distance is always integral.
 
-**Implementation location:** Both `resolve_axis_fcc` and the FCC-specific
-distance formula live in `fcc12.rs` as private helpers. No changes to
-`grid2d.rs` are needed.
+**Implementation location:** `resolve_axis_fcc`, `axis_distance_u32`,
+and the FCC distance formula all live in `fcc12.rs` as private helpers.
+No changes to `grid2d.rs` are needed.
 
 ## 9. FFI Wiring
 
@@ -735,6 +753,8 @@ all valid ratio and coverage.
 | `neighbours_clamp_interior` | Clamp doesn't affect interior cells (12 neighbours) |
 | `canonical_rank_odd_dims` | 5×5×5 rank roundtrips correctly (alternating slices) |
 | `cell_count_odd_dims` | 5×5×5 = 63 cells (not 62 or 64) |
+| `distance_wrap_tie` | Wrap axis with `diff == len/2`: returns exactly `len/2`, not off-by-one |
+| `clamp_equals_absorb_boundary` | `Fcc12(..., Clamp)` neighbour sets identical to `Absorb` at boundary coords |
 
 ### 10.3 Property Tests (proptest)
 
@@ -779,7 +799,7 @@ proptest! {
 | 1.1 | `crates/murk-space/src/fcc12.rs` | Struct, `new()`, `cell_count`, `count_fcc_cells()` |
 | 1.2 | same | `canonical_ordering()`, `canonical_rank()` (O(1) closed-form with even/odd slice sizes) |
 | 1.3 | same | `neighbours()` with `FCC_OFFSETS`, `resolve_axis` reuse |
-| 1.4 | same | `distance()` using `max(max_abs, half_L1)` with `axis_distance` |
+| 1.4 | same | `distance()` using `max(max_abs, half_L1)` with `axis_distance_u32` |
 | 1.5 | same | `compile_region()` — All, Rect, Coords |
 | 1.6 | same | `compile_region()` — Disk, Neighbours (BFS) |
 | 1.7 | same | Unit tests + compliance suite |

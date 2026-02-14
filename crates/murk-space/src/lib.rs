@@ -11,6 +11,7 @@
 //! - [`Square4`]: 2D grid, 4-connected (N/S/E/W), Manhattan distance
 //! - [`Square8`]: 2D grid, 8-connected (+ diagonals), Chebyshev distance
 //! - [`Hex2D`]: 2D hexagonal lattice, 6-connected, cube distance
+//! - [`Fcc12`]: 3D face-centred cubic lattice, 12-connected, isotropic
 //! - [`ProductSpace`]: Cartesian product of arbitrary spaces
 //!
 //! # Region Planning
@@ -24,6 +25,7 @@
 
 pub mod edge;
 pub mod error;
+pub mod fcc12;
 pub(crate) mod grid2d;
 pub mod hex2d;
 pub mod line1d;
@@ -39,6 +41,7 @@ pub(crate) mod compliance;
 
 pub use edge::EdgeBehavior;
 pub use error::SpaceError;
+pub use fcc12::Fcc12;
 pub use hex2d::Hex2D;
 pub use line1d::Line1D;
 pub use product::{ProductMetric, ProductSpace};

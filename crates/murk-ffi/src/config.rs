@@ -9,7 +9,7 @@ use std::sync::Mutex;
 
 use murk_core::{BoundaryBehavior, FieldDef, FieldMutability, FieldType};
 use murk_propagator::Propagator;
-use murk_space::{EdgeBehavior, Hex2D, Line1D, ProductSpace, Ring1D, Space, Square4, Square8};
+use murk_space::{EdgeBehavior, Fcc12, Hex2D, Line1D, ProductSpace, Ring1D, Space, Square4, Square8};
 
 use crate::handle::HandleTable;
 use crate::status::MurkStatus;
@@ -128,6 +128,19 @@ fn parse_space(space_type: i32, p: &[f64]) -> Option<Box<dyn Space>> {
                 .ok()
                 .map(|s| Box::new(s) as Box<dyn Space>)
         }
+        x if x == MurkSpaceType::Fcc12 as i32 => {
+            // params = [w, h, d, edge_behavior]
+            if p.len() < 4 {
+                return None;
+            }
+            let w = p[0] as u32;
+            let h = p[1] as u32;
+            let d = p[2] as u32;
+            let edge = parse_edge_behavior(p[3] as i32)?;
+            Fcc12::new(w, h, d, edge)
+                .ok()
+                .map(|s| Box::new(s) as Box<dyn Space>)
+        }
         x if x == MurkSpaceType::ProductSpace as i32 => {
             // params = [n_components, type_0, n_params_0, p0_0, ..., type_1, n_params_1, p1_0, ...]
             if p.is_empty() {
@@ -169,6 +182,7 @@ fn parse_space(space_type: i32, p: &[f64]) -> Option<Box<dyn Space>> {
 /// - Ring1D: \[length\]
 /// - Square4/Square8: \[width, height, edge_behavior\]
 /// - Hex2D: \[cols, rows\]
+/// - Fcc12: \[w, h, d, edge_behavior\]
 /// - ProductSpace: \[n_components, type_0, n_params_0, p0_0, ..., type_1, n_params_1, p1_0, ...\]
 ///
 /// Edge behavior: 0=Absorb, 1=Clamp, 2=Wrap.

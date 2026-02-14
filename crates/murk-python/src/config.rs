@@ -27,6 +27,8 @@ pub(crate) enum SpaceType {
     Hex2D = 4,
     /// Cartesian product of arbitrary spaces.
     ProductSpace = 5,
+    /// 3D FCC lattice, 12-connected (isotropic).
+    Fcc12 = 6,
 }
 
 /// Field data type.
@@ -114,6 +116,7 @@ impl Config {
     /// - Ring1D: (length,)
     /// - Square4/Square8: (width, height, edge_behavior)
     /// - Hex2D: (cols, rows)
+    /// - Fcc12: (w, h, d, edge_behavior)
     /// - ProductSpace: (n_components, type_0, n_params_0, p0_0, ..., type_1, ...)
     fn set_space(&self, py: Python<'_>, space_type: SpaceType, params: Vec<f64>) -> PyResult<()> {
         let h = self.require_handle()?;

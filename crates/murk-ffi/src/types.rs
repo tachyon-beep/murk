@@ -16,6 +16,8 @@ pub enum MurkSpaceType {
     Hex2D = 4,
     /// Cartesian product of arbitrary spaces.
     ProductSpace = 5,
+    /// 3D FCC lattice, 12-connected (isotropic).
+    Fcc12 = 6,
 }
 
 /// Field allocation strategy across ticks.
