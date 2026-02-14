@@ -51,3 +51,11 @@ jobs:
         with:
           components: miri
       - run: cargo +nightly miri test -p murk-arena
+
+  deny:
+    name: cargo deny
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
