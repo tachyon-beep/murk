@@ -151,3 +151,39 @@ def test_pool_kernel_enum_values():
     assert PoolKernel.Max.value == 2
     assert PoolKernel.Min.value == 3
     assert PoolKernel.Sum.value == 4
+
+
+def test_config_set_space_line1d_typed():
+    """set_space_line1d accepts EdgeBehavior enum."""
+    cfg = Config()
+    cfg.set_space_line1d(10, EdgeBehavior.Absorb)
+
+
+def test_config_set_space_square4_typed():
+    """set_space_square4 accepts EdgeBehavior enum."""
+    cfg = Config()
+    cfg.set_space_square4(5, 5, EdgeBehavior.Wrap)
+
+
+def test_config_set_space_square8_typed():
+    """set_space_square8 accepts EdgeBehavior enum."""
+    cfg = Config()
+    cfg.set_space_square8(8, 8, EdgeBehavior.Absorb)
+
+
+def test_config_set_space_hex2d_typed():
+    """set_space_hex2d accepts dimensions."""
+    cfg = Config()
+    cfg.set_space_hex2d(10, 10)
+
+
+def test_config_set_space_ring1d_typed():
+    """set_space_ring1d accepts length."""
+    cfg = Config()
+    cfg.set_space_ring1d(20)
+
+
+def test_config_set_space_fcc12_typed():
+    """set_space_fcc12 accepts dimensions and EdgeBehavior."""
+    cfg = Config()
+    cfg.set_space_fcc12(4, 4, 4, EdgeBehavior.Absorb)

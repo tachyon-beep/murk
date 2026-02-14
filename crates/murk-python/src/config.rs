@@ -191,24 +191,95 @@ impl Config {
         })
     }
 
-    /// Set the spatial topology.
+    /// Set the spatial topology (low-level).
     ///
-    /// Parameters depend on space type:
-    /// - Line1D: (length, edge_behavior)
-    /// - Ring1D: (length,)
-    /// - Square4/Square8: (width, height, edge_behavior)
-    /// - Hex2D: (cols, rows)
-    /// - Fcc12: (w, h, d, edge_behavior)
-    /// - ProductSpace: (n_components, type_0, n_params_0, p0_0, ..., type_1, ...)
+    /// Prefer the typed methods (set_space_square4, set_space_hex2d, etc.)
+    /// for a self-documenting API. This method is retained for ProductSpace
+    /// and advanced use cases.
     fn set_space(&self, py: Python<'_>, space_type: SpaceType, params: Vec<f64>) -> PyResult<()> {
-        let h = self.require_handle()?;
-        let params_addr = params.as_ptr() as usize;
-        let params_len = params.len();
-        let st = space_type as i32;
-        // Release GIL: murk_config_set_space locks CONFIGS.
-        let status = py
-            .allow_threads(|| murk_config_set_space(h, st, params_addr as *const f64, params_len));
-        check_status(status)
+        self._set_space_raw(py, space_type as i32, &params)
+    }
+
+    /// Set space to Line1D.
+    ///
+    /// Args:
+    ///     length: Number of cells.
+    ///     edge: Edge behavior (Absorb, Clamp, or Wrap).
+    fn set_space_line1d(&self, py: Python<'_>, length: u32, edge: EdgeBehavior) -> PyResult<()> {
+        let params = [length as f64, edge as i32 as f64];
+        self._set_space_raw(py, SpaceType::Line1D as i32, &params)
+    }
+
+    /// Set space to Ring1D (periodic 1D).
+    ///
+    /// Args:
+    ///     length: Number of cells.
+    fn set_space_ring1d(&self, py: Python<'_>, length: u32) -> PyResult<()> {
+        let params = [length as f64];
+        self._set_space_raw(py, SpaceType::Ring1D as i32, &params)
+    }
+
+    /// Set space to Square4 (2D grid, 4-connected).
+    ///
+    /// Args:
+    ///     width: Grid width.
+    ///     height: Grid height.
+    ///     edge: Edge behavior (Absorb, Clamp, or Wrap).
+    fn set_space_square4(
+        &self,
+        py: Python<'_>,
+        width: u32,
+        height: u32,
+        edge: EdgeBehavior,
+    ) -> PyResult<()> {
+        let params = [width as f64, height as f64, edge as i32 as f64];
+        self._set_space_raw(py, SpaceType::Square4 as i32, &params)
+    }
+
+    /// Set space to Square8 (2D grid, 8-connected).
+    ///
+    /// Args:
+    ///     width: Grid width.
+    ///     height: Grid height.
+    ///     edge: Edge behavior (Absorb, Clamp, or Wrap).
+    fn set_space_square8(
+        &self,
+        py: Python<'_>,
+        width: u32,
+        height: u32,
+        edge: EdgeBehavior,
+    ) -> PyResult<()> {
+        let params = [width as f64, height as f64, edge as i32 as f64];
+        self._set_space_raw(py, SpaceType::Square8 as i32, &params)
+    }
+
+    /// Set space to Hex2D (hexagonal lattice, 6-connected).
+    ///
+    /// Args:
+    ///     cols: Number of columns.
+    ///     rows: Number of rows.
+    fn set_space_hex2d(&self, py: Python<'_>, cols: u32, rows: u32) -> PyResult<()> {
+        let params = [cols as f64, rows as f64];
+        self._set_space_raw(py, SpaceType::Hex2D as i32, &params)
+    }
+
+    /// Set space to Fcc12 (3D FCC lattice, 12-connected).
+    ///
+    /// Args:
+    ///     width: Grid width.
+    ///     height: Grid height.
+    ///     depth: Grid depth.
+    ///     edge: Edge behavior (Absorb, Clamp, or Wrap).
+    fn set_space_fcc12(
+        &self,
+        py: Python<'_>,
+        width: u32,
+        height: u32,
+        depth: u32,
+        edge: EdgeBehavior,
+    ) -> PyResult<()> {
+        let params = [width as f64, height as f64, depth as f64, edge as i32 as f64];
+        self._set_space_raw(py, SpaceType::Fcc12 as i32, &params)
     }
 
     /// Add a field definition to the config.
@@ -272,6 +343,16 @@ impl Config {
         self.handle.ok_or_else(|| {
             pyo3::exceptions::PyRuntimeError::new_err("Config already consumed or destroyed")
         })
+    }
+
+    fn _set_space_raw(&self, py: Python<'_>, space_type: i32, params: &[f64]) -> PyResult<()> {
+        let h = self.require_handle()?;
+        let params_addr = params.as_ptr() as usize;
+        let params_len = params.len();
+        let status = py.allow_threads(|| {
+            murk_config_set_space(h, space_type, params_addr as *const f64, params_len)
+        });
+        check_status(status)
     }
 
     /// Add a propagator handle to the config (FFI call).
