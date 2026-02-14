@@ -14,6 +14,18 @@
 4. CFL stability constant clarified: depends on physical vs graph spacing
    convention (§12)
 
+**Revision 3 (2026-02-14):** Six polish fixes after second review:
+1. Disk BFS now uses `self.neighbours()` instead of raw axis resolution,
+   ensuring Clamp parity safety is consistent everywhere (§7.2)
+2. Distance explanation: "exactly 2" → "at most 2"; constructive proof
+   split into Case A (max-abs dominant) and Case B (balanced) (§2.3)
+3. Distance implementation uses integer arithmetic throughout, casting to
+   `f64` only at return; `axis_distance_u32` helper added (§6)
+4. Cell count and slice arithmetic use checked multiplication to prevent
+   `usize` overflow on large dimensions (§3.2, §3.3)
+5. Wrap `dim/2` distance ambiguity documented (§6)
+6. Phase 1 step table aligned with revised O(1) canonical_rank (§11)
+
 ## 1. Motivation
 
 Murk's existing 2D backends (Square4, Square8, Hex2D) serve grid-world and
@@ -80,16 +92,19 @@ changes exactly two axes, not one. Two lower bounds combine:
 
 - **Lower bound 1 (max-abs):** Each step changes any single axis by at
   most 1, so we need at least `max(|dx|, |dy|, |dz|)` steps.
-- **Lower bound 2 (half-L1):** Each step reduces the L1 displacement by
-  exactly 2 (changes two axes by ±1 each toward target), so we need at
-  least `(|dx| + |dy| + |dz|) / 2` steps.
+- **Lower bound 2 (half-L1):** Each step changes two axes by ±1, so
+  it reduces L1 displacement by **at most 2** (exactly 2 when both
+  changes are toward the target; 0 when one is a "carrier" move away
+  from target). We need at least `ceil((|dx| + |dy| + |dz|) / 2)`
+  steps — which equals `(|dx| + |dy| + |dz|) / 2` because L1 is
+  always even between valid cells (see below).
 
 The geodesic is the tighter of the two: `max(max_abs, half_L1)`.
 
 **Why L1 is always even between valid cells:** Both endpoints satisfy
-`(x+y+z) % 2 == 0`, so `|dx| + |dy| + |dz|` has the same parity as
-`(a.x+a.y+a.z) - (b.x+b.y+b.z)` which is even. The division by 2 is
-exact.
+`(x+y+z) % 2 == 0`, so `(a.x+a.y+a.z) - (b.x+b.y+b.z)` is even.
+Since `|dx| + |dy| + |dz| ≥ |dx + dy + dz|` and both have the same
+parity, L1 is even. The division by 2 is exact.
 
 **Counterexample showing L∞ is wrong:** From `(0,0,0)` to `(2,2,2)`:
 - L∞ says 2
@@ -97,11 +112,21 @@ exact.
   4 axis-increments, but need 6
 - Correct: `max(2, 6/2) = max(2, 3) = 3`
 
-**Constructive proof:** At each step, pick the two axes with the
-largest remaining |displacement| and step toward the target on both.
-This reduces max-abs by 1 whenever the two largest components are
-equal, and reduces half-L1 by 1 always. The strategy achieves
-`max(max_abs, half_L1)` steps.
+**Constructive proof (two cases):**
+
+*Case A: `max_abs ≥ half_L1` (one axis dominates).*
+Example: `(0,0,0) → (4,0,0)`. max_abs=4, half_L1=2. The dominant axis
+(x) must advance 4 steps, but each step also changes a second axis.
+Use a "carrier": step `(+1,+1,0)` then `(+1,-1,0)`, netting `(+2,0,0)`.
+Repeat. This achieves max_abs steps by using the second axis as a
+temporary carrier that cancels out.
+
+*Case B: `half_L1 ≥ max_abs` (balanced displacement).*
+Example: `(0,0,0) → (2,2,2)`. max_abs=2, half_L1=3. Greedily pick
+any two non-zero axes and step toward the target on both. Each such
+step reduces L1 by 2 and reduces some axis deltas. Since the
+displacement is balanced, you can always find two non-zero axes to
+pair until all deltas reach zero. This achieves half_L1 steps.
 
 **Metric properties:**
 - Reflexive: `max(0, 0) = 0` ✓
@@ -225,8 +250,12 @@ impl Fcc12 {
             });
         }
 
-        // Count valid cells: for each (y, z), count x values with correct parity
-        let cell_count = count_fcc_cells(w, h, d);
+        // Count valid cells with overflow check.
+        // cell_count ≤ w*h*d/2, but w*h*d can overflow usize for large dims.
+        let cell_count = count_fcc_cells_checked(w, h, d)
+            .ok_or_else(|| SpaceError::InvalidComposition {
+                reason: format!("FCC12 {w}x{h}x{d} exceeds maximum cell count"),
+            })?;
 
         Ok(Self { w, h, d, cell_count, edge, instance_id: SpaceInstanceId::next() })
     }
@@ -239,7 +268,7 @@ For each `(y, z)` pair, valid `x` values start at `(y + z) % 2` and
 step by 2, ending before `w`:
 
 ```rust
-fn count_fcc_cells(w: u32, h: u32, d: u32) -> usize {
+fn count_fcc_cells_checked(w: u32, h: u32, d: u32) -> Option<usize> {
     // For each (y,z), the number of valid x is:
     //   start = (y + z) % 2
     //   count = (w - start + 1) / 2   (integer division, rounding down)
@@ -250,13 +279,15 @@ fn count_fcc_cells(w: u32, h: u32, d: u32) -> usize {
     //   n_even = ceil(w / 2) cells per start=0 row
     //   n_odd  = floor(w / 2) cells per start=1 row
     //
-    // Fast closed-form:
-    let hd = h as usize * d as usize;
+    // Closed-form with overflow checks:
+    let hd = (h as usize).checked_mul(d as usize)?;
     let n_even_rows = (hd + 1) / 2;  // rows where (y+z) % 2 == 0
     let n_odd_rows = hd / 2;          // rows where (y+z) % 2 == 1
     let x_even = ((w as usize) + 1) / 2; // valid x count when start=0
     let x_odd = (w as usize) / 2;         // valid x count when start=1
-    n_even_rows * x_even + n_odd_rows * x_odd
+    let a = n_even_rows.checked_mul(x_even)?;
+    let b = n_odd_rows.checked_mul(x_odd)?;
+    a.checked_add(b)
 }
 ```
 
@@ -416,7 +447,6 @@ fn resolve_axis_fcc(val: i32, len: u32, edge: EdgeBehavior) -> (Option<i32>, boo
     }
 }
 ```
-```
 
 **Note on SmallVec<[Coord; 8]> spill:** FCC returns up to 12 neighbours.
 SmallVec will heap-allocate when count > 8. This is acceptable for v1
@@ -434,27 +464,43 @@ If profiling shows this matters, we can:
 
 ## 6. Distance
 
+The FCC graph distance is always an integer, so we compute it entirely
+in `u32` and cast once at the end. This avoids floating-point edge cases
+and makes the implementation harder to accidentally break:
+
 ```rust
 fn distance(&self, a: &Coord, b: &Coord) -> f64 {
-    let dx = axis_distance_3d(a[0], b[0], self.w, self.edge);
-    let dy = axis_distance_3d(a[1], b[1], self.h, self.edge);
-    let dz = axis_distance_3d(a[2], b[2], self.d, self.edge);
+    let dx = axis_distance_u32(a[0], b[0], self.w, self.edge);
+    let dy = axis_distance_u32(a[1], b[1], self.h, self.edge);
+    let dz = axis_distance_u32(a[2], b[2], self.d, self.edge);
 
     let max_abs = dx.max(dy).max(dz);
-    let half_l1 = (dx + dy + dz) / 2.0;
+    let half_l1 = (dx + dy + dz) / 2;  // exact: L1 always even
 
-    max_abs.max(half_l1)
+    f64::from(max_abs.max(half_l1))
 }
 ```
 
-Where `axis_distance_3d` is the same as `grid2d::axis_distance` (it's
-axis-independent — returns the absolute or wrapped per-axis distance as
-`f64`). We reuse it directly since it's `pub(crate)` in `grid2d.rs`.
+Where `axis_distance_u32` computes the per-axis absolute displacement
+as `u32`:
 
-**Note on integer vs float division:** The `axis_distance` helper returns
-`f64`, so `half_l1` is computed in floating point. Since both endpoints
-satisfy the parity constraint, `dx + dy + dz` is always an even integer
-(as `f64`), so the division is exact. No rounding issues.
+```rust
+fn axis_distance_u32(a: i32, b: i32, len: u32, edge: EdgeBehavior) -> u32 {
+    let diff = (a - b).unsigned_abs();
+    match edge {
+        EdgeBehavior::Wrap => diff.min(len - diff),
+        EdgeBehavior::Absorb | EdgeBehavior::Clamp => diff,
+    }
+}
+```
+
+This parallels `grid2d::axis_distance` but stays in `u32` instead of
+returning `f64`. It lives in `fcc12.rs` as a private helper.
+
+**Wrap ambiguity at `dim/2`:** When `diff == len - diff` (i.e.
+`diff == len/2`, which can only happen with even `len`), there are
+two equally short paths around the torus. Either choice yields the
+same distance value, so no special handling is needed.
 
 ## 7. Region Compilation
 
@@ -489,7 +535,10 @@ because a `[w, h, d]` tensor would have 50% invalid entries.
 ### 7.2 Disk
 
 BFS-based, following the `grid2d::compile_disk_2d` pattern but
-generalized to 3D:
+generalized to 3D. **Uses `self.neighbours()`** to ensure Clamp
+parity safety is handled identically to the main neighbour function
+(region compilation is not on the hot path, so the SmallVec spill
+is not a concern here):
 
 ```rust
 fn compile_fcc_disk(&self, cx: i32, cy: i32, cz: i32, radius: u32) -> RegionPlan {
@@ -497,32 +546,38 @@ fn compile_fcc_disk(&self, cx: i32, cy: i32, cz: i32, radius: u32) -> RegionPlan
     let mut queue = VecDeque::new();
     let mut result: Vec<Coord> = Vec::new();
 
-    let center_rank = self.canonical_rank(&smallvec![cx, cy, cz]).unwrap();
+    let center: Coord = smallvec![cx, cy, cz];
+    let center_rank = self.canonical_rank(&center).unwrap();
     visited[center_rank] = true;
-    queue.push_back((cx, cy, cz, 0u32));
-    result.push(smallvec![cx, cy, cz]);
+    queue.push_back((center.clone(), 0u32));
+    result.push(center);
 
-    while let Some((x, y, z, dist)) = queue.pop_front() {
+    while let Some((here, dist)) = queue.pop_front() {
         if dist >= radius { continue; }
-        for (dx, dy, dz) in FCC_OFFSETS {
-            let nx = resolve_axis_3d(x + dx, self.w, self.edge);
-            let ny = resolve_axis_3d(y + dy, self.h, self.edge);
-            let nz = resolve_axis_3d(z + dz, self.d, self.edge);
-            if let (Some(nx), Some(ny), Some(nz)) = (nx, ny, nz) {
-                let coord: Coord = smallvec![nx, ny, nz];
-                let rank = self.canonical_rank(&coord).unwrap();
-                if !visited[rank] {
-                    visited[rank] = true;
-                    queue.push_back((nx, ny, nz, dist + 1));
-                    result.push(coord);
-                }
+        for n in self.neighbours(&here) {
+            let rank = self.canonical_rank(&n)
+                .expect("neighbours() must only yield valid FCC coords");
+            if !visited[rank] {
+                visited[rank] = true;
+                queue.push_back((n.clone(), dist + 1));
+                result.push(n);
             }
         }
     }
 
     // Sort by canonical rank for deterministic order
     result.sort_by_key(|c| self.canonical_rank(c).unwrap());
-    // ... build RegionPlan with flat bounding shape
+    let cell_count = result.len();
+    let tensor_indices: Vec<usize> = (0..cell_count).collect();
+    let valid_mask = vec![1u8; cell_count];
+
+    RegionPlan {
+        cell_count,
+        coords: result,
+        tensor_indices,
+        valid_mask,
+        bounding_shape: BoundingShape::Rect(vec![cell_count]),
+    }
 }
 ```
 
@@ -722,7 +777,7 @@ proptest! {
 | Step | File | Description |
 |------|------|-------------|
 | 1.1 | `crates/murk-space/src/fcc12.rs` | Struct, `new()`, `cell_count`, `count_fcc_cells()` |
-| 1.2 | same | `canonical_ordering()`, `canonical_rank()` (loop version) |
+| 1.2 | same | `canonical_ordering()`, `canonical_rank()` (O(1) closed-form with even/odd slice sizes) |
 | 1.3 | same | `neighbours()` with `FCC_OFFSETS`, `resolve_axis` reuse |
 | 1.4 | same | `distance()` using `max(max_abs, half_L1)` with `axis_distance` |
 | 1.5 | same | `compile_region()` — All, Rect, Coords |
@@ -811,5 +866,6 @@ spacing. The graph-spacing CFL is 2× stricter for FCC.
 | SmallVec spill perf | Low | Medium | Profile first; add specialization if needed |
 | Wrap parity mismatch | Medium | High (neighbour symmetry breaks) | Even-dim constraint + compliance suite |
 | Clamp producing invalid parity | High if unchecked | High (crash or phantom cells) | Clamp degrades to Absorb; clamped flag tracked in `resolve_axis_fcc` |
-| Cell count overflow | Low | High | `checked_mul` in constructor |
+| Cell count overflow | Low | High | `checked_mul` in constructor and `count_fcc_cells_checked` |
 | Distance formula wrong | Was High | High | Corrected from L∞ to `max(max_abs, half_L1)`; counterexample verified |
+| Disk BFS using wrong resolver | Was High | High | BFS now calls `self.neighbours()`, not raw axis resolution |
