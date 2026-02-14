@@ -171,3 +171,43 @@ See `crates/murk-engine/examples/quickstart.rs` for a complete example, or
 2. Make your changes with tests.
 3. Ensure all CI checks pass locally (`cargo test --workspace && cargo clippy --workspace -- -D warnings`).
 4. Open a PR with a clear description of what changed and why.
+
+## Commit messages
+
+This project uses [Conventional Commits](https://www.conventionalcommits.org/):
+
+| Prefix | When to use |
+|--------|------------|
+| `feat:` | New feature |
+| `fix:` | Bug fix |
+| `docs:` | Documentation only |
+| `ci:` | CI/CD changes |
+| `chore:` | Maintenance (deps, config) |
+| `refactor:` | Code change that neither fixes nor adds |
+| `test:` | Adding or updating tests |
+| `perf:` | Performance improvement |
+
+Use a scope when helpful: `feat(space):`, `fix(python):`, `ci(release):`.
+
+## Releasing
+
+Releases are managed by [release-plz](https://release-plz.ieni.dev/):
+
+1. **Automatic:** On every push to `main`, release-plz opens (or updates) a
+   release PR that bumps versions and updates CHANGELOG.md based on conventional
+   commits since the last release.
+2. **Merge the release PR** when ready to publish.
+3. **On merge:** release-plz creates git tags, which trigger the release workflow.
+4. **The release workflow** publishes Rust crates to crates.io and Python wheels
+   to PyPI, and creates a GitHub Release.
+
+**Dry-run a release locally:**
+
+```bash
+cargo publish --dry-run -p murk-core
+```
+
+**Secrets required** (set in GitHub repo settings > Secrets):
+- `CARGO_REGISTRY_TOKEN` — crates.io API token
+- `PYPI_API_TOKEN` — PyPI API token
+- `CODECOV_TOKEN` — Codecov upload token
