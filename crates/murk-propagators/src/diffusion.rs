@@ -8,7 +8,7 @@ use crate::fields::{HEAT, HEAT_GRADIENT, VELOCITY};
 use murk_core::{FieldId, FieldSet, PropagatorError};
 use murk_propagator::context::StepContext;
 use murk_propagator::propagator::{Propagator, WriteMode};
-use murk_space::Square4;
+use murk_space::{EdgeBehavior, Square4};
 
 /// Jacobi diffusion propagator for heat and velocity fields.
 ///
@@ -27,13 +27,49 @@ impl DiffusionPropagator {
         Self { diffusivity }
     }
 
+    /// Resolve a single axis value under the given edge behavior.
+    /// Returns `Some(resolved)` or `None` for Absorb out-of-bounds.
+    fn resolve_axis(val: i32, len: i32, edge: EdgeBehavior) -> Option<i32> {
+        if val >= 0 && val < len {
+            return Some(val);
+        }
+        match edge {
+            EdgeBehavior::Absorb => None,
+            EdgeBehavior::Clamp => Some(val.clamp(0, len - 1)),
+            EdgeBehavior::Wrap => Some(((val % len) + len) % len),
+        }
+    }
+
+    /// Collect the flat indices of the 4-connected neighbours for cell (r,c),
+    /// respecting the grid's edge behavior.
+    fn neighbours_flat(
+        r: i32,
+        c: i32,
+        rows: i32,
+        cols: i32,
+        edge: EdgeBehavior,
+    ) -> smallvec::SmallVec<[usize; 4]> {
+        let offsets: [(i32, i32); 4] = [(-1, 0), (1, 0), (0, -1), (0, 1)];
+        let mut result = smallvec::SmallVec::new();
+        for (dr, dc) in offsets {
+            let nr = Self::resolve_axis(r + dr, rows, edge);
+            let nc = Self::resolve_axis(c + dc, cols, edge);
+            if let (Some(nr), Some(nc)) = (nr, nc) {
+                result.push(nr as usize * cols as usize + nc as usize);
+            }
+        }
+        result
+    }
+
     fn step_square4(
         &self,
         ctx: &mut StepContext<'_>,
-        grid: &Square4,
+        rows: u32,
+        cols: u32,
+        edge: EdgeBehavior,
     ) -> Result<(), PropagatorError> {
-        let rows = grid.rows() as usize;
-        let cols = grid.cols() as usize;
+        let rows_i = rows as i32;
+        let cols_i = cols as i32;
         let dt = ctx.dt();
 
         let heat_prev = ctx
@@ -59,31 +95,13 @@ impl DiffusionPropagator {
                 reason: "heat field not writable".into(),
             })?;
 
-        // Diffuse heat using Square4 index arithmetic
-        for r in 0..rows {
-            for c in 0..cols {
-                let i = r * cols + c;
-                let mut sum = 0.0f32;
-                let mut count = 0u32;
-
-                if r > 0 {
-                    sum += heat_prev[(r - 1) * cols + c];
-                    count += 1;
-                }
-                if r + 1 < rows {
-                    sum += heat_prev[(r + 1) * cols + c];
-                    count += 1;
-                }
-                if c > 0 {
-                    sum += heat_prev[r * cols + (c - 1)];
-                    count += 1;
-                }
-                if c + 1 < cols {
-                    sum += heat_prev[r * cols + (c + 1)];
-                    count += 1;
-                }
-
+        for r in 0..rows_i {
+            for c in 0..cols_i {
+                let i = r as usize * cols as usize + c as usize;
+                let nbs = Self::neighbours_flat(r, c, rows_i, cols_i, edge);
+                let count = nbs.len() as u32;
                 if count > 0 {
+                    let sum: f32 = nbs.iter().map(|&ni| heat_prev[ni]).sum();
                     let alpha = (self.diffusivity * dt * count as f64) as f32;
                     let mean = sum / count as f32;
                     heat_out[i] = (1.0 - alpha) * heat_prev[i] + alpha * mean;
@@ -93,7 +111,6 @@ impl DiffusionPropagator {
             }
         }
 
-        // Diffuse velocity (2 components per cell)
         let vel_out = ctx
             .writes()
             .write(VELOCITY)
@@ -101,32 +118,15 @@ impl DiffusionPropagator {
                 reason: "velocity field not writable".into(),
             })?;
 
-        for r in 0..rows {
-            for c in 0..cols {
-                let i = r * cols + c;
+        for r in 0..rows_i {
+            for c in 0..cols_i {
+                let i = r as usize * cols as usize + c as usize;
+                let nbs = Self::neighbours_flat(r, c, rows_i, cols_i, edge);
+                let count = nbs.len() as u32;
                 for comp in 0..2 {
                     let idx = i * 2 + comp;
-                    let mut sum = 0.0f32;
-                    let mut count = 0u32;
-
-                    if r > 0 {
-                        sum += vel_prev[((r - 1) * cols + c) * 2 + comp];
-                        count += 1;
-                    }
-                    if r + 1 < rows {
-                        sum += vel_prev[((r + 1) * cols + c) * 2 + comp];
-                        count += 1;
-                    }
-                    if c > 0 {
-                        sum += vel_prev[(r * cols + (c - 1)) * 2 + comp];
-                        count += 1;
-                    }
-                    if c + 1 < cols {
-                        sum += vel_prev[(r * cols + (c + 1)) * 2 + comp];
-                        count += 1;
-                    }
-
                     if count > 0 {
+                        let sum: f32 = nbs.iter().map(|&ni| vel_prev[ni * 2 + comp]).sum();
                         let alpha = (self.diffusivity * dt * count as f64) as f32;
                         let mean = sum / count as f32;
                         vel_out[idx] = (1.0 - alpha) * vel_prev[idx] + alpha * mean;
@@ -137,7 +137,9 @@ impl DiffusionPropagator {
             }
         }
 
-        // Compute heat gradient using central differences
+        // Compute heat gradient using central differences.
+        // For boundary cells, resolve the neighbour per edge behavior;
+        // if a direction has no neighbour (Absorb OOB), use self.
         let grad_out = ctx
             .writes()
             .write(HEAT_GRADIENT)
@@ -145,29 +147,22 @@ impl DiffusionPropagator {
                 reason: "heat_gradient field not writable".into(),
             })?;
 
-        for r in 0..rows {
-            for c in 0..cols {
-                let i = r * cols + c;
-                let h_east = if c + 1 < cols {
-                    heat_prev[r * cols + (c + 1)]
-                } else {
-                    heat_prev[i]
-                };
-                let h_west = if c > 0 {
-                    heat_prev[r * cols + (c - 1)]
-                } else {
-                    heat_prev[i]
-                };
-                let h_south = if r + 1 < rows {
-                    heat_prev[(r + 1) * cols + c]
-                } else {
-                    heat_prev[i]
-                };
-                let h_north = if r > 0 {
-                    heat_prev[(r - 1) * cols + c]
-                } else {
-                    heat_prev[i]
-                };
+        for r in 0..rows_i {
+            for c in 0..cols_i {
+                let i = r as usize * cols as usize + c as usize;
+
+                let h_east = Self::resolve_axis(c + 1, cols_i, edge)
+                    .map(|nc| heat_prev[r as usize * cols as usize + nc as usize])
+                    .unwrap_or(heat_prev[i]);
+                let h_west = Self::resolve_axis(c - 1, cols_i, edge)
+                    .map(|nc| heat_prev[r as usize * cols as usize + nc as usize])
+                    .unwrap_or(heat_prev[i]);
+                let h_south = Self::resolve_axis(r + 1, rows_i, edge)
+                    .map(|nr| heat_prev[nr as usize * cols as usize + c as usize])
+                    .unwrap_or(heat_prev[i]);
+                let h_north = Self::resolve_axis(r - 1, rows_i, edge)
+                    .map(|nr| heat_prev[nr as usize * cols as usize + c as usize])
+                    .unwrap_or(heat_prev[i]);
 
                 grad_out[i * 2] = (h_east - h_west) / 2.0;
                 grad_out[i * 2 + 1] = (h_south - h_north) / 2.0;
@@ -337,16 +332,11 @@ impl Propagator for DiffusionPropagator {
 
     fn step(&self, ctx: &mut StepContext<'_>) -> Result<(), PropagatorError> {
         if let Some(grid) = ctx.space().downcast_ref::<Square4>() {
-            // Clone the grid data we need before the mutable borrow
+            // Extract scalars before the mutable borrow
             let rows = grid.rows();
             let cols = grid.cols();
-            let grid_copy =
-                Square4::new(rows, cols, grid.edge_behavior()).map_err(|e| {
-                    PropagatorError::ExecutionFailed {
-                        reason: format!("failed to copy grid: {e}"),
-                    }
-                })?;
-            self.step_square4(ctx, &grid_copy)
+            let edge = grid.edge_behavior();
+            self.step_square4(ctx, rows, cols, edge)
         } else {
             self.step_generic(ctx)
         }
@@ -560,6 +550,209 @@ mod tests {
         assert!(
             (grad[0] - (-25.0)).abs() < 1e-6,
             "corner grad_x should be -25, got {}",
+            grad[0]
+        );
+    }
+
+    #[test]
+    fn wrap_edge_uniform_stays_uniform() {
+        let grid = Square4::new(5, 5, EdgeBehavior::Wrap).unwrap();
+        let n = grid.cell_count();
+        let prop = DiffusionPropagator::new(0.1);
+
+        let mut reader = MockFieldReader::new();
+        reader.set_field(HEAT, vec![10.0; n]);
+        reader.set_field(VELOCITY, vec![0.0; n * 2]);
+
+        let mut writer = MockFieldWriter::new();
+        writer.add_field(HEAT, n);
+        writer.add_field(VELOCITY, n * 2);
+        writer.add_field(HEAT_GRADIENT, n * 2);
+
+        let mut scratch = ScratchRegion::new(0);
+        let mut ctx = make_ctx(&reader, &mut writer, &mut scratch, &grid, 0.01);
+        prop.step(&mut ctx).unwrap();
+
+        let heat = writer.get_field(HEAT).unwrap();
+        for &v in heat {
+            assert!(
+                (v - 10.0).abs() < 1e-6,
+                "wrap: uniform heat should stay uniform, got {v}"
+            );
+        }
+    }
+
+    #[test]
+    fn wrap_edge_corner_has_four_neighbours() {
+        // On a Wrap grid, corner (0,0) should have 4 neighbours.
+        // A hot corner should diffuse into all 4 wrapped neighbours.
+        let grid = Square4::new(4, 4, EdgeBehavior::Wrap).unwrap();
+        let n = grid.cell_count();
+        let prop = DiffusionPropagator::new(0.1);
+
+        let mut heat = vec![0.0f32; n];
+        heat[0] = 100.0; // corner (0,0)
+
+        let mut reader = MockFieldReader::new();
+        reader.set_field(HEAT, heat.clone());
+        reader.set_field(VELOCITY, vec![0.0; n * 2]);
+
+        let mut writer = MockFieldWriter::new();
+        writer.add_field(HEAT, n);
+        writer.add_field(VELOCITY, n * 2);
+        writer.add_field(HEAT_GRADIENT, n * 2);
+
+        let mut scratch = ScratchRegion::new(0);
+        let mut ctx = make_ctx(&reader, &mut writer, &mut scratch, &grid, 0.01);
+        prop.step(&mut ctx).unwrap();
+
+        let result = writer.get_field(HEAT).unwrap();
+        // Corner should have decreased (diffused into 4 neighbours)
+        assert!(result[0] < 100.0, "corner should cool: {}", result[0]);
+
+        // Wrapped neighbours: north=(3,0)=12, south=(1,0)=4, west=(0,3)=3, east=(0,1)=1
+        assert!(result[12] > 0.0, "wrapped north (3,0) should warm: {}", result[12]);
+        assert!(result[4] > 0.0, "south (1,0) should warm: {}", result[4]);
+        assert!(result[3] > 0.0, "wrapped west (0,3) should warm: {}", result[3]);
+        assert!(result[1] > 0.0, "east (0,1) should warm: {}", result[1]);
+
+        // Energy conservation
+        let total: f32 = result.iter().sum();
+        assert!(
+            (total - 100.0).abs() < 1e-3,
+            "wrap: energy not conserved: {total}"
+        );
+    }
+
+    #[test]
+    fn wrap_energy_conservation() {
+        let grid = Square4::new(5, 5, EdgeBehavior::Wrap).unwrap();
+        let n = grid.cell_count();
+        let prop = DiffusionPropagator::new(0.1);
+
+        let mut heat = vec![0.0f32; n];
+        heat[0] = 100.0;
+        let total_before: f32 = heat.iter().sum();
+
+        let mut reader = MockFieldReader::new();
+        reader.set_field(HEAT, heat);
+        reader.set_field(VELOCITY, vec![0.0; n * 2]);
+
+        let mut writer = MockFieldWriter::new();
+        writer.add_field(HEAT, n);
+        writer.add_field(VELOCITY, n * 2);
+        writer.add_field(HEAT_GRADIENT, n * 2);
+
+        let mut scratch = ScratchRegion::new(0);
+        let mut ctx = make_ctx(&reader, &mut writer, &mut scratch, &grid, 0.01);
+        prop.step(&mut ctx).unwrap();
+
+        let result = writer.get_field(HEAT).unwrap();
+        let total_after: f32 = result.iter().sum();
+        assert!(
+            (total_before - total_after).abs() < 1e-3,
+            "wrap: energy not conserved: before={total_before}, after={total_after}"
+        );
+    }
+
+    #[test]
+    fn clamp_edge_uniform_stays_uniform() {
+        let grid = Square4::new(5, 5, EdgeBehavior::Clamp).unwrap();
+        let n = grid.cell_count();
+        let prop = DiffusionPropagator::new(0.1);
+
+        let mut reader = MockFieldReader::new();
+        reader.set_field(HEAT, vec![10.0; n]);
+        reader.set_field(VELOCITY, vec![0.0; n * 2]);
+
+        let mut writer = MockFieldWriter::new();
+        writer.add_field(HEAT, n);
+        writer.add_field(VELOCITY, n * 2);
+        writer.add_field(HEAT_GRADIENT, n * 2);
+
+        let mut scratch = ScratchRegion::new(0);
+        let mut ctx = make_ctx(&reader, &mut writer, &mut scratch, &grid, 0.01);
+        prop.step(&mut ctx).unwrap();
+
+        let heat = writer.get_field(HEAT).unwrap();
+        for &v in heat {
+            assert!(
+                (v - 10.0).abs() < 1e-6,
+                "clamp: uniform heat should stay uniform, got {v}"
+            );
+        }
+    }
+
+    #[test]
+    fn clamp_corner_has_four_neighbours() {
+        // On a Clamp grid, corner (0,0) has 4 neighbours (including self-loops).
+        // So alpha = D * dt * 4, and the self-loops include heat[0] twice.
+        let grid = Square4::new(4, 4, EdgeBehavior::Clamp).unwrap();
+        let n = grid.cell_count();
+        let prop = DiffusionPropagator::new(0.1);
+
+        let mut heat = vec![0.0f32; n];
+        heat[0] = 100.0;
+
+        let mut reader = MockFieldReader::new();
+        reader.set_field(HEAT, heat);
+        reader.set_field(VELOCITY, vec![0.0; n * 2]);
+
+        let mut writer = MockFieldWriter::new();
+        writer.add_field(HEAT, n);
+        writer.add_field(VELOCITY, n * 2);
+        writer.add_field(HEAT_GRADIENT, n * 2);
+
+        let mut scratch = ScratchRegion::new(0);
+        let mut ctx = make_ctx(&reader, &mut writer, &mut scratch, &grid, 0.01);
+        prop.step(&mut ctx).unwrap();
+
+        let result = writer.get_field(HEAT).unwrap();
+        // Clamp: corner has 4 neighbours [self, self, (1,0), (0,1)]
+        // mean = (100 + 100 + 0 + 0) / 4 = 50
+        // alpha = 0.1 * 0.01 * 4 = 0.004
+        // heat[0] = (1 - 0.004) * 100 + 0.004 * 50 = 99.6 + 0.2 = 99.8
+        assert!(
+            (result[0] - 99.8).abs() < 1e-4,
+            "clamp corner should be ~99.8, got {}",
+            result[0]
+        );
+    }
+
+    #[test]
+    fn wrap_gradient_at_boundary() {
+        // On a 4x4 Wrap grid with linear-x heat, the gradient at (0,0)
+        // should wrap around to see heat at (0,3).
+        let grid = Square4::new(4, 4, EdgeBehavior::Wrap).unwrap();
+        let n = grid.cell_count();
+        let prop = DiffusionPropagator::new(0.0);
+
+        let mut heat = vec![0.0f32; n];
+        for r in 0..4 {
+            for c in 0..4 {
+                heat[r * 4 + c] = (c as f32) * 10.0;
+            }
+        }
+
+        let mut reader = MockFieldReader::new();
+        reader.set_field(HEAT, heat);
+        reader.set_field(VELOCITY, vec![0.0; n * 2]);
+
+        let mut writer = MockFieldWriter::new();
+        writer.add_field(HEAT, n);
+        writer.add_field(VELOCITY, n * 2);
+        writer.add_field(HEAT_GRADIENT, n * 2);
+
+        let mut scratch = ScratchRegion::new(0);
+        let mut ctx = make_ctx(&reader, &mut writer, &mut scratch, &grid, 0.01);
+        prop.step(&mut ctx).unwrap();
+
+        let grad = writer.get_field(HEAT_GRADIENT).unwrap();
+        // Cell (0,0): east=(0,1)=10, west=wrap to (0,3)=30
+        // grad_x = (10 - 30) / 2 = -10
+        assert!(
+            (grad[0] - (-10.0)).abs() < 1e-6,
+            "wrap grad_x at (0,0) should be -10, got {}",
             grad[0]
         );
     }

@@ -74,7 +74,17 @@ pub fn stress_profile(seed: u64, action_buffer: ActionBuffer) -> WorldConfig {
 ///
 /// Places `n` agents at evenly-spaced positions in the grid using a
 /// simple hash of the seed. Returns `(agent_id, flat_index)` pairs.
+///
+/// If `cell_count` is 0 or `n` exceeds `cell_count`, the result is
+/// clamped to at most `cell_count` agents (no panic, no infinite loop).
 pub fn init_agent_positions(cell_count: usize, n: u16, seed: u64) -> Vec<(u16, usize)> {
+    if cell_count == 0 {
+        return Vec::new();
+    }
+
+    // Cannot place more agents than cells
+    let n = (n as usize).min(cell_count) as u16;
+
     let mut positions = Vec::with_capacity(n as usize);
     let mut occupied = std::collections::HashSet::new();
 
@@ -83,7 +93,7 @@ pub fn init_agent_positions(cell_count: usize, n: u16, seed: u64) -> Vec<(u16, u
         let mut pos = ((seed.wrapping_mul(6364136223846793005).wrapping_add(i as u64 * 1442695040888963407))
             % cell_count as u64) as usize;
 
-        // Linear probe to avoid collisions
+        // Linear probe to avoid collisions (guaranteed to terminate: n <= cell_count)
         while occupied.contains(&pos) {
             pos = (pos + 1) % cell_count;
         }
@@ -132,5 +142,31 @@ mod tests {
         let a = init_agent_positions(1000, 5, 42);
         let b = init_agent_positions(1000, 5, 42);
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn init_agent_positions_zero_cells_returns_empty() {
+        let positions = init_agent_positions(0, 5, 42);
+        assert!(positions.is_empty());
+    }
+
+    #[test]
+    fn init_agent_positions_more_agents_than_cells_clamps() {
+        let positions = init_agent_positions(3, 10, 42);
+        assert_eq!(positions.len(), 3);
+
+        let indices: Vec<usize> = positions.iter().map(|&(_, idx)| idx).collect();
+        let unique: std::collections::HashSet<usize> = indices.iter().copied().collect();
+        assert_eq!(unique.len(), 3, "all positions should be unique");
+    }
+
+    #[test]
+    fn init_agent_positions_exactly_fills_grid() {
+        let positions = init_agent_positions(4, 4, 99);
+        assert_eq!(positions.len(), 4);
+
+        let indices: Vec<usize> = positions.iter().map(|&(_, idx)| idx).collect();
+        let unique: std::collections::HashSet<usize> = indices.iter().copied().collect();
+        assert_eq!(unique.len(), 4);
     }
 }
