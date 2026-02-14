@@ -56,7 +56,35 @@ generational allocation for deterministic, zero-GC memory management.
 └─────────────────────────────────────────────────────┘
 ```
 
+## Prerequisites
+
+**Rust** (for building from source or using the Rust API):
+- Rust toolchain (stable, 1.75+): [rustup.rs](https://rustup.rs/)
+
+**Python** (for the Gymnasium bindings):
+- Python 3.9+
+- [maturin](https://www.maturin.rs/) (`pip install maturin`)
+- numpy >= 1.24, gymnasium >= 0.29 (installed automatically)
+
 ## Quick start
+
+### Installation
+
+Murk is not yet on PyPI or crates.io. Install from source:
+
+```bash
+git clone https://github.com/tachyon-beep/murk.git
+cd murk
+
+# Rust: build and test
+cargo build --workspace
+cargo test --workspace
+
+# Python: build native extension in development mode
+cd crates/murk-python
+pip install maturin
+maturin develop --release
+```
 
 ### Rust
 
@@ -78,18 +106,16 @@ let heat = result.snapshot.read(FieldId(0)).unwrap();
 
 ### Python
 
-```bash
-pip install murk
-```
-
 ```python
 import murk
+from murk import Config, FieldMutability, EdgeBehavior, WriteMode, ObsEntry, RegionType
 
-config = murk.Config()
-config.set_space(murk.SpaceType.Square4, width=100, height=100)
-# ... add fields and propagators ...
+config = Config()
+config.set_space_square4(16, 16, EdgeBehavior.Absorb)
+config.add_field("heat", mutability=FieldMutability.PerTick)
+# ... add propagators ...
 
-env = murk.MurkEnv(config, obs_entries=[...], n_actions=5)
+env = murk.MurkEnv(config, obs_entries=[ObsEntry(0, region_type=RegionType.All)], n_actions=5)
 obs, info = env.reset()
 
 for _ in range(1000):
@@ -114,19 +140,17 @@ for _ in range(1000):
 | `murk-bench` | Benchmark profiles and utilities |
 | `murk-test-utils` | Shared test fixtures |
 
-## Building
+## Examples
 
-```bash
-# Rust
-cargo build --workspace
-cargo test --workspace
-cargo clippy --workspace -- -D warnings
+| Example | Demonstrates |
+|---------|-------------|
+| [`heat_seeker`](examples/heat_seeker/) | PPO RL on Square4, Python propagator, diffusion |
+| [`hex_pursuit`](examples/hex_pursuit/) | Hex2D, multi-agent, AgentDisk foveation |
+| [`crystal_nav`](examples/crystal_nav/) | FCC12 3D lattice navigation |
+| [`quickstart.rs`](crates/murk-engine/examples/quickstart.rs) | Rust API: propagator, commands, snapshots |
 
-# Python (requires maturin)
-cd crates/murk-python
-pip install maturin
-maturin develop
-```
+See [`docs/CONCEPTS.md`](docs/CONCEPTS.md) for a guide to Murk's mental model
+(spaces, fields, propagators, commands, observations).
 
 ## Design
 
