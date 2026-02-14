@@ -20,7 +20,10 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv
 
 import murk
-from murk import Command, Config, ObsEntry, SpaceType, FieldMutability, FieldType
+from murk import (
+    Command, Config, ObsEntry, FieldMutability, FieldType,
+    EdgeBehavior, WriteMode, RegionType,
+)
 
 # ─── World parameters ───────────────────────────────────────────
 #
@@ -161,8 +164,7 @@ class HeatSeekerEnv(murk.MurkEnv):
         config = Config()
 
         # Space: 16x16 Square4 grid with absorb boundaries.
-        # params = [width, height, edge_behavior] where 0=Absorb.
-        config.set_space(SpaceType.Square4, [float(GRID_W), float(GRID_H), 0.0])
+        config.set_space_square4(GRID_W, GRID_H, EdgeBehavior.Absorb)
 
         # Fields: heat (the gradient signal) and agent_pos (binary mask).
         # Both are PerTick (fresh allocation each tick, starts at zero).
@@ -174,19 +176,19 @@ class HeatSeekerEnv(murk.MurkEnv):
 
         # Register the diffusion propagator.
         #   reads_previous=[0] → Jacobi-style read of previous tick's heat
-        #   writes=[(0, 0)]    → full-write to heat field (write_mode 0=Full)
+        #   writes=[(0, WriteMode.Full)] → full-write to heat field
         murk.add_propagator(
             config,
             name="diffusion",
             step_fn=diffusion_step,
             reads_previous=[HEAT_FIELD],
-            writes=[(HEAT_FIELD, 0)],
+            writes=[(HEAT_FIELD, WriteMode.Full)],
         )
 
-        # Observation plan: observe both fields in full (region_type=0 = All).
+        # Observation plan: observe both fields in full.
         obs_entries = [
-            ObsEntry(HEAT_FIELD),
-            ObsEntry(AGENT_FIELD),
+            ObsEntry(HEAT_FIELD, region_type=RegionType.All),
+            ObsEntry(AGENT_FIELD, region_type=RegionType.All),
         ]
 
         super().__init__(

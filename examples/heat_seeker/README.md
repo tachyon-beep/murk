@@ -50,15 +50,14 @@ movement, which is fine but makes the action space larger without adding
 pedagogical value. Hex2D would be interesting but harder to visualize.
 
 ```python
-config.set_space(SpaceType.Square4, [16.0, 16.0, 0.0])
-#                                    width  height edge_behavior
-#                                                  0=Absorb (walls)
+config.set_space_square4(16, 16, EdgeBehavior.Absorb)
+#                        width  height  edge_behavior
 ```
 
-The edge behavior parameter controls what happens at the grid boundary:
-- **Absorb (0):** edges are walls — no neighbor beyond the edge
-- **Clamp (1):** beyond-edge references map back to the edge cell
-- **Wrap (2):** periodic boundaries (left edge connects to right)
+The `EdgeBehavior` enum controls what happens at the grid boundary:
+- **`EdgeBehavior.Absorb`:** edges are walls — no neighbor beyond the edge
+- **`EdgeBehavior.Clamp`:** beyond-edge references map back to the edge cell
+- **`EdgeBehavior.Wrap`:** periodic boundaries (left edge connects to right)
 
 We use Absorb because the agent should learn to avoid corners, not wrap
 around to the other side.
@@ -177,14 +176,14 @@ murk.add_propagator(
     config,
     name="diffusion",
     step_fn=diffusion_step,
-    reads_previous=[HEAT_FIELD],  # Jacobi read
-    writes=[(HEAT_FIELD, 0)],     # 0 = Full write mode
+    reads_previous=[HEAT_FIELD],            # Jacobi read
+    writes=[(HEAT_FIELD, WriteMode.Full)],  # full-write to heat field
 )
 ```
 
-Write modes:
-- **Full (0):** propagator writes every cell. Buffer starts at zero.
-- **Incremental (1):** propagator adds to existing values. Used when
+Write modes (`WriteMode` enum):
+- **`WriteMode.Full`:** propagator writes every cell. Buffer starts at zero.
+- **`WriteMode.Incremental`:** propagator adds to existing values. Used when
   multiple propagators contribute to the same field.
 
 ## Step 4: Wire observations
@@ -199,22 +198,22 @@ Murk's observation system separates *specification* from *execution*:
 
 | Type | Output size | Use case |
 |------|------------|----------|
-| All (0) | cell_count per field | Full-grid observation |
-| AgentDisk (5) | ~pi*r^2 per field | Local circular patch around agent |
-| AgentRect (6) | (2h+1)^ndim per field | Local rectangular patch around agent |
+| `RegionType.All` | cell_count per field | Full-grid observation |
+| `RegionType.AgentDisk` | ~pi*r^2 per field | Local circular patch around agent |
+| `RegionType.AgentRect` | (2h+1)^ndim per field | Local rectangular patch around agent |
 
-**Our choice: All (full grid).** For a 16x16 grid, this gives 256 floats
-per field. With two fields (heat + agent_pos), the observation is 512
-floats — trivial for PPO's MLP policy.
+**Our choice: `RegionType.All` (full grid).** For a 16x16 grid, this gives
+256 floats per field. With two fields (heat + agent_pos), the observation
+is 512 floats — trivial for PPO's MLP policy.
 
-For larger grids (100x100+), you'd switch to AgentDisk or AgentRect to
-keep the observation size manageable and give the agent translation-invariant
-local perception.
+For larger grids (100x100+), you'd switch to `RegionType.AgentDisk` or
+`RegionType.AgentRect` to keep the observation size manageable and give
+the agent translation-invariant local perception.
 
 ```python
 obs_entries = [
-    ObsEntry(HEAT_FIELD),   # 256 floats: the temperature gradient
-    ObsEntry(AGENT_FIELD),  # 256 floats: 1.0 at agent position
+    ObsEntry(HEAT_FIELD, region_type=RegionType.All),   # 256 floats: the temperature gradient
+    ObsEntry(AGENT_FIELD, region_type=RegionType.All),   # 256 floats: 1.0 at agent position
 ]
 ```
 
@@ -224,8 +223,8 @@ is agent position.
 ### Transforms
 
 ObsEntry supports transforms applied at extraction time:
-- **Identity (0, default):** raw values
-- **Normalize (1):** scale to [min, max] range
+- **`TransformType.Identity` (default):** raw values
+- **`TransformType.Normalize`:** scale to [min, max] range
 
 We use Identity since our heat values are already in a reasonable range
 for neural network input.
