@@ -29,6 +29,10 @@ fn _murk(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<config::EdgeBehavior>()?;
     m.add_class::<command::WriteMode>()?;
     m.add_class::<command::CommandType>()?;
+    m.add_class::<config::RegionType>()?;
+    m.add_class::<config::TransformType>()?;
+    m.add_class::<config::PoolKernel>()?;
+    m.add_class::<config::DType>()?;
 
     // Core classes
     m.add_class::<config::Config>()?;

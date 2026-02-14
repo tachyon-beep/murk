@@ -126,3 +126,28 @@ def test_enum_values():
     assert FieldMutability.Static == FieldMutability.Static
     assert BoundaryBehavior.Clamp == BoundaryBehavior.Clamp
     assert EdgeBehavior.Absorb == EdgeBehavior.Absorb
+
+
+def test_region_type_enum_values():
+    """RegionType enum has expected members."""
+    from murk import RegionType
+    assert RegionType.All.value == 0
+    assert RegionType.AgentDisk.value == 5
+    assert RegionType.AgentRect.value == 6
+
+
+def test_transform_type_enum_values():
+    """TransformType enum has expected members."""
+    from murk import TransformType
+    assert TransformType.Identity.value == 0
+    assert TransformType.Normalize.value == 1
+
+
+def test_pool_kernel_enum_values():
+    """PoolKernel enum has expected members."""
+    from murk import PoolKernel
+    assert PoolKernel.NoPool.value == 0
+    assert PoolKernel.Mean.value == 1
+    assert PoolKernel.Max.value == 2
+    assert PoolKernel.Min.value == 3
+    assert PoolKernel.Sum.value == 4

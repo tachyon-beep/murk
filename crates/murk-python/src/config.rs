@@ -81,6 +81,88 @@ pub(crate) enum EdgeBehavior {
     Wrap = 2,
 }
 
+/// Observation region type.
+#[pyclass(eq, eq_int)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RegionType {
+    /// Full grid — observe every cell.
+    All = 0,
+    /// Circular patch around agent center.
+    AgentDisk = 5,
+    /// Rectangular patch around agent center.
+    AgentRect = 6,
+}
+
+#[pymethods]
+impl RegionType {
+    /// Integer discriminant, compatible with Python enum `.value`.
+    #[getter]
+    fn value(&self) -> i32 {
+        *self as i32
+    }
+}
+
+/// Observation transform applied at extraction time.
+#[pyclass(eq, eq_int)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TransformType {
+    /// Raw field values, no transform.
+    Identity = 0,
+    /// Scale to [normalize_min, normalize_max] range.
+    Normalize = 1,
+}
+
+#[pymethods]
+impl TransformType {
+    /// Integer discriminant, compatible with Python enum `.value`.
+    #[getter]
+    fn value(&self) -> i32 {
+        *self as i32
+    }
+}
+
+/// Pooling kernel for observation downsampling.
+#[pyclass(eq, eq_int)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PoolKernel {
+    /// No pooling.
+    NoPool = 0,
+    /// Mean pooling.
+    Mean = 1,
+    /// Max pooling.
+    Max = 2,
+    /// Min pooling.
+    Min = 3,
+    /// Sum pooling.
+    Sum = 4,
+}
+
+#[pymethods]
+impl PoolKernel {
+    /// Integer discriminant, compatible with Python enum `.value`.
+    #[getter]
+    fn value(&self) -> i32 {
+        *self as i32
+    }
+}
+
+/// Observation data type.
+#[pyclass(eq, eq_int)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DType {
+    /// 32-bit float.
+    F32 = 0,
+}
+
+#[pymethods]
+impl DType {
+    /// Integer discriminant, compatible with Python enum `.value`.
+    #[getter]
+    fn value(&self) -> i32 {
+        *self as i32
+    }
+}
+
 /// Config builder for constructing a Murk world.
 ///
 /// Wraps the C FFI config handle. Must be consumed by `World(config)` or
