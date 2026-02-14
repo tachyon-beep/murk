@@ -303,8 +303,9 @@ impl Space for Fcc12 {
                 for z in z_lo..=z_hi {
                     for y in y_lo..=y_hi {
                         // First valid x >= x_lo with correct parity.
-                        let parity_offset = ((x_lo + y + z) % 2 + 2) % 2;
-                        let x_start = x_lo + parity_offset;
+                        // (x_lo + y + z) % 2 is always 0 or 1 here because all
+                        // values are non-negative (check_bounds guarantees >= 0).
+                        let x_start = x_lo + ((x_lo + y + z) % 2);
                         let mut x = x_start;
                         while x <= x_hi {
                             coords.push(smallvec![x, y, z]);
