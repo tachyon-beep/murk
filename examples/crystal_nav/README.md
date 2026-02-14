@@ -131,23 +131,28 @@ laplacian = nbr_sum - DEGREE * prev_field  # graph Laplacian
 The sentinel trick avoids Python loops over cells: missing neighbors
 point to the extra element at index `CELL_COUNT` (always 0.0), so
 `padded[NBR_IDX]` returns the correct neighbor values even for boundary
-cells. The `DEGREE` array corrects the center term of the Laplacian.
+cells.
+
+This implements the **combinatorial graph Laplacian on the induced
+subgraph**: `L*u = sum_nbr(u_nbr) - deg(v)*u_v`. The sentinel value
+0.0 is a vectorisation convenience, not "outside world is zero" —
+missing neighbors are simply absent edges. `DEGREE` corrects the
+self-term (`-deg * u`), not a denominator.
 
 This pattern works on **any** Murk topology — Square4, Hex2D, ProductSpace —
 as long as you precompute the adjacency array.
 
-### CFL stability
+### Non-negative weights condition
 
-The Courant-Friedrichs-Lewy condition for explicit diffusion on a graph
-with maximum degree `d_max` is:
+For the explicit update to stay monotone (no overshoot), all weights
+in the stencil must remain non-negative. With maximum degree `d_max`:
 
 ```
-d_max * D * dt < 1
+d_max * D * dt + decay * dt < 1
 ```
 
-For FCC12 with dt=1.0: `12 * D < 1`, so `D < 0.083`. Our beacon
-diffusion coefficient D=0.06 gives CFL=0.72, and radiation D=0.04
-gives CFL=0.48 — both stable.
+For FCC12 with dt=1.0: beacon gives `12*0.06 + 0.01 = 0.73`, radiation
+gives `12*0.04 + 0.03 = 0.51` — both well under 1.
 
 ## Step 4: Exponential decay and spatial gradients
 
@@ -204,19 +209,27 @@ signal for PPO.
 ## Step 5: 13-action space
 
 The agent has 13 discrete actions: stay (0) plus the 12 FCC offsets (1-12).
-
-```python
-if action != 0:
-    dx, dy, dz = FCC_OFFSETS[action - 1]
-    nx, ny, nz = x + dx, y + dy, z + dz
-    if (nx, ny, nz) in COORD_TO_RANK:
-        x, y, z = nx, ny, nz  # valid move
-    # else: absorb (stay put)
-```
-
 At the boundary, invalid moves are absorbed — the agent stays in place.
 Interior cells have all 12 moves valid; corner cells may have as few as
 3 valid moves.
+
+### Precomputed transition table
+
+Rather than checking coordinate validity per step, we precompute the
+full transition graph at module load time:
+
+```python
+# NEXT_RANK[rank, action] → rank  (invalid moves map to self)
+# VALID_MASK[rank, action] → bool (for optional action-masking)
+
+cur = COORD_TO_RANK[(agent_x, agent_y, agent_z)]
+nxt = NEXT_RANK[cur, action]
+agent_x, agent_y, agent_z = CELLS[nxt]
+```
+
+This eliminates per-step dictionary lookups, removes any possibility of
+a rank mismatch bug, and makes the code read as what it is: control on
+a graph.
 
 ## Step 6: Environment and reward
 

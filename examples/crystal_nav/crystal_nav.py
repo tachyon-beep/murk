@@ -22,8 +22,10 @@ import time
 from typing import Any
 
 import numpy as np
+import torch
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv
+from stable_baselines3.common.utils import set_random_seed
 
 import murk
 from murk import Command, Config, ObsEntry, SpaceType, FieldMutability, FieldType
@@ -57,9 +59,9 @@ RADIATION_X, RADIATION_Y, RADIATION_Z = 2, 2, 2
 
 # Diffusion coefficients (with dt=1.0).
 # Beacon spreads wider (longer-range signal), radiation is sharper (local hazard).
-# CFL stability: 12 * D * dt < 1.
-BEACON_D = 0.06    # CFL = 0.72
-RADIATION_D = 0.04  # CFL = 0.48
+# Non-negative weights condition: 12*D*dt + decay < 1.
+BEACON_D = 0.06    # 12*0.06 + 0.01 = 0.73
+RADIATION_D = 0.04  # 12*0.04 + 0.03 = 0.51
 
 # Decay rates: without decay, diffusion saturates to SOURCE_INTENSITY everywhere
 # (no gradient). Decay creates an exponential gradient around each source:
@@ -158,6 +160,39 @@ def _build_fcc_adjacency(w, h, d):
 CELLS, COORD_TO_RANK, NBR_IDX, DEGREE = _build_fcc_adjacency(GRID_W, GRID_H, GRID_D)
 CELL_COUNT = len(CELLS)
 
+
+def _build_transition_table(cells, coord_to_rank, cell_count):
+    """Precompute NEXT_RANK[rank, action] → rank (invalid moves map to self).
+
+    This turns movement into a single array lookup — no per-step dict
+    membership tests, no risk of rank mismatch bugs. The agent operates
+    on a graph, and this table IS the graph from the control perspective.
+
+    Also builds VALID_MASK[rank, action] for optional action-masking.
+    """
+    # 13 actions: 0=stay, 1-12=FCC offsets.
+    next_rank = np.zeros((cell_count, 13), dtype=np.int32)
+    valid_mask = np.zeros((cell_count, 13), dtype=np.bool_)
+
+    for rank, (x, y, z) in enumerate(cells):
+        # Action 0: stay (always valid).
+        next_rank[rank, 0] = rank
+        valid_mask[rank, 0] = True
+        # Actions 1-12: FCC offsets.
+        for ai, (dx, dy, dz) in enumerate(FCC_OFFSETS):
+            nb = coord_to_rank.get((x + dx, y + dy, z + dz))
+            if nb is not None:
+                next_rank[rank, ai + 1] = nb
+                valid_mask[rank, ai + 1] = True
+            else:
+                next_rank[rank, ai + 1] = rank  # absorb → stay
+                valid_mask[rank, ai + 1] = False
+
+    return next_rank, valid_mask
+
+
+NEXT_RANK, VALID_MASK = _build_transition_table(CELLS, COORD_TO_RANK, CELL_COUNT)
+
 # ─── Debug assertions ───────────────────────────────────────────
 
 if __debug__:
@@ -175,9 +210,10 @@ if __debug__:
                 f"interior cell ({x},{y},{z}) has degree {DEGREE[rank]}, expected 12"
             )
 
-    # CFL stability check (diffusion + decay must not overshoot).
-    assert 12 * BEACON_D * 1.0 + BEACON_DECAY < 1.0, f"beacon CFL unstable"
-    assert 12 * RADIATION_D * 1.0 + RADIATION_DECAY < 1.0, f"radiation CFL unstable"
+    # Non-negative weights check: 12*D + decay < 1 ensures the explicit
+    # update weights stay non-negative (monotonicity / no overshoot).
+    assert 12 * BEACON_D * 1.0 + BEACON_DECAY < 1.0, "beacon weights go negative"
+    assert 12 * RADIATION_D * 1.0 + RADIATION_DECAY < 1.0, "radiation weights go negative"
 
     # Source cells exist in the lattice.
     assert (BEACON_X, BEACON_Y, BEACON_Z) in COORD_TO_RANK, "beacon not a valid FCC cell"
@@ -193,8 +229,13 @@ if __debug__:
 # Decision: sentinel trick for vectorized numpy.
 #   Pad the field array with one extra element (sentinel = 0.0) at
 #   index CELL_COUNT. Missing neighbours in NBR_IDX point to this
-#   sentinel, so fancy indexing gathers 0.0 for them. The DEGREE
-#   array corrects the Laplacian denominator.
+#   sentinel, so fancy indexing gathers 0.0 for them.
+#
+#   This implements the combinatorial graph Laplacian on the induced
+#   subgraph: L*u = sum_nbr(u_nbr) - deg(v)*u_v.  The sentinel is
+#   a vectorisation convenience — missing neighbours are absent edges,
+#   not "outside world is zero".  DEGREE corrects the self-term
+#   (-deg * u), not a denominator.
 #
 #   This avoids Python loops over cells and runs at numpy speed.
 #
@@ -340,15 +381,11 @@ class CrystalNavEnv(murk.MurkEnv):
         return obs, {"tick_id": tick_id, "age_ticks": age_ticks}
 
     def _action_to_commands(self, action: Any) -> list[Command]:
-        # 0 = stay, 1-12 = FCC offsets (same order as FCC_OFFSETS).
-        if action != 0:
-            dx, dy, dz = FCC_OFFSETS[action - 1]
-            nx = self._agent_x + dx
-            ny = self._agent_y + dy
-            nz = self._agent_z + dz
-            # Only move if target is a valid FCC cell (absorb at boundaries).
-            if (nx, ny, nz) in COORD_TO_RANK:
-                self._agent_x, self._agent_y, self._agent_z = nx, ny, nz
+        # Single array lookup — NEXT_RANK encodes the full graph topology.
+        # Invalid moves (boundary) map to self (absorb).
+        cur = COORD_TO_RANK[(self._agent_x, self._agent_y, self._agent_z)]
+        nxt = int(NEXT_RANK[cur, action])
+        self._agent_x, self._agent_y, self._agent_z = CELLS[nxt]
 
         return [Command.set_field(
             AGENT_FIELD, [self._agent_x, self._agent_y, self._agent_z], 1.0
@@ -423,6 +460,10 @@ def main():
     print(f"  Warmup:      {WARMUP_TICKS} ticks")
     print(f"  Training:    {TOTAL_TIMESTEPS:,} timesteps")
     print()
+
+    # ── Pin all RNG seeds for reproducibility ──────────────
+    set_random_seed(42)
+    torch.manual_seed(42)
 
     # ── Create vectorized environment for PPO ────────────────
     env = DummyVecEnv([lambda: CrystalNavEnv(seed=42)])
