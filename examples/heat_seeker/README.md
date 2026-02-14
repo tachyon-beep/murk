@@ -153,7 +153,7 @@ def diffusion_step(reads, reads_prev, writes, tick_id, dt, cell_count):
         - 4.0 * prev                                # center
     )
 
-    new_heat = prev + D * dt * laplacian
+    new_heat = prev + D * dt * laplacian - HEAT_DECAY * dt * prev
     new_heat[SOURCE_Y, SOURCE_X] = SOURCE_INTENSITY  # inject at source
     out[:] = new_heat.ravel()
 ```
@@ -162,6 +162,13 @@ def diffusion_step(reads, reads_prev, writes, tick_id, dt, cell_count):
 Edge-padding copies the boundary cell's value into the ghost cell, so the
 Laplacian contribution from the missing neighbor is zero (no flux across
 the boundary). This matches the Square4 Absorb edge behavior.
+
+**Why the decay term (`- HEAT_DECAY * dt * prev`)?** Without decay,
+diffusion with a constant source on a bounded domain converges to a
+uniform steady state — all cells approach `SOURCE_INTENSITY`, destroying
+the gradient. The decay term creates an exponential spatial gradient
+(`~exp(-d * sqrt(HEAT_DECAY / D))`) that persists at steady state,
+giving the agent a directional signal to follow.
 
 Register it with the engine:
 
@@ -290,15 +297,19 @@ stable-baselines3's PPO works out of the box with any Gymnasium env:
 from stable_baselines3 import PPO
 
 env = DummyVecEnv([lambda: HeatSeekerEnv(seed=42)])
-model = PPO("MlpPolicy", env, n_steps=512, verbose=0)
-model.learn(total_timesteps=50_000, progress_bar=True)
+model = PPO("MlpPolicy", env, n_steps=2048, ent_coef=0.15, verbose=0,
+            policy_kwargs=dict(net_arch=[128, 128]))
+model.learn(total_timesteps=300_000, progress_bar=True)
 ```
 
 **Why these hyperparameters?**
-- `MlpPolicy`: two-layer MLP (64x64 by default). Plenty for 512-dim input.
-- `n_steps=512`: collect ~2.5 episodes worth of experience before each
-  policy update. Balances sample efficiency and update frequency.
-- `50_000 timesteps`: enough to converge on this problem (~250 episodes).
+- `MlpPolicy`: two-layer MLP (128x128). Handles the 512-dim observation.
+- `n_steps=2048`: longer rollouts (~13 episodes) give better value estimates
+  for the sparse terminal reward.
+- `ent_coef=0.15`: high entropy coefficient prevents premature policy
+  collapse. Without sufficient entropy, PPO converges to a single action
+  before discovering the terminal bonus.
+- `300_000 timesteps`: enough to converge on this problem (~2000 episodes).
 
 ## Step 7: Evaluate
 
@@ -306,23 +317,23 @@ We compare a random policy (untrained model) against the trained policy:
 
 ```
 Evaluating random policy (before training)...
-  Mean reward:       7.2
-  Mean length:     200.0 steps
+  Mean reward:    -146.1
+  Mean length:     149.0 steps
   Reach rate:         0%
 
-Training PPO for 50,000 timesteps...
-  Done in 42.1s (1188 steps/sec)
+Training PPO for 300,000 timesteps...
+  Done in 165.6s (1811 steps/sec)
 
 Evaluating trained policy (after training)...
-  Mean reward:     189.4
-  Mean length:      22.3 steps
+  Mean reward:      91.5
+  Mean length:      11.9 steps
   Reach rate:       100%
 ```
 
 The trained agent:
 - Reliably reaches the heat source (100% reach rate)
-- Does so in ~22 steps (optimal is ~28 for worst-case diagonal traversal)
-- Accumulates ~27x more reward than random
+- Does so in ~12 steps on average (near-optimal for the grid)
+- Achieves reward ~91 vs -146 for random (terminal bonus dominates)
 
 ## What's next
 

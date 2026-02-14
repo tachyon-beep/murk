@@ -16,7 +16,6 @@ import time
 from typing import Any
 
 import numpy as np
-from gymnasium import spaces
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv
 
@@ -47,6 +46,15 @@ SOURCE_X, SOURCE_Y = 14, 14
 DIFFUSION_COEFF = 0.1
 SOURCE_INTENSITY = 10.0
 
+# Decay rate: without decay, diffusion saturates to SOURCE_INTENSITY
+# everywhere (zero gradient). Decay creates an exponential gradient:
+#   steady-state ~ S * exp(-d * sqrt(decay/D))
+# With decay=0.005, D=0.1: characteristic length ~4.5 cells.
+#   5 cells from source: heat ≈ 3.3
+#   10 cells from source: heat ≈ 1.1
+#   20 cells from source: heat ≈ 0.1
+HEAT_DECAY = 0.005
+
 # Field IDs (assigned by add_field order).
 HEAT_FIELD = 0
 AGENT_FIELD = 1
@@ -59,8 +67,20 @@ MAX_STEPS = 200
 # approximate steady state before the agent starts.
 WARMUP_TICKS = 50
 
+# Reward shaping: scale heat to a shaping signal, add terminal bonus
+# and step penalty so reaching the source is clearly optimal.
+#
+#   At source (heat=10): 0.1*10 - 1.0 + 100 = +99.0   (terminal step)
+#   1 cell away (heat≈6.8): 0.1*6.8 - 1.0 = -0.32/step  (negative — no camping)
+#   10 cells away (heat≈1): 0.1*1 - 1.0 = -0.90/step
+#   Camping 200 steps at -0.32: -64  (clearly worse than reaching)
+#
+REWARD_SCALE = 0.1
+TERMINAL_BONUS = 100.0
+STEP_PENALTY = 1.0
+
 # Training budget.
-TOTAL_TIMESTEPS = 50_000
+TOTAL_TIMESTEPS = 300_000
 
 
 # ─── Propagator: discrete diffusion ─────────────────────────────
@@ -101,7 +121,7 @@ def diffusion_step(reads, reads_prev, writes, tick_id, dt, cell_count):
         - 4.0 * prev
     )
 
-    new_heat = prev + DIFFUSION_COEFF * dt * laplacian
+    new_heat = prev + DIFFUSION_COEFF * dt * laplacian - HEAT_DECAY * dt * prev
     new_heat[SOURCE_Y, SOURCE_X] = SOURCE_INTENSITY
     np.maximum(new_heat, 0.0, out=new_heat)
 
@@ -200,7 +220,8 @@ class HeatSeekerEnv(murk.MurkEnv):
         self._agent_y = int(rng.integers(0, GRID_H))
 
         # Stamp agent position into the field and tick once more.
-        cmd = Command.set_field(AGENT_FIELD, [self._agent_x, self._agent_y], 1.0)
+        # Coord convention: Rust canonical_rank uses [row, col] = [y, x].
+        cmd = Command.set_field(AGENT_FIELD, [self._agent_y, self._agent_x], 1.0)
         self._world.step([cmd])
 
         # Extract initial observation.
@@ -216,14 +237,17 @@ class HeatSeekerEnv(murk.MurkEnv):
         dx, dy = deltas[action]
         self._agent_x = max(0, min(GRID_W - 1, self._agent_x + dx))
         self._agent_y = max(0, min(GRID_H - 1, self._agent_y + dy))
-        return [Command.set_field(AGENT_FIELD, [self._agent_x, self._agent_y], 1.0)]
+        # Coord convention: Rust canonical_rank uses [row, col] = [y, x].
+        return [Command.set_field(AGENT_FIELD, [self._agent_y, self._agent_x], 1.0)]
 
     def _compute_reward(self, obs: np.ndarray, info: dict) -> float:
-        # Reward = heat value at the agent's current position.
         # obs layout: [heat_field (256 floats), agent_field (256 floats)]
         heat = obs[:CELL_COUNT]
         agent_idx = self._agent_y * GRID_W + self._agent_x
-        return float(heat[agent_idx])
+        reward = REWARD_SCALE * float(heat[agent_idx]) - STEP_PENALTY
+        if self._check_terminated(obs, info):
+            reward += TERMINAL_BONUS
+        return reward
 
     def _check_terminated(self, obs: np.ndarray, info: dict) -> bool:
         return self._agent_x == SOURCE_X and self._agent_y == SOURCE_Y
@@ -291,15 +315,18 @@ def main():
     # ── Create PPO model ─────────────────────────────────────
     #
     # Decision: hyperparameters.
-    #   Defaults work well for this problem. The only tuning:
-    #   - n_steps=512: collect half an episode before each update
-    #   - Small network (64x64 MLP) is plenty for 512-dim input
+    #   n_steps=2048: longer rollouts (~13 episodes) for stable value estimates.
+    #   ent_coef=0.15: prevent premature policy collapse — without this,
+    #   PPO converges to a single action before discovering the terminal bonus.
+    #   net_arch=[128, 128]: two 128-unit layers for the 512-dim observation.
     #
     model = PPO(
         "MlpPolicy",
         env,
-        n_steps=512,
+        n_steps=2048,
+        ent_coef=0.15,
         verbose=0,
+        policy_kwargs=dict(net_arch=[128, 128]),
     )
 
     # ── Evaluate before training (random policy baseline) ────
