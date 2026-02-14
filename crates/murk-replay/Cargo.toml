@@ -9,4 +9,10 @@ murk-core = { path = "../murk-core" }
 indexmap = { workspace = true }
 
 [dev-dependencies]
+murk-engine = { path = "../murk-engine" }
+murk-space = { path = "../murk-space" }
+murk-propagator = { path = "../murk-propagator" }
+murk-propagators = { path = "../murk-propagators" }
+murk-test-utils = { path = "../murk-test-utils" }
+murk-bench = { path = "../murk-bench" }
 proptest = { workspace = true }

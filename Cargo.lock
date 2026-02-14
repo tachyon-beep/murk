@@ -525,7 +525,13 @@ name = "murk-replay"
 version = "0.1.0"
 dependencies = [
  "indexmap",
+ "murk-bench",
  "murk-core",
+ "murk-engine",
+ "murk-propagator",
+ "murk-propagators",
+ "murk-space",
+ "murk-test-utils",
  "proptest",
 ]
 
