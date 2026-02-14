@@ -8,6 +8,7 @@ use murk_ffi::{
     murk_obsplan_mask_len, murk_obsplan_output_len, MurkObsEntry, MurkObsResult,
 };
 
+use crate::config::{DType, PoolKernel, RegionType, TransformType};
 use crate::error::check_status;
 use crate::world::World;
 
@@ -24,40 +25,40 @@ impl ObsEntry {
     ///
     /// Args:
     ///     field_id: Field index to observe.
-    ///     region_type: 0=All, 5=AgentDisk, 6=AgentRect.
-    ///     transform_type: 0 = Identity, 1 = Normalize.
+    ///     region_type: RegionType enum (All, AgentDisk, AgentRect).
+    ///     transform_type: TransformType enum (Identity, Normalize).
     ///     normalize_min: Lower bound for Normalize transform.
     ///     normalize_max: Upper bound for Normalize transform.
-    ///     dtype: 0 = F32.
+    ///     dtype: DType enum (F32).
     ///     region_params: List of int32 region parameters (up to 8).
-    ///         For AgentDisk (5): [radius].
-    ///         For AgentRect (6): [half_extent_0, half_extent_1, ...].
-    ///     pool_kernel: 0=None, 1=Mean, 2=Max, 3=Min, 4=Sum.
-    ///     pool_kernel_size: Pooling window size (ignored if pool_kernel=0).
-    ///     pool_stride: Pooling stride (ignored if pool_kernel=0).
+    ///         For AgentDisk: [radius].
+    ///         For AgentRect: [half_extent_0, half_extent_1, ...].
+    ///     pool_kernel: PoolKernel enum (NoPool, Mean, Max, Min, Sum).
+    ///     pool_kernel_size: Pooling window size (ignored if pool_kernel=NoPool).
+    ///     pool_stride: Pooling stride (ignored if pool_kernel=NoPool).
     #[new]
     #[pyo3(signature = (
         field_id,
-        region_type=0,
-        transform_type=0,
+        region_type=RegionType::All,
+        transform_type=TransformType::Identity,
         normalize_min=0.0,
         normalize_max=1.0,
-        dtype=0,
+        dtype=DType::F32,
         region_params=None,
-        pool_kernel=0,
+        pool_kernel=PoolKernel::NoPool,
         pool_kernel_size=0,
         pool_stride=0,
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         field_id: u32,
-        region_type: i32,
-        transform_type: i32,
+        region_type: RegionType,
+        transform_type: TransformType,
         normalize_min: f32,
         normalize_max: f32,
-        dtype: i32,
+        dtype: DType,
         region_params: Option<Vec<i32>>,
-        pool_kernel: i32,
+        pool_kernel: PoolKernel,
         pool_kernel_size: i32,
         pool_stride: i32,
     ) -> PyResult<Self> {
@@ -79,14 +80,14 @@ impl ObsEntry {
         Ok(ObsEntry {
             inner: MurkObsEntry {
                 field_id,
-                region_type,
-                transform_type,
+                region_type: region_type as i32,
+                transform_type: transform_type as i32,
                 normalize_min,
                 normalize_max,
-                dtype,
+                dtype: dtype as i32,
                 region_params: params,
                 n_region_params: n_params,
-                pool_kernel,
+                pool_kernel: pool_kernel as i32,
                 pool_kernel_size,
                 pool_stride,
             },

@@ -61,11 +61,12 @@ def test_obsplan_context_manager():
 
 def test_obsplan_normalize_transform():
     """Normalize transform scales values to [0, 1]."""
+    from murk import TransformType
     world, _ = make_const_world(value=5.0, n_cells=10)
     world.step()
 
     # Normalize from [0, 10] => 5.0 -> 0.5
-    entries = [ObsEntry(0, transform_type=1, normalize_min=0.0, normalize_max=10.0)]
+    entries = [ObsEntry(0, transform_type=TransformType.Normalize, normalize_min=0.0, normalize_max=10.0)]
     plan = ObsPlan(world, entries)
 
     obs = np.zeros(plan.output_len, dtype=np.float32)
@@ -88,4 +89,33 @@ def test_obsplan_reuse_across_steps():
         assert tick_id == i + 1
         np.testing.assert_array_equal(obs, 1.0)
 
+    world.destroy()
+
+
+def test_obsentry_accepts_enum_types():
+    """ObsEntry accepts RegionType and TransformType enums."""
+    from murk import RegionType, TransformType, PoolKernel
+    entry = ObsEntry(
+        0,
+        region_type=RegionType.All,
+        transform_type=TransformType.Identity,
+        pool_kernel=PoolKernel.NoPool,
+    )
+
+
+def test_obsentry_normalize_with_enum():
+    """ObsEntry with TransformType.Normalize works end-to-end."""
+    from murk import TransformType
+    world, _ = make_const_world(value=5.0, n_cells=10)
+    world.step()
+
+    entries = [ObsEntry(0, transform_type=TransformType.Normalize,
+                        normalize_min=0.0, normalize_max=10.0)]
+    plan = ObsPlan(world, entries)
+
+    obs = np.zeros(plan.output_len, dtype=np.float32)
+    mask = np.zeros(plan.mask_len, dtype=np.uint8)
+    plan.execute(world, obs, mask)
+
+    np.testing.assert_allclose(obs, 0.5, rtol=1e-5)
     world.destroy()
