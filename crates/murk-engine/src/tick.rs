@@ -17,9 +17,10 @@ use murk_arena::config::ArenaConfig;
 use murk_arena::pingpong::PingPongArena;
 use murk_arena::read::Snapshot;
 use murk_arena::static_arena::StaticArena;
-use murk_core::command::{Command, Receipt};
+use murk_core::command::{Command, CommandPayload, Receipt};
 use murk_core::error::{IngressError, StepError};
 use murk_core::id::{FieldId, ParameterVersion, TickId};
+use murk_core::traits::FieldWriter;
 use murk_core::FieldMutability;
 use murk_propagator::pipeline::{ReadResolutionPlan, ReadSource};
 use murk_propagator::propagator::Propagator;
@@ -212,6 +213,23 @@ impl TickEngine {
                 reason_code: None,
                 command_index: dc.command_index,
             });
+        }
+        // 3b. Apply SetField commands to the staging writer.
+        for dc in &commands {
+            if let CommandPayload::SetField {
+                ref coord,
+                field_id,
+                value,
+            } = dc.command.payload
+            {
+                if let Some(rank) = self.space.canonical_rank(coord) {
+                    if let Some(buf) = guard.writer.write(field_id) {
+                        if rank < buf.len() {
+                            buf[rank] = value;
+                        }
+                    }
+                }
+            }
         }
         let command_processing_us = cmd_start.elapsed().as_micros() as u64;
 
