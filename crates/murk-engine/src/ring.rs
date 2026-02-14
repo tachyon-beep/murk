@@ -46,7 +46,10 @@ impl SnapshotRing {
     /// Panics if `capacity < 2`. A ring buffer needs at least 2 slots
     /// to be useful (one being written, one readable).
     pub fn new(capacity: usize) -> Self {
-        assert!(capacity >= 2, "SnapshotRing capacity must be >= 2, got {capacity}");
+        assert!(
+            capacity >= 2,
+            "SnapshotRing capacity must be >= 2, got {capacity}"
+        );
         let slots = (0..capacity).map(|_| Mutex::new(None)).collect();
         Self {
             slots,
@@ -422,7 +425,10 @@ mod tests {
         // Verify final state.
         assert!(ring.len() <= 8);
         assert_eq!(epoch_counter.current(), 100);
-        assert!(total_reads >= 4, "consumers collectively should have many reads");
+        assert!(
+            total_reads >= 4,
+            "consumers collectively should have many reads"
+        );
     }
 
     #[test]

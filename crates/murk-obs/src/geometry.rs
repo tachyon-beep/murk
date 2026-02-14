@@ -95,8 +95,8 @@ impl GridGeometry {
     pub fn canonical_rank(&self, coord: &[i32]) -> usize {
         debug_assert_eq!(coord.len(), self.ndim);
         let mut rank = 0usize;
-        for i in 0..self.ndim {
-            rank += coord[i] as usize * self.coord_strides[i];
+        for (c, &stride) in coord.iter().zip(&self.coord_strides) {
+            rank += *c as usize * stride;
         }
         rank
     }
@@ -106,8 +106,8 @@ impl GridGeometry {
         if coord.len() != self.ndim {
             return false;
         }
-        for i in 0..self.ndim {
-            if coord[i] < 0 || coord[i] >= self.coord_dims[i] as i32 {
+        for (c, &dim) in coord.iter().zip(&self.coord_dims) {
+            if *c < 0 || *c >= dim as i32 {
                 return false;
             }
         }
@@ -126,8 +126,8 @@ impl GridGeometry {
             return true;
         }
         let r = radius as i32;
-        for i in 0..self.ndim {
-            if center[i] < r || center[i] + r >= self.coord_dims[i] as i32 {
+        for (c, &dim) in center.iter().zip(&self.coord_dims) {
+            if *c < r || *c + r >= dim as i32 {
                 return false;
             }
         }
@@ -142,12 +142,12 @@ impl GridGeometry {
     /// - `Hex`: Cube distance `max(|dq|, |dr|, |dq + dr|)` (axial coords)
     pub fn graph_distance(&self, relative: &[i32]) -> u32 {
         match self.connectivity {
-            GridConnectivity::FourWay => {
-                relative.iter().map(|&d| d.unsigned_abs()).sum()
-            }
-            GridConnectivity::EightWay => {
-                relative.iter().map(|&d| d.unsigned_abs()).max().unwrap_or(0)
-            }
+            GridConnectivity::FourWay => relative.iter().map(|&d| d.unsigned_abs()).sum(),
+            GridConnectivity::EightWay => relative
+                .iter()
+                .map(|&d| d.unsigned_abs())
+                .max()
+                .unwrap_or(0),
             GridConnectivity::Hex => {
                 // Axial coordinates [dq, dr]. Cube distance = max(|dq|, |dr|, |dq+dr|).
                 debug_assert_eq!(relative.len(), 2);

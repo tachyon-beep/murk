@@ -160,7 +160,14 @@ pub(crate) fn compile_region_2d(
 
         RegionSpec::Disk { center, radius } => {
             let (cr, cc) = check_2d_bounds(center, rows, cols)?;
-            Ok(compile_disk_2d(cr, cc, *radius, rows, cols, &get_neighbours))
+            Ok(compile_disk_2d(
+                cr,
+                cc,
+                *radius,
+                rows,
+                cols,
+                &get_neighbours,
+            ))
         }
 
         RegionSpec::Neighbours { center, depth } => {
@@ -173,9 +180,7 @@ pub(crate) fn compile_region_2d(
             let (r_hi, c_hi) = check_2d_bounds(max, rows, cols)?;
             if r_lo > r_hi || c_lo > c_hi {
                 return Err(SpaceError::InvalidRegion {
-                    reason: format!(
-                        "Rect min ({r_lo},{c_lo}) > max ({r_hi},{c_hi}) on some axis"
-                    ),
+                    reason: format!("Rect min ({r_lo},{c_lo}) > max ({r_hi},{c_hi}) on some axis"),
                 });
             }
             let mut coords = Vec::new();
@@ -218,4 +223,3 @@ pub(crate) fn compile_region_2d(
         }
     }
 }
-

@@ -84,7 +84,9 @@ fn parse_space(space_type: i32, p: &[f64]) -> Option<Box<dyn Space>> {
             }
             let len = p[0] as u32;
             let edge = parse_edge_behavior(p[1] as i32)?;
-            Line1D::new(len, edge).ok().map(|s| Box::new(s) as Box<dyn Space>)
+            Line1D::new(len, edge)
+                .ok()
+                .map(|s| Box::new(s) as Box<dyn Space>)
         }
         x if x == MurkSpaceType::Ring1D as i32 => {
             if p.is_empty() {
@@ -100,7 +102,9 @@ fn parse_space(space_type: i32, p: &[f64]) -> Option<Box<dyn Space>> {
             let w = p[0] as u32;
             let h = p[1] as u32;
             let edge = parse_edge_behavior(p[2] as i32)?;
-            Square4::new(w, h, edge).ok().map(|s| Box::new(s) as Box<dyn Space>)
+            Square4::new(w, h, edge)
+                .ok()
+                .map(|s| Box::new(s) as Box<dyn Space>)
         }
         x if x == MurkSpaceType::Square8 as i32 => {
             if p.len() < 3 {
@@ -109,7 +113,9 @@ fn parse_space(space_type: i32, p: &[f64]) -> Option<Box<dyn Space>> {
             let w = p[0] as u32;
             let h = p[1] as u32;
             let edge = parse_edge_behavior(p[2] as i32)?;
-            Square8::new(w, h, edge).ok().map(|s| Box::new(s) as Box<dyn Space>)
+            Square8::new(w, h, edge)
+                .ok()
+                .map(|s| Box::new(s) as Box<dyn Space>)
         }
         x if x == MurkSpaceType::Hex2D as i32 => {
             // params = [cols, rows]
@@ -118,7 +124,9 @@ fn parse_space(space_type: i32, p: &[f64]) -> Option<Box<dyn Space>> {
             }
             let cols = p[0] as u32;
             let rows = p[1] as u32;
-            Hex2D::new(rows, cols).ok().map(|s| Box::new(s) as Box<dyn Space>)
+            Hex2D::new(rows, cols)
+                .ok()
+                .map(|s| Box::new(s) as Box<dyn Space>)
         }
         x if x == MurkSpaceType::ProductSpace as i32 => {
             // params = [n_components, type_0, n_params_0, p0_0, ..., type_1, n_params_1, p1_0, ...]
@@ -277,8 +285,7 @@ pub extern "C" fn murk_config_add_propagator(handle: u64, prop_ptr: u64) -> i32 
     // SAFETY: prop_ptr was produced by Box::into_raw(Box::new(boxed)) in
     // murk_propagator_create. It's a thin pointer to a Box<dyn Propagator>
     // and is consumed exactly once here.
-    let prop: Box<dyn Propagator> =
-        *unsafe { Box::from_raw(prop_ptr as *mut Box<dyn Propagator>) };
+    let prop: Box<dyn Propagator> = *unsafe { Box::from_raw(prop_ptr as *mut Box<dyn Propagator>) };
 
     let mut table = CONFIGS.lock().unwrap();
     match table.get_mut(handle) {
@@ -386,10 +393,7 @@ mod tests {
             MurkStatus::Ok as i32
         );
 
-        assert_eq!(
-            murk_config_set_dt(h, 0.1),
-            MurkStatus::Ok as i32
-        );
+        assert_eq!(murk_config_set_dt(h, 0.1), MurkStatus::Ok as i32);
 
         assert_eq!(murk_config_destroy(h), MurkStatus::Ok as i32);
     }
@@ -407,10 +411,7 @@ mod tests {
         let mut h: u64 = 0;
         murk_config_create(&mut h);
         murk_config_destroy(h);
-        assert_eq!(
-            murk_config_set_dt(h, 1.0),
-            MurkStatus::InvalidHandle as i32
-        );
+        assert_eq!(murk_config_set_dt(h, 1.0), MurkStatus::InvalidHandle as i32);
     }
 
     #[test]

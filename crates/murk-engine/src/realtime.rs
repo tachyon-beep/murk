@@ -134,7 +134,9 @@ impl RealtimeAsyncWorld {
     pub fn new(config: WorldConfig, async_config: AsyncConfig) -> Result<Self, ConfigError> {
         let tick_rate_hz = config.tick_rate_hz.unwrap_or(60.0);
         if !tick_rate_hz.is_finite() || tick_rate_hz <= 0.0 {
-            return Err(ConfigError::InvalidTickRate { value: tick_rate_hz });
+            return Err(ConfigError::InvalidTickRate {
+                value: tick_rate_hz,
+            });
         }
 
         let seed = config.seed;
@@ -250,12 +252,10 @@ impl RealtimeAsyncWorld {
             reply: reply_tx,
         };
 
-        cmd_tx
-            .try_send(batch)
-            .map_err(|e| match e {
-                crossbeam_channel::TrySendError::Full(_) => SubmitError::ChannelFull,
-                crossbeam_channel::TrySendError::Disconnected(_) => SubmitError::Shutdown,
-            })?;
+        cmd_tx.try_send(batch).map_err(|e| match e {
+            crossbeam_channel::TrySendError::Full(_) => SubmitError::ChannelFull,
+            crossbeam_channel::TrySendError::Disconnected(_) => SubmitError::Shutdown,
+        })?;
 
         // Wait for receipts (blocks until tick thread processes the batch).
         reply_rx.recv().map_err(|_| SubmitError::Shutdown)
@@ -271,9 +271,12 @@ impl RealtimeAsyncWorld {
         output: &mut [f32],
         mask: &mut [u8],
     ) -> Result<ObsMetadata, ObsError> {
-        let obs_tx = self.obs_tx.as_ref().ok_or_else(|| ObsError::ExecutionFailed {
-            reason: "world is shut down".into(),
-        })?;
+        let obs_tx = self
+            .obs_tx
+            .as_ref()
+            .ok_or_else(|| ObsError::ExecutionFailed {
+                reason: "world is shut down".into(),
+            })?;
 
         let (reply_tx, reply_rx) = crossbeam_channel::bounded(1);
         let task = ObsTask::Simple {
@@ -319,9 +322,12 @@ impl RealtimeAsyncWorld {
         output: &mut [f32],
         mask: &mut [u8],
     ) -> Result<Vec<ObsMetadata>, ObsError> {
-        let obs_tx = self.obs_tx.as_ref().ok_or_else(|| ObsError::ExecutionFailed {
-            reason: "world is shut down".into(),
-        })?;
+        let obs_tx = self
+            .obs_tx
+            .as_ref()
+            .ok_or_else(|| ObsError::ExecutionFailed {
+                reason: "world is shut down".into(),
+            })?;
 
         let (reply_tx, reply_rx) = crossbeam_channel::bounded(1);
         let n_agents = agent_centers.len();
@@ -389,13 +395,7 @@ impl RealtimeAsyncWorld {
             let handle = thread::Builder::new()
                 .name(format!("murk-egress-{i}"))
                 .spawn(move || {
-                    crate::egress::worker_loop_indexed(
-                        obs_rx,
-                        ring,
-                        epoch,
-                        worker_epochs_ref,
-                        i,
-                    );
+                    crate::egress::worker_loop_indexed(obs_rx, ring, epoch, worker_epochs_ref, i);
                 })
                 .expect("failed to spawn egress worker");
             worker_threads.push(handle);
@@ -693,8 +693,7 @@ mod tests {
 
     #[test]
     fn lifecycle_start_and_shutdown() {
-        let mut world =
-            RealtimeAsyncWorld::new(test_config(), AsyncConfig::default()).unwrap();
+        let mut world = RealtimeAsyncWorld::new(test_config(), AsyncConfig::default()).unwrap();
 
         // Wait for at least one snapshot (polling with timeout).
         let deadline = Instant::now() + Duration::from_secs(2);
@@ -715,8 +714,7 @@ mod tests {
 
     #[test]
     fn observe_returns_data() {
-        let mut world =
-            RealtimeAsyncWorld::new(test_config(), AsyncConfig::default()).unwrap();
+        let mut world = RealtimeAsyncWorld::new(test_config(), AsyncConfig::default()).unwrap();
 
         // Wait for at least one snapshot.
         let deadline = Instant::now() + Duration::from_secs(2);
@@ -754,8 +752,7 @@ mod tests {
 
     #[test]
     fn concurrent_observe() {
-        let world =
-            RealtimeAsyncWorld::new(test_config(), AsyncConfig::default()).unwrap();
+        let world = RealtimeAsyncWorld::new(test_config(), AsyncConfig::default()).unwrap();
 
         // Wait for at least one snapshot.
         let deadline = Instant::now() + Duration::from_secs(2);
@@ -808,8 +805,7 @@ mod tests {
 
     #[test]
     fn submit_commands_flow_through() {
-        let mut world =
-            RealtimeAsyncWorld::new(test_config(), AsyncConfig::default()).unwrap();
+        let mut world = RealtimeAsyncWorld::new(test_config(), AsyncConfig::default()).unwrap();
 
         // Wait for first tick.
         let deadline = Instant::now() + Duration::from_secs(2);
@@ -841,8 +837,7 @@ mod tests {
 
     #[test]
     fn drop_triggers_shutdown() {
-        let world =
-            RealtimeAsyncWorld::new(test_config(), AsyncConfig::default()).unwrap();
+        let world = RealtimeAsyncWorld::new(test_config(), AsyncConfig::default()).unwrap();
         std::thread::sleep(Duration::from_millis(50));
         drop(world);
         // If this doesn't hang, shutdown worked.
@@ -850,8 +845,7 @@ mod tests {
 
     #[test]
     fn shutdown_budget() {
-        let mut world =
-            RealtimeAsyncWorld::new(test_config(), AsyncConfig::default()).unwrap();
+        let mut world = RealtimeAsyncWorld::new(test_config(), AsyncConfig::default()).unwrap();
         std::thread::sleep(Duration::from_millis(100));
 
         let report = world.shutdown();
@@ -865,8 +859,7 @@ mod tests {
 
     #[test]
     fn reset_lifecycle() {
-        let mut world =
-            RealtimeAsyncWorld::new(test_config(), AsyncConfig::default()).unwrap();
+        let mut world = RealtimeAsyncWorld::new(test_config(), AsyncConfig::default()).unwrap();
 
         // Wait for some ticks.
         let deadline = Instant::now() + Duration::from_secs(2);

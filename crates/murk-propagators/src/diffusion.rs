@@ -88,12 +88,12 @@ impl DiffusionPropagator {
             })?
             .to_vec();
 
-        let heat_out = ctx
-            .writes()
-            .write(HEAT)
-            .ok_or_else(|| PropagatorError::ExecutionFailed {
-                reason: "heat field not writable".into(),
-            })?;
+        let heat_out =
+            ctx.writes()
+                .write(HEAT)
+                .ok_or_else(|| PropagatorError::ExecutionFailed {
+                    reason: "heat field not writable".into(),
+                })?;
 
         for r in 0..rows_i {
             for c in 0..cols_i {
@@ -111,12 +111,12 @@ impl DiffusionPropagator {
             }
         }
 
-        let vel_out = ctx
-            .writes()
-            .write(VELOCITY)
-            .ok_or_else(|| PropagatorError::ExecutionFailed {
-                reason: "velocity field not writable".into(),
-            })?;
+        let vel_out =
+            ctx.writes()
+                .write(VELOCITY)
+                .ok_or_else(|| PropagatorError::ExecutionFailed {
+                    reason: "velocity field not writable".into(),
+                })?;
 
         for r in 0..rows_i {
             for c in 0..cols_i {
@@ -140,12 +140,12 @@ impl DiffusionPropagator {
         // Compute heat gradient using central differences.
         // For boundary cells, resolve the neighbour per edge behavior;
         // if a direction has no neighbour (Absorb OOB), use self.
-        let grad_out = ctx
-            .writes()
-            .write(HEAT_GRADIENT)
-            .ok_or_else(|| PropagatorError::ExecutionFailed {
-                reason: "heat_gradient field not writable".into(),
-            })?;
+        let grad_out =
+            ctx.writes()
+                .write(HEAT_GRADIENT)
+                .ok_or_else(|| PropagatorError::ExecutionFailed {
+                    reason: "heat_gradient field not writable".into(),
+                })?;
 
         for r in 0..rows_i {
             for c in 0..cols_i {
@@ -276,28 +276,28 @@ impl DiffusionPropagator {
         }
 
         // Write results
-        let heat_out = ctx
-            .writes()
-            .write(HEAT)
-            .ok_or_else(|| PropagatorError::ExecutionFailed {
-                reason: "heat field not writable".into(),
-            })?;
+        let heat_out =
+            ctx.writes()
+                .write(HEAT)
+                .ok_or_else(|| PropagatorError::ExecutionFailed {
+                    reason: "heat field not writable".into(),
+                })?;
         heat_out.copy_from_slice(&heat_new);
 
-        let vel_out = ctx
-            .writes()
-            .write(VELOCITY)
-            .ok_or_else(|| PropagatorError::ExecutionFailed {
-                reason: "velocity field not writable".into(),
-            })?;
+        let vel_out =
+            ctx.writes()
+                .write(VELOCITY)
+                .ok_or_else(|| PropagatorError::ExecutionFailed {
+                    reason: "velocity field not writable".into(),
+                })?;
         vel_out.copy_from_slice(&vel_new);
 
-        let grad_out = ctx
-            .writes()
-            .write(HEAT_GRADIENT)
-            .ok_or_else(|| PropagatorError::ExecutionFailed {
-                reason: "heat_gradient field not writable".into(),
-            })?;
+        let grad_out =
+            ctx.writes()
+                .write(HEAT_GRADIENT)
+                .ok_or_else(|| PropagatorError::ExecutionFailed {
+                    reason: "heat_gradient field not writable".into(),
+                })?;
         grad_out.copy_from_slice(&grad_new);
 
         Ok(())
@@ -418,7 +418,11 @@ mod tests {
         // Center should have decreased
         assert!(result[12] < 100.0, "center should cool: {}", result[12]);
         // Neighbours should have increased
-        assert!(result[7] > 0.0, "north neighbour should warm: {}", result[7]);
+        assert!(
+            result[7] > 0.0,
+            "north neighbour should warm: {}",
+            result[7]
+        );
         assert!(
             result[17] > 0.0,
             "south neighbour should warm: {}",
@@ -611,9 +615,17 @@ mod tests {
         assert!(result[0] < 100.0, "corner should cool: {}", result[0]);
 
         // Wrapped neighbours: north=(3,0)=12, south=(1,0)=4, west=(0,3)=3, east=(0,1)=1
-        assert!(result[12] > 0.0, "wrapped north (3,0) should warm: {}", result[12]);
+        assert!(
+            result[12] > 0.0,
+            "wrapped north (3,0) should warm: {}",
+            result[12]
+        );
         assert!(result[4] > 0.0, "south (1,0) should warm: {}", result[4]);
-        assert!(result[3] > 0.0, "wrapped west (0,3) should warm: {}", result[3]);
+        assert!(
+            result[3] > 0.0,
+            "wrapped west (0,3) should warm: {}",
+            result[3]
+        );
         assert!(result[1] > 0.0, "east (0,1) should warm: {}", result[1]);
 
         // Energy conservation

@@ -254,8 +254,7 @@ pub fn validate_pipeline(
 
     // 5. Build ReadResolutionPlan
     let mut last_writer: IndexMap<FieldId, usize> = IndexMap::new();
-    let mut routes: Vec<IndexMap<FieldId, ReadSource>> =
-        Vec::with_capacity(propagators.len());
+    let mut routes: Vec<IndexMap<FieldId, ReadSource>> = Vec::with_capacity(propagators.len());
 
     for (i, prop) in propagators.iter().enumerate() {
         let mut prop_routes = IndexMap::new();
@@ -296,7 +295,9 @@ mod tests {
     /// Reads field A, writes field B.
     struct PropAB;
     impl Propagator for PropAB {
-        fn name(&self) -> &str { "PropAB" }
+        fn name(&self) -> &str {
+            "PropAB"
+        }
         fn reads(&self) -> FieldSet {
             [FieldId(0)].into_iter().collect()
         }
@@ -311,7 +312,9 @@ mod tests {
     /// Reads field B, writes field C.
     struct PropBC;
     impl Propagator for PropBC {
-        fn name(&self) -> &str { "PropBC" }
+        fn name(&self) -> &str {
+            "PropBC"
+        }
         fn reads(&self) -> FieldSet {
             [FieldId(1)].into_iter().collect()
         }
@@ -326,8 +329,12 @@ mod tests {
     /// Also writes field B — causes a write conflict with PropAB.
     struct PropConflict;
     impl Propagator for PropConflict {
-        fn name(&self) -> &str { "PropConflict" }
-        fn reads(&self) -> FieldSet { FieldSet::empty() }
+        fn name(&self) -> &str {
+            "PropConflict"
+        }
+        fn reads(&self) -> FieldSet {
+            FieldSet::empty()
+        }
         fn writes(&self) -> Vec<(FieldId, WriteMode)> {
             vec![(FieldId(1), WriteMode::Incremental)]
         }
@@ -339,11 +346,15 @@ mod tests {
     /// References a field that doesn't exist.
     struct PropBadRef;
     impl Propagator for PropBadRef {
-        fn name(&self) -> &str { "PropBadRef" }
+        fn name(&self) -> &str {
+            "PropBadRef"
+        }
         fn reads(&self) -> FieldSet {
             [FieldId(99)].into_iter().collect()
         }
-        fn writes(&self) -> Vec<(FieldId, WriteMode)> { vec![] }
+        fn writes(&self) -> Vec<(FieldId, WriteMode)> {
+            vec![]
+        }
         fn step(&self, _ctx: &mut StepContext<'_>) -> Result<(), PropagatorError> {
             Ok(())
         }
@@ -354,12 +365,18 @@ mod tests {
         max: f64,
     }
     impl Propagator for PropDtConstrained {
-        fn name(&self) -> &str { "PropDtConstrained" }
-        fn reads(&self) -> FieldSet { FieldSet::empty() }
+        fn name(&self) -> &str {
+            "PropDtConstrained"
+        }
+        fn reads(&self) -> FieldSet {
+            FieldSet::empty()
+        }
         fn writes(&self) -> Vec<(FieldId, WriteMode)> {
             vec![(FieldId(0), WriteMode::Full)]
         }
-        fn max_dt(&self) -> Option<f64> { Some(self.max) }
+        fn max_dt(&self) -> Option<f64> {
+            Some(self.max)
+        }
         fn step(&self, _ctx: &mut StepContext<'_>) -> Result<(), PropagatorError> {
             Ok(())
         }
@@ -368,8 +385,12 @@ mod tests {
     /// Reads field A via reads_previous (Jacobi-style).
     struct PropJacobi;
     impl Propagator for PropJacobi {
-        fn name(&self) -> &str { "PropJacobi" }
-        fn reads(&self) -> FieldSet { FieldSet::empty() }
+        fn name(&self) -> &str {
+            "PropJacobi"
+        }
+        fn reads(&self) -> FieldSet {
+            FieldSet::empty()
+        }
         fn reads_previous(&self) -> FieldSet {
             [FieldId(0)].into_iter().collect()
         }
@@ -389,10 +410,7 @@ mod tests {
 
     #[test]
     fn valid_two_stage_pipeline() {
-        let props: Vec<Box<dyn Propagator>> = vec![
-            Box::new(PropAB),
-            Box::new(PropBC),
-        ];
+        let props: Vec<Box<dyn Propagator>> = vec![Box::new(PropAB), Box::new(PropBC)];
         let plan = validate_pipeline(&props, &fields_0_1_2(), 0.1).unwrap();
         assert_eq!(plan.len(), 2);
 
@@ -432,10 +450,7 @@ mod tests {
 
     #[test]
     fn write_conflict_detected() {
-        let props: Vec<Box<dyn Propagator>> = vec![
-            Box::new(PropAB),
-            Box::new(PropConflict),
-        ];
+        let props: Vec<Box<dyn Propagator>> = vec![Box::new(PropAB), Box::new(PropConflict)];
         let result = validate_pipeline(&props, &fields_0_1_2(), 0.1);
         match result {
             Err(PipelineError::WriteConflict(conflicts)) => {
@@ -455,7 +470,10 @@ mod tests {
         let props: Vec<Box<dyn Propagator>> = vec![Box::new(PropBadRef)];
         let result = validate_pipeline(&props, &FieldSet::empty(), 0.1);
         match result {
-            Err(PipelineError::UndefinedField { propagator, field_id }) => {
+            Err(PipelineError::UndefinedField {
+                propagator,
+                field_id,
+            }) => {
                 assert_eq!(propagator, "PropBadRef");
                 assert_eq!(field_id, FieldId(99));
             }
@@ -485,9 +503,7 @@ mod tests {
 
     #[test]
     fn dt_within_bound_accepted() {
-        let props: Vec<Box<dyn Propagator>> = vec![
-            Box::new(PropDtConstrained { max: 0.5 }),
-        ];
+        let props: Vec<Box<dyn Propagator>> = vec![Box::new(PropDtConstrained { max: 0.5 })];
         let fields = [FieldId(0)].into_iter().collect();
         assert!(validate_pipeline(&props, &fields, 0.5).is_ok());
         assert!(validate_pipeline(&props, &fields, 0.1).is_ok());
@@ -495,9 +511,7 @@ mod tests {
 
     #[test]
     fn dt_exceeds_max_dt_rejected() {
-        let props: Vec<Box<dyn Propagator>> = vec![
-            Box::new(PropDtConstrained { max: 0.5 }),
-        ];
+        let props: Vec<Box<dyn Propagator>> = vec![Box::new(PropDtConstrained { max: 0.5 })];
         let fields = [FieldId(0)].into_iter().collect();
         let result = validate_pipeline(&props, &fields, 1.0);
         match result {
@@ -519,37 +533,49 @@ mod tests {
         // Two propagators: max_dt 0.5 and 0.2. dt=0.3 should fail.
         struct PropDt05;
         impl Propagator for PropDt05 {
-            fn name(&self) -> &str { "PropDt05" }
-            fn reads(&self) -> FieldSet { FieldSet::empty() }
+            fn name(&self) -> &str {
+                "PropDt05"
+            }
+            fn reads(&self) -> FieldSet {
+                FieldSet::empty()
+            }
             fn writes(&self) -> Vec<(FieldId, WriteMode)> {
                 vec![(FieldId(0), WriteMode::Full)]
             }
-            fn max_dt(&self) -> Option<f64> { Some(0.5) }
+            fn max_dt(&self) -> Option<f64> {
+                Some(0.5)
+            }
             fn step(&self, _ctx: &mut StepContext<'_>) -> Result<(), PropagatorError> {
                 Ok(())
             }
         }
         struct PropDt02;
         impl Propagator for PropDt02 {
-            fn name(&self) -> &str { "PropDt02" }
-            fn reads(&self) -> FieldSet { FieldSet::empty() }
+            fn name(&self) -> &str {
+                "PropDt02"
+            }
+            fn reads(&self) -> FieldSet {
+                FieldSet::empty()
+            }
             fn writes(&self) -> Vec<(FieldId, WriteMode)> {
                 vec![(FieldId(1), WriteMode::Full)]
             }
-            fn max_dt(&self) -> Option<f64> { Some(0.2) }
+            fn max_dt(&self) -> Option<f64> {
+                Some(0.2)
+            }
             fn step(&self, _ctx: &mut StepContext<'_>) -> Result<(), PropagatorError> {
                 Ok(())
             }
         }
 
-        let props: Vec<Box<dyn Propagator>> = vec![
-            Box::new(PropDt05),
-            Box::new(PropDt02),
-        ];
+        let props: Vec<Box<dyn Propagator>> = vec![Box::new(PropDt05), Box::new(PropDt02)];
         let fields = [FieldId(0), FieldId(1)].into_iter().collect();
         let result = validate_pipeline(&props, &fields, 0.3);
         match result {
-            Err(PipelineError::DtTooLarge { constraining_propagator, .. }) => {
+            Err(PipelineError::DtTooLarge {
+                constraining_propagator,
+                ..
+            }) => {
                 assert_eq!(constraining_propagator, "PropDt02");
             }
             other => panic!("expected DtTooLarge, got {other:?}"),
@@ -565,8 +591,12 @@ mod tests {
         // C → reads field 1 (overlay → Staged{0}), reads field 2 (overlay → Staged{1})
         struct PropA;
         impl Propagator for PropA {
-            fn name(&self) -> &str { "A" }
-            fn reads(&self) -> FieldSet { FieldSet::empty() }
+            fn name(&self) -> &str {
+                "A"
+            }
+            fn reads(&self) -> FieldSet {
+                FieldSet::empty()
+            }
             fn writes(&self) -> Vec<(FieldId, WriteMode)> {
                 vec![(FieldId(1), WriteMode::Full)]
             }
@@ -576,7 +606,9 @@ mod tests {
         }
         struct PropB;
         impl Propagator for PropB {
-            fn name(&self) -> &str { "B" }
+            fn name(&self) -> &str {
+                "B"
+            }
             fn reads(&self) -> FieldSet {
                 [FieldId(1)].into_iter().collect()
             }
@@ -589,21 +621,22 @@ mod tests {
         }
         struct PropC;
         impl Propagator for PropC {
-            fn name(&self) -> &str { "C" }
+            fn name(&self) -> &str {
+                "C"
+            }
             fn reads(&self) -> FieldSet {
                 [FieldId(1), FieldId(2)].into_iter().collect()
             }
-            fn writes(&self) -> Vec<(FieldId, WriteMode)> { vec![] }
+            fn writes(&self) -> Vec<(FieldId, WriteMode)> {
+                vec![]
+            }
             fn step(&self, _ctx: &mut StepContext<'_>) -> Result<(), PropagatorError> {
                 Ok(())
             }
         }
 
-        let props: Vec<Box<dyn Propagator>> = vec![
-            Box::new(PropA),
-            Box::new(PropB),
-            Box::new(PropC),
-        ];
+        let props: Vec<Box<dyn Propagator>> =
+            vec![Box::new(PropA), Box::new(PropB), Box::new(PropC)];
         let fields = [FieldId(0), FieldId(1), FieldId(2)].into_iter().collect();
         let plan = validate_pipeline(&props, &fields, 0.1).unwrap();
 

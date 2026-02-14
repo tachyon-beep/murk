@@ -3,9 +3,10 @@
 use crate::error::SpaceError;
 use crate::region::{BoundingShape, RegionPlan, RegionSpec};
 use crate::space::Space;
+use indexmap::IndexSet;
 use murk_core::{Coord, SpaceInstanceId};
 use smallvec::SmallVec;
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 use std::fmt;
 
 /// Distance metric for product spaces.
@@ -136,14 +137,10 @@ impl ProductSpace {
 
         match metric {
             ProductMetric::L1 => per_comp.iter().sum(),
-            ProductMetric::LInfinity => {
-                per_comp.iter().copied().fold(0.0f64, f64::max)
+            ProductMetric::LInfinity => per_comp.iter().copied().fold(0.0f64, f64::max),
+            ProductMetric::Weighted(weights) => {
+                per_comp.iter().zip(weights).map(|(d, w)| d * w).sum()
             }
-            ProductMetric::Weighted(weights) => per_comp
-                .iter()
-                .zip(weights)
-                .map(|(d, w)| d * w)
-                .sum(),
         }
     }
 
@@ -313,9 +310,7 @@ impl Space for ProductSpace {
                 self.compile_disk_bfs(center, *radius)
             }
 
-            RegionSpec::Neighbours { center, depth } => {
-                self.compile_disk_bfs(center, *depth)
-            }
+            RegionSpec::Neighbours { center, depth } => self.compile_disk_bfs(center, *depth),
 
             RegionSpec::Coords(coords) => {
                 // Validate all coords.
@@ -441,7 +436,7 @@ impl ProductSpace {
             }
         }
 
-        let mut visited: HashSet<Coord> = HashSet::new();
+        let mut visited: IndexSet<Coord> = IndexSet::new();
         let mut queue: VecDeque<(Coord, u32)> = VecDeque::new();
         let mut result: Vec<Coord> = Vec::new();
 
@@ -530,10 +525,7 @@ mod tests {
         let s = hex_line();
         let a: Coord = smallvec![2, 1, 5];
         let b: Coord = smallvec![4, 0, 8];
-        assert_eq!(
-            s.metric_distance(&a, &b, &ProductMetric::LInfinity),
-            3.0
-        );
+        assert_eq!(s.metric_distance(&a, &b, &ProductMetric::LInfinity), 3.0);
     }
 
     #[test]
@@ -622,10 +614,7 @@ mod tests {
     #[test]
     fn empty_components_error() {
         let result = ProductSpace::new(vec![]);
-        assert!(matches!(
-            result,
-            Err(SpaceError::InvalidComposition { .. })
-        ));
+        assert!(matches!(result, Err(SpaceError::InvalidComposition { .. })));
     }
 
     // ── valid_ratio tests ───────────────────────────────────────
@@ -664,9 +653,7 @@ mod tests {
     #[test]
     fn downcast_ref_product_space() {
         let line = Line1D::new(5, crate::EdgeBehavior::Absorb).unwrap();
-        let s: Box<dyn Space> = Box::new(
-            ProductSpace::new(vec![Box::new(line)]).unwrap(),
-        );
+        let s: Box<dyn Space> = Box::new(ProductSpace::new(vec![Box::new(line)]).unwrap());
         assert!(s.downcast_ref::<ProductSpace>().is_some());
         assert!(s.downcast_ref::<Hex2D>().is_none());
     }
@@ -690,7 +677,9 @@ mod tests {
         let canonical = s.canonical_ordering();
         let mut last_pos = None;
         for coord in &plan.coords {
-            let pos = canonical.iter().position(|c| c == coord)
+            let pos = canonical
+                .iter()
+                .position(|c| c == coord)
                 .expect("disk coord not in canonical ordering");
             if let Some(lp) = last_pos {
                 assert!(pos > lp, "coords not in canonical order: {:?}", plan.coords);
@@ -708,7 +697,7 @@ mod tests {
         let plan = s
             .compile_region(&RegionSpec::Coords(vec![
                 smallvec![1, 0, 3],
-                smallvec![0, 1, 2],  // Hex canonical: (0,1) > (1,0) since r-then-q
+                smallvec![0, 1, 2], // Hex canonical: (0,1) > (1,0) since r-then-q
                 smallvec![2, 0, 0],
             ]))
             .unwrap();

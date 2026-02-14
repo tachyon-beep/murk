@@ -38,7 +38,12 @@ impl Command {
     ///     expires_after_tick: Command expires if not applied by this tick (default 0 = never).
     #[staticmethod]
     #[pyo3(signature = (field_id, coord, value, expires_after_tick=u64::MAX))]
-    fn set_field(field_id: u32, coord: Vec<i32>, value: f32, expires_after_tick: u64) -> PyResult<Self> {
+    fn set_field(
+        field_id: u32,
+        coord: Vec<i32>,
+        value: f32,
+        expires_after_tick: u64,
+    ) -> PyResult<Self> {
         if coord.is_empty() || coord.len() > 4 {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "coord must have 1-4 dimensions",

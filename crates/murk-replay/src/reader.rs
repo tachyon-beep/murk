@@ -126,11 +126,8 @@ mod tests {
     }
 
     fn make_snapshot(tick: u64, data: Vec<f32>) -> MockSnapshot {
-        let mut snap = MockSnapshot::new(
-            TickId(tick),
-            WorldGenerationId(tick),
-            ParameterVersion(0),
-        );
+        let mut snap =
+            MockSnapshot::new(TickId(tick), WorldGenerationId(tick), ParameterVersion(0));
         snap.set_field(murk_core::FieldId(0), data);
         snap
     }

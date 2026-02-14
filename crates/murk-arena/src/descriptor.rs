@@ -65,12 +65,8 @@ impl FieldDescriptor {
                 total_len,
                 name: def.name.clone(),
             };
-            let handle = FieldHandle::new(
-                0,
-                0,
-                total_len,
-                FieldLocation::PerTick { segment_index: 0 },
-            );
+            let handle =
+                FieldHandle::new(0, 0, total_len, FieldLocation::PerTick { segment_index: 0 });
             entries.insert(*id, FieldEntry { handle, meta });
         }
         Self { entries }
@@ -198,17 +194,16 @@ mod tests {
         let defs = make_field_defs();
         let mut desc = FieldDescriptor::from_field_defs(&defs, 100);
 
-        let new_handle = FieldHandle::new(
-            5,
-            1024,
-            100,
-            FieldLocation::PerTick { segment_index: 2 },
-        );
+        let new_handle =
+            FieldHandle::new(5, 1024, 100, FieldLocation::PerTick { segment_index: 2 });
         desc.update_handle(FieldId(0), new_handle);
 
         let entry = desc.get(FieldId(0)).unwrap();
         assert_eq!(entry.handle.generation(), 5);
-        assert_eq!(entry.handle.location(), FieldLocation::PerTick { segment_index: 2 });
+        assert_eq!(
+            entry.handle.location(),
+            FieldLocation::PerTick { segment_index: 2 }
+        );
     }
 
     #[test]
@@ -221,14 +216,10 @@ mod tests {
             .collect();
         assert_eq!(per_tick.len(), 2);
 
-        let static_fields: Vec<_> = desc
-            .fields_by_mutability(FieldMutability::Static)
-            .collect();
+        let static_fields: Vec<_> = desc.fields_by_mutability(FieldMutability::Static).collect();
         assert_eq!(static_fields.len(), 1);
 
-        let sparse: Vec<_> = desc
-            .fields_by_mutability(FieldMutability::Sparse)
-            .collect();
+        let sparse: Vec<_> = desc.fields_by_mutability(FieldMutability::Sparse).collect();
         assert_eq!(sparse.len(), 1);
     }
 

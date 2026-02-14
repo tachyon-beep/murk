@@ -244,9 +244,7 @@ pub fn decode_frame(r: &mut dyn Read) -> Result<Option<Frame>, ReplayError> {
                 }
                 // Partial tick header — truncated/corrupt file.
                 return Err(ReplayError::MalformedFrame {
-                    detail: format!(
-                        "truncated frame header: got {filled} of 8 bytes for tick_id"
-                    ),
+                    detail: format!("truncated frame header: got {filled} of 8 bytes for tick_id"),
                 });
             }
             Ok(n) => filled += n,
@@ -444,8 +442,7 @@ pub fn deserialize_command(sc: &SerializedCommand) -> Result<Command, ReplayErro
                     detail: "truncated Spawn field_values count".into(),
                 });
             }
-            let count =
-                u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap()) as usize;
+            let count = u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap()) as usize;
             offset += 4;
             let mut field_values = Vec::with_capacity(count);
             for _ in 0..count {
@@ -482,8 +479,9 @@ pub fn deserialize_command(sc: &SerializedCommand) -> Result<Command, ReplayErro
                     detail: "truncated SetField payload".into(),
                 });
             }
-            let field_id =
-                FieldId(u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap()));
+            let field_id = FieldId(u32::from_le_bytes(
+                data[offset..offset + 4].try_into().unwrap(),
+            ));
             offset += 4;
             let value = f32::from_le_bytes(data[offset..offset + 4].try_into().unwrap());
             CommandPayload::SetField {
@@ -535,8 +533,9 @@ pub fn deserialize_command(sc: &SerializedCommand) -> Result<Command, ReplayErro
                         detail: "truncated SetParameterBatch entry".into(),
                     });
                 }
-                let key =
-                    ParameterKey(u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap()));
+                let key = ParameterKey(u32::from_le_bytes(
+                    data[offset..offset + 4].try_into().unwrap(),
+                ));
                 offset += 4;
                 let value = f64::from_le_bytes(data[offset..offset + 8].try_into().unwrap());
                 offset += 8;
@@ -560,8 +559,8 @@ pub fn deserialize_command(sc: &SerializedCommand) -> Result<Command, ReplayErro
 #[cfg(test)]
 mod tests {
     use super::*;
-    use proptest::prelude::*;
     use murk_core::Coord;
+    use proptest::prelude::*;
 
     // ── Proptest strategies ─────────────────────────────────────
 
@@ -571,11 +570,7 @@ mod tests {
 
     /// Strategy for optional u64 that includes None, Some(0), and arbitrary values.
     fn arb_opt_u64() -> impl Strategy<Value = Option<u64>> {
-        prop_oneof![
-            Just(None),
-            Just(Some(0u64)),
-            any::<u64>().prop_map(Some),
-        ]
+        prop_oneof![Just(None), Just(Some(0u64)), any::<u64>().prop_map(Some),]
     }
 
     fn arb_command() -> impl Strategy<Value = Command> {
@@ -622,8 +617,14 @@ mod tests {
                 arrival_seq: 0,
             }),
             // SetField
-            (arb_coord(), 0u32..10, any::<f32>(), arb_opt_u64(), arb_opt_u64()).prop_map(
-                |(coord, fid, val, sid, sseq)| Command {
+            (
+                arb_coord(),
+                0u32..10,
+                any::<f32>(),
+                arb_opt_u64(),
+                arb_opt_u64()
+            )
+                .prop_map(|(coord, fid, val, sid, sseq)| Command {
                     payload: CommandPayload::SetField {
                         coord,
                         field_id: FieldId(fid),
@@ -634,8 +635,7 @@ mod tests {
                     source_seq: sseq,
                     priority_class: 1,
                     arrival_seq: 0,
-                }
-            ),
+                }),
             // Custom
             (
                 0u32..100,
@@ -654,8 +654,8 @@ mod tests {
                     }
                 }),
             // SetParameter
-            (0u32..10, any::<f64>(), arb_opt_u64(), arb_opt_u64()).prop_map(
-                |(k, v, sid, sseq)| Command {
+            (0u32..10, any::<f64>(), arb_opt_u64(), arb_opt_u64()).prop_map(|(k, v, sid, sseq)| {
+                Command {
                     payload: CommandPayload::SetParameter {
                         key: ParameterKey(k),
                         value: v,
@@ -666,7 +666,7 @@ mod tests {
                     priority_class: 1,
                     arrival_seq: 0,
                 }
-            ),
+            }),
             // SetParameterBatch
             (
                 prop::collection::vec((0u32..10, any::<f64>()), 1..4),
@@ -900,9 +900,7 @@ mod tests {
                         "wrong error detail for {partial_len} bytes: {detail}"
                     );
                 }
-                other => panic!(
-                    "expected MalformedFrame for {partial_len} bytes, got {other:?}"
-                ),
+                other => panic!("expected MalformedFrame for {partial_len} bytes, got {other:?}"),
             }
         }
     }

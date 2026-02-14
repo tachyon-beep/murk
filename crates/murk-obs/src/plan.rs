@@ -203,9 +203,7 @@ impl ObsPlan {
                 ObsRegion::Fixed(spec) => spec,
                 ObsRegion::AgentDisk { .. } | ObsRegion::AgentRect { .. } => {
                     return Err(ObsError::InvalidObsSpec {
-                        reason: format!(
-                            "entry {i}: agent-relative region in Simple plan"
-                        ),
+                        reason: format!("entry {i}: agent-relative region in Simple plan"),
                     });
                 }
             };
@@ -244,9 +242,7 @@ impl ObsPlan {
                     *coord_to_field_idx
                         .get(coord)
                         .ok_or_else(|| ObsError::InvalidObsSpec {
-                            reason: format!(
-                                "entry {i}: coord {coord:?} not in canonical ordering"
-                            ),
+                            reason: format!("entry {i}: coord {coord:?} not in canonical ordering"),
                         })?;
                 let tensor_idx = region_plan.tensor_indices[coord_idx];
                 gather_ops.push(GatherOp {
@@ -318,17 +314,15 @@ impl ObsPlan {
                 ObsRegion::Fixed(region_spec) => {
                     if entry.pool.is_some() {
                         return Err(ObsError::InvalidObsSpec {
-                            reason: format!(
-                                "entry {i}: pooling on Fixed regions not supported"
-                            ),
+                            reason: format!("entry {i}: pooling on Fixed regions not supported"),
                         });
                     }
 
-                    let region_plan = space
-                        .compile_region(region_spec)
-                        .map_err(|e| ObsError::InvalidObsSpec {
+                    let region_plan = space.compile_region(region_spec).map_err(|e| {
+                        ObsError::InvalidObsSpec {
                             reason: format!("entry {i}: region compile failed: {e}"),
-                        })?;
+                        }
+                    })?;
 
                     let ratio = region_plan.valid_ratio();
                     if ratio < COVERAGE_ERROR_THRESHOLD {
@@ -341,14 +335,13 @@ impl ObsPlan {
 
                     let mut gather_ops = Vec::with_capacity(region_plan.coords.len());
                     for (coord_idx, coord) in region_plan.coords.iter().enumerate() {
-                        let field_data_idx =
-                            *coord_to_field_idx.get(coord).ok_or_else(|| {
-                                ObsError::InvalidObsSpec {
-                                    reason: format!(
-                                        "entry {i}: coord {coord:?} not in canonical ordering"
-                                    ),
-                                }
-                            })?;
+                        let field_data_idx = *coord_to_field_idx.get(coord).ok_or_else(|| {
+                            ObsError::InvalidObsSpec {
+                                reason: format!(
+                                    "entry {i}: coord {coord:?} not in canonical ordering"
+                                ),
+                            }
+                        })?;
                         let tensor_idx = region_plan.tensor_indices[coord_idx];
                         gather_ops.push(GatherOp {
                             field_data_idx,
@@ -440,6 +433,7 @@ impl ObsPlan {
     ///
     /// `disk_radius`: if `Some(r)`, template ops outside graph-distance `r`
     /// are marked `in_disk = false` (for `AgentDisk`). `None` for `AgentRect`.
+    #[allow(clippy::too_many_arguments)]
     fn compile_agent_entry(
         entry_idx: usize,
         entry: &crate::spec::ObsEntry,
@@ -471,9 +465,7 @@ impl ObsPlan {
             let stride = pool.stride;
             if ks == 0 || stride == 0 {
                 return Err(ObsError::InvalidObsSpec {
-                    reason: format!(
-                        "entry {entry_idx}: pool kernel_size and stride must be > 0"
-                    ),
+                    reason: format!("entry {entry_idx}: pool kernel_size and stride must be > 0"),
                 });
             }
             let out_h = if h >= ks { (h - ks) / stride + 1 } else { 0 };
@@ -567,8 +559,7 @@ impl ObsPlan {
             PlanStrategy::Simple(entries) => entries,
             PlanStrategy::Standard(_) => {
                 return Err(ObsError::ExecutionFailed {
-                    reason: "Standard plan requires execute_agents(), not execute()"
-                        .into(),
+                    reason: "Standard plan requires execute_agents(), not execute()".into(),
                 });
             }
         };
@@ -584,11 +575,7 @@ impl ObsPlan {
         }
         if mask.len() < self.mask_len {
             return Err(ObsError::ExecutionFailed {
-                reason: format!(
-                    "mask buffer too small: {} < {}",
-                    mask.len(),
-                    self.mask_len
-                ),
+                reason: format!("mask buffer too small: {} < {}", mask.len(), self.mask_len),
             });
         }
 
@@ -618,8 +605,7 @@ impl ObsPlan {
 
             let out_slice =
                 &mut output[entry.output_offset..entry.output_offset + entry.element_count];
-            let mask_slice =
-                &mut mask[entry.mask_offset..entry.mask_offset + entry.element_count];
+            let mask_slice = &mut mask[entry.mask_offset..entry.mask_offset + entry.element_count];
 
             // Initialize to zero/padding.
             out_slice.fill(0.0);
@@ -681,8 +667,7 @@ impl ObsPlan {
         // execute_batch only works with Simple plans.
         if matches!(self.strategy, PlanStrategy::Standard(_)) {
             return Err(ObsError::ExecutionFailed {
-                reason: "Standard plan requires execute_agents(), not execute_batch()"
-                    .into(),
+                reason: "Standard plan requires execute_agents(), not execute_batch()".into(),
             });
         }
 
@@ -766,11 +751,7 @@ impl ObsPlan {
         }
         if mask.len() < expected_mask {
             return Err(ObsError::ExecutionFailed {
-                reason: format!(
-                    "mask buffer too small: {} < {}",
-                    mask.len(),
-                    expected_mask
-                ),
+                reason: format!("mask buffer too small: {} < {}", mask.len(), expected_mask),
             });
         }
 
@@ -804,21 +785,21 @@ impl ObsPlan {
         let mut field_data_map: IndexMap<FieldId, &[f32]> = IndexMap::new();
         for entry in &standard.fixed_entries {
             if !field_data_map.contains_key(&entry.field_id) {
-                let data = snapshot
-                    .read_field(entry.field_id)
-                    .ok_or_else(|| ObsError::ExecutionFailed {
+                let data = snapshot.read_field(entry.field_id).ok_or_else(|| {
+                    ObsError::ExecutionFailed {
                         reason: format!("field {:?} not in snapshot", entry.field_id),
-                    })?;
+                    }
+                })?;
                 field_data_map.insert(entry.field_id, data);
             }
         }
         for entry in &standard.agent_entries {
             if !field_data_map.contains_key(&entry.field_id) {
-                let data = snapshot
-                    .read_field(entry.field_id)
-                    .ok_or_else(|| ObsError::ExecutionFailed {
+                let data = snapshot.read_field(entry.field_id).ok_or_else(|| {
+                    ObsError::ExecutionFailed {
                         reason: format!("field {:?} not in snapshot", entry.field_id),
-                    })?;
+                    }
+                })?;
                 field_data_map.insert(entry.field_id, data);
             }
         }
@@ -842,8 +823,8 @@ impl ObsPlan {
                 let field_data = field_data_map[&entry.field_id];
                 let out_slice = &mut agent_output
                     [entry.output_offset..entry.output_offset + entry.element_count];
-                let mask_slice = &mut agent_mask
-                    [entry.mask_offset..entry.mask_offset + entry.element_count];
+                let mask_slice =
+                    &mut agent_mask[entry.mask_offset..entry.mask_offset + entry.element_count];
 
                 mask_slice.copy_from_slice(&entry.valid_mask);
                 for op in &entry.gather_ops {
@@ -924,6 +905,7 @@ impl ObsPlan {
 /// Execute a single agent-relative entry for one agent.
 ///
 /// Returns the number of valid cells written.
+#[allow(clippy::too_many_arguments)]
 fn execute_agent_entry(
     entry: &AgentCompiledEntry,
     center: &Coord,
@@ -936,18 +918,31 @@ fn execute_agent_entry(
 ) -> usize {
     if entry.pool.is_some() {
         execute_agent_entry_pooled(
-            entry, center, field_data, geometry, space, use_fast_path,
-            agent_output, agent_mask,
+            entry,
+            center,
+            field_data,
+            geometry,
+            space,
+            use_fast_path,
+            agent_output,
+            agent_mask,
         )
     } else {
         execute_agent_entry_direct(
-            entry, center, field_data, geometry, space, use_fast_path,
-            agent_output, agent_mask,
+            entry,
+            center,
+            field_data,
+            geometry,
+            space,
+            use_fast_path,
+            agent_output,
+            agent_mask,
         )
     }
 }
 
 /// Direct gather (no pooling): gather + transform → output.
+#[allow(clippy::too_many_arguments)]
 fn execute_agent_entry_direct(
     entry: &AgentCompiledEntry,
     center: &Coord,
@@ -960,8 +955,7 @@ fn execute_agent_entry_direct(
 ) -> usize {
     let out_slice =
         &mut agent_output[entry.output_offset..entry.output_offset + entry.element_count];
-    let mask_slice =
-        &mut agent_mask[entry.mask_offset..entry.mask_offset + entry.element_count];
+    let mask_slice = &mut agent_mask[entry.mask_offset..entry.mask_offset + entry.element_count];
 
     if use_fast_path {
         // FAST PATH: all cells in-bounds, branchless stride arithmetic.
@@ -988,8 +982,7 @@ fn execute_agent_entry_direct(
             let field_idx = resolve_field_index(center, &op.relative, geometry, space);
             if let Some(idx) = field_idx {
                 if idx < field_data.len() {
-                    out_slice[op.tensor_idx] =
-                        apply_transform(field_data[idx], &entry.transform);
+                    out_slice[op.tensor_idx] = apply_transform(field_data[idx], &entry.transform);
                     mask_slice[op.tensor_idx] = 1;
                     valid += 1;
                 }
@@ -1000,6 +993,7 @@ fn execute_agent_entry_direct(
 }
 
 /// Pooled gather: gather → scratch → pool → transform → output.
+#[allow(clippy::too_many_arguments)]
 fn execute_agent_entry_pooled(
     entry: &AgentCompiledEntry,
     center: &Coord,
@@ -1045,8 +1039,7 @@ fn execute_agent_entry_pooled(
 
     let out_slice =
         &mut agent_output[entry.output_offset..entry.output_offset + entry.element_count];
-    let mask_slice =
-        &mut agent_mask[entry.mask_offset..entry.mask_offset + entry.element_count];
+    let mask_slice = &mut agent_mask[entry.mask_offset..entry.mask_offset + entry.element_count];
 
     let n = pooled.len().min(entry.element_count);
     for i in 0..n {
@@ -1189,7 +1182,9 @@ fn apply_transform(raw: f32, transform: &ObsTransform) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::spec::{ObsDtype, ObsEntry, ObsRegion, ObsSpec, ObsTransform, PoolConfig, PoolKernel};
+    use crate::spec::{
+        ObsDtype, ObsEntry, ObsRegion, ObsSpec, ObsTransform, PoolConfig, PoolKernel,
+    };
     use murk_core::{FieldId, ParameterVersion, TickId, WorldGenerationId};
     use murk_space::{EdgeBehavior, Hex2D, RegionSpec, Square4, Square8};
     use murk_test_utils::MockSnapshot;
@@ -1199,11 +1194,7 @@ mod tests {
     }
 
     fn snapshot_with_field(field: FieldId, data: Vec<f32>) -> MockSnapshot {
-        let mut snap = MockSnapshot::new(
-            TickId(5),
-            WorldGenerationId(1),
-            ParameterVersion(0),
-        );
+        let mut snap = MockSnapshot::new(TickId(5), WorldGenerationId(1), ParameterVersion(0));
         snap.set_field(field, data);
         snap
     }
@@ -1322,7 +1313,10 @@ mod tests {
 
         let mut output = vec![0.0f32; result.output_len];
         let mut mask = vec![0u8; result.mask_len];
-        let meta = result.plan.execute(&snap, None, &mut output, &mut mask).unwrap();
+        let meta = result
+            .plan
+            .execute(&snap, None, &mut output, &mut mask)
+            .unwrap();
 
         // Output should match field data in canonical order.
         let expected: Vec<f32> = (1..=9).map(|x| x as f32).collect();
@@ -1347,10 +1341,7 @@ mod tests {
                 field_id: FieldId(0),
                 region: ObsRegion::Fixed(RegionSpec::All),
                 pool: None,
-                transform: ObsTransform::Normalize {
-                    min: 0.0,
-                    max: 8.0,
-                },
+                transform: ObsTransform::Normalize { min: 0.0, max: 8.0 },
                 dtype: ObsDtype::F32,
             }],
         };
@@ -1358,12 +1349,18 @@ mod tests {
 
         let mut output = vec![0.0f32; result.output_len];
         let mut mask = vec![0u8; result.mask_len];
-        result.plan.execute(&snap, None, &mut output, &mut mask).unwrap();
+        result
+            .plan
+            .execute(&snap, None, &mut output, &mut mask)
+            .unwrap();
 
         // Each value x should be x/8.
         for (i, &v) in output.iter().enumerate() {
             let expected = i as f32 / 8.0;
-            assert!((v - expected).abs() < 1e-6, "output[{i}] = {v}, expected {expected}");
+            assert!(
+                (v - expected).abs() < 1e-6,
+                "output[{i}] = {v}, expected {expected}"
+            );
         }
     }
 
@@ -1390,7 +1387,10 @@ mod tests {
 
         let mut output = vec![0.0f32; result.output_len];
         let mut mask = vec![0u8; result.mask_len];
-        result.plan.execute(&snap, None, &mut output, &mut mask).unwrap();
+        result
+            .plan
+            .execute(&snap, None, &mut output, &mut mask)
+            .unwrap();
 
         for &v in &output {
             assert!((0.0..=1.0).contains(&v), "value {v} out of [0,1] range");
@@ -1408,10 +1408,7 @@ mod tests {
                 field_id: FieldId(0),
                 region: ObsRegion::Fixed(RegionSpec::All),
                 pool: None,
-                transform: ObsTransform::Normalize {
-                    min: 5.0,
-                    max: 5.0,
-                },
+                transform: ObsTransform::Normalize { min: 5.0, max: 5.0 },
                 dtype: ObsDtype::F32,
             }],
         };
@@ -1419,7 +1416,10 @@ mod tests {
 
         let mut output = vec![-1.0f32; result.output_len];
         let mut mask = vec![0u8; result.mask_len];
-        result.plan.execute(&snap, None, &mut output, &mut mask).unwrap();
+        result
+            .plan
+            .execute(&snap, None, &mut output, &mut mask)
+            .unwrap();
 
         // Zero range → all outputs 0.0.
         assert!(output.iter().all(|&v| v == 0.0));
@@ -1449,7 +1449,10 @@ mod tests {
 
         let mut output = vec![0.0f32; result.output_len];
         let mut mask = vec![0u8; result.mask_len];
-        result.plan.execute(&snap, None, &mut output, &mut mask).unwrap();
+        result
+            .plan
+            .execute(&snap, None, &mut output, &mut mask)
+            .unwrap();
 
         // Rect covers (1,1)=6, (1,2)=7, (2,1)=10, (2,2)=11
         assert_eq!(output, vec![6.0, 7.0, 10.0, 11.0]);
@@ -1488,7 +1491,10 @@ mod tests {
 
         let mut output = vec![0.0f32; result.output_len];
         let mut mask = vec![0u8; result.mask_len];
-        result.plan.execute(&snap, None, &mut output, &mut mask).unwrap();
+        result
+            .plan
+            .execute(&snap, None, &mut output, &mut mask)
+            .unwrap();
 
         // First 9: field 0, next 9: field 1.
         let expected_a: Vec<f32> = (1..=9).map(|x| x as f32).collect();
@@ -1515,7 +1521,10 @@ mod tests {
 
         let mut output = vec![0.0f32; result.output_len];
         let mut mask = vec![0u8; result.mask_len];
-        let err = result.plan.execute(&snap, None, &mut output, &mut mask).unwrap_err();
+        let err = result
+            .plan
+            .execute(&snap, None, &mut output, &mut mask)
+            .unwrap_err();
         assert!(matches!(err, ObsError::ExecutionFailed { .. }));
     }
 
@@ -1538,7 +1547,10 @@ mod tests {
 
         let mut output = vec![0.0f32; 4]; // too small
         let mut mask = vec![0u8; result.mask_len];
-        let err = result.plan.execute(&snap, None, &mut output, &mut mask).unwrap_err();
+        let err = result
+            .plan
+            .execute(&snap, None, &mut output, &mut mask)
+            .unwrap_err();
         assert!(matches!(err, ObsError::ExecutionFailed { .. }));
     }
 
@@ -1563,7 +1575,10 @@ mod tests {
 
         let mut output = vec![0.0f32; result.output_len];
         let mut mask = vec![0u8; result.mask_len];
-        let meta = result.plan.execute(&snap, None, &mut output, &mut mask).unwrap();
+        let meta = result
+            .plan
+            .execute(&snap, None, &mut output, &mut mask)
+            .unwrap();
 
         assert_eq!(meta.coverage, 1.0);
     }
@@ -1586,12 +1601,14 @@ mod tests {
             }],
         };
         // Compile bound to generation 99, but snapshot is generation 1.
-        let result =
-            ObsPlan::compile_bound(&spec, &space, WorldGenerationId(99)).unwrap();
+        let result = ObsPlan::compile_bound(&spec, &space, WorldGenerationId(99)).unwrap();
 
         let mut output = vec![0.0f32; result.output_len];
         let mut mask = vec![0u8; result.mask_len];
-        let err = result.plan.execute(&snap, None, &mut output, &mut mask).unwrap_err();
+        let err = result
+            .plan
+            .execute(&snap, None, &mut output, &mut mask)
+            .unwrap_err();
         assert!(matches!(err, ObsError::PlanInvalidated { .. }));
     }
 
@@ -1610,12 +1627,14 @@ mod tests {
                 dtype: ObsDtype::F32,
             }],
         };
-        let result =
-            ObsPlan::compile_bound(&spec, &space, WorldGenerationId(1)).unwrap();
+        let result = ObsPlan::compile_bound(&spec, &space, WorldGenerationId(1)).unwrap();
 
         let mut output = vec![0.0f32; result.output_len];
         let mut mask = vec![0u8; result.mask_len];
-        result.plan.execute(&snap, None, &mut output, &mut mask).unwrap();
+        result
+            .plan
+            .execute(&snap, None, &mut output, &mut mask)
+            .unwrap();
     }
 
     #[test]
@@ -1638,7 +1657,10 @@ mod tests {
 
         let mut output = vec![0.0f32; result.output_len];
         let mut mask = vec![0u8; result.mask_len];
-        result.plan.execute(&snap, None, &mut output, &mut mask).unwrap();
+        result
+            .plan
+            .execute(&snap, None, &mut output, &mut mask)
+            .unwrap();
     }
 
     // ── Metadata tests ───────────────────────────────────────
@@ -1663,7 +1685,10 @@ mod tests {
 
         let mut output = vec![0.0f32; result.output_len];
         let mut mask = vec![0u8; result.mask_len];
-        let meta = result.plan.execute(&snap, None, &mut output, &mut mask).unwrap();
+        let meta = result
+            .plan
+            .execute(&snap, None, &mut output, &mut mask)
+            .unwrap();
 
         assert_eq!(meta.tick_id, TickId(42));
         assert_eq!(meta.age_ticks, 0);
@@ -1788,7 +1813,10 @@ mod tests {
         let snap = snapshot_with_field(FieldId(0), vec![1.0; 4]);
         let mut output = vec![0.0f32; result.output_len];
         let mut mask = vec![0u8; result.mask_len];
-        let err = result.plan.execute(&snap, None, &mut output, &mut mask).unwrap_err();
+        let err = result
+            .plan
+            .execute(&snap, None, &mut output, &mut mask)
+            .unwrap_err();
         assert!(matches!(err, ObsError::ExecutionFailed { .. }));
     }
 
@@ -1869,7 +1897,14 @@ mod tests {
         let mut std_mask = vec![0u8; std_result.mask_len];
         std_result
             .plan
-            .execute_agents(&snap, &space, &[center.clone()], None, &mut std_output, &mut std_mask)
+            .execute_agents(
+                &snap,
+                &space,
+                &[center.clone()],
+                None,
+                &mut std_output,
+                &mut std_mask,
+            )
             .unwrap();
 
         // Simple plan: explicit Rect covering the same area.
@@ -2140,7 +2175,7 @@ mod tests {
             }],
         };
         let result = ObsPlan::compile(&spec, &space).unwrap();
-        assert_eq!(result.output_len, 9);  // 3x3
+        assert_eq!(result.output_len, 9); // 3x3
         assert_eq!(result.entry_shapes, vec![vec![3, 3]]);
 
         // Interior agent at (10, 10): all cells valid.
@@ -2233,12 +2268,16 @@ mod tests {
         let bad_center: Coord = smallvec::smallvec![5]; // 1D, not 2D
         let mut output = vec![0.0f32; result.output_len];
         let mut mask = vec![0u8; result.mask_len];
-        let err = result
-            .plan
-            .execute_agents(&snap, &space, &[bad_center], None, &mut output, &mut mask);
+        let err =
+            result
+                .plan
+                .execute_agents(&snap, &space, &[bad_center], None, &mut output, &mut mask);
         assert!(err.is_err());
         let msg = format!("{}", err.unwrap_err());
-        assert!(msg.contains("dimensions"), "error should mention dimensions: {msg}");
+        assert!(
+            msg.contains("dimensions"),
+            "error should mention dimensions: {msg}"
+        );
     }
 
     #[test]
@@ -2278,7 +2317,10 @@ mod tests {
         //   . . X . .    (row +2: only center col)
         // Total: 1 + 3 + 5 + 3 + 1 = 13 cells
         let valid_count = mask.iter().filter(|&&v| v == 1).count();
-        assert_eq!(valid_count, 13, "Manhattan disk radius=2 should have 13 cells");
+        assert_eq!(
+            valid_count, 13,
+            "Manhattan disk radius=2 should have 13 cells"
+        );
 
         // Corners should be masked out: (dr,dc) where |dr|+|dc| > 2
         // tensor_idx 0: dr=-2,dc=-2 → dist=4 → OUT
@@ -2286,7 +2328,10 @@ mod tests {
         // tensor_idx 20: dr=+2,dc=-2 → dist=4 → OUT
         // tensor_idx 24: dr=+2,dc=+2 → dist=4 → OUT
         for &idx in &[0, 4, 20, 24] {
-            assert_eq!(mask[idx], 0, "corner tensor_idx {idx} should be outside disk");
+            assert_eq!(
+                mask[idx], 0,
+                "corner tensor_idx {idx} should be outside disk"
+            );
         }
 
         // Center cell: tensor_idx = 2*5+2 = 12, absolute = row 10 * 20 + col 10 = 210

@@ -162,9 +162,8 @@ impl World {
         let buf_addr = unsafe { output.as_array_mut().as_mut_ptr() } as usize;
         let buf_len = output.len();
         // Release GIL: murk_snapshot_read_field locks WORLDS.
-        let status = py.allow_threads(|| {
-            murk_snapshot_read_field(h, field_id, buf_addr as *mut f32, buf_len)
-        });
+        let status = py
+            .allow_threads(|| murk_snapshot_read_field(h, field_id, buf_addr as *mut f32, buf_len));
         check_status(status)
     }
 
@@ -215,9 +214,8 @@ impl World {
 
 impl World {
     fn require_handle(&self) -> PyResult<u64> {
-        self.handle.ok_or_else(|| {
-            pyo3::exceptions::PyRuntimeError::new_err("World already destroyed")
-        })
+        self.handle
+            .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("World already destroyed"))
     }
 
     pub(crate) fn handle(&self) -> PyResult<u64> {

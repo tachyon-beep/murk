@@ -104,11 +104,8 @@ impl TickEngine {
         // Validate and build read resolution plan.
         config.validate()?;
         let defined_fields = config.defined_field_set();
-        let plan = murk_propagator::validate_pipeline(
-            &config.propagators,
-            &defined_fields,
-            config.dt,
-        )?;
+        let plan =
+            murk_propagator::validate_pipeline(&config.propagators, &defined_fields, config.dt)?;
 
         // Build arena field defs.
         let arena_field_defs: Vec<(FieldId, murk_core::FieldDef)> = config
@@ -197,13 +194,10 @@ impl TickEngine {
         }
 
         // 2. Begin tick — if this fails, commands stay in the queue.
-        let mut guard = self
-            .arena
-            .begin_tick()
-            .map_err(|_| TickError {
-                kind: StepError::AllocationFailed,
-                receipts: Vec::new(),
-            })?;
+        let mut guard = self.arena.begin_tick().map_err(|_| TickError {
+            kind: StepError::AllocationFailed,
+            receipts: Vec::new(),
+        })?;
 
         // 3. Drain ingress queue (safe: begin_tick succeeded).
         let cmd_start = Instant::now();
@@ -272,7 +266,10 @@ impl TickEngine {
                 }
             }
 
-            propagator_us.push((prop.name().to_string(), prop_start.elapsed().as_micros() as u64));
+            propagator_us.push((
+                prop.name().to_string(),
+                prop_start.elapsed().as_micros() as u64,
+            ));
         }
 
         // 5. guard goes out of scope here (releases staging borrows).
@@ -446,7 +443,11 @@ mod tests {
             fields: vec![scalar_field("field0"), scalar_field("field1")],
             propagators: vec![
                 Box::new(ConstPropagator::new("write_f0", FieldId(0), 7.0)),
-                Box::new(IdentityPropagator::new("copy_f0_to_f1", FieldId(0), FieldId(1))),
+                Box::new(IdentityPropagator::new(
+                    "copy_f0_to_f1",
+                    FieldId(0),
+                    FieldId(1),
+                )),
             ],
             dt: 0.1,
             seed: 42,
@@ -513,8 +514,17 @@ mod tests {
             ],
             propagators: vec![
                 Box::new(ConstPropagator::new("write_f0", FieldId(0), 7.0)),
-                Box::new(IdentityPropagator::new("copy_f0_to_f1", FieldId(0), FieldId(1))),
-                Box::new(SumPropagator::new("sum_f0_f1_to_f2", FieldId(0), FieldId(1), FieldId(2))),
+                Box::new(IdentityPropagator::new(
+                    "copy_f0_to_f1",
+                    FieldId(0),
+                    FieldId(1),
+                )),
+                Box::new(SumPropagator::new(
+                    "sum_f0_f1_to_f2",
+                    FieldId(0),
+                    FieldId(1),
+                    FieldId(2),
+                )),
             ],
             dt: 0.1,
             seed: 42,
@@ -698,7 +708,10 @@ mod tests {
         // On the very first tick with no prior publish, the snapshot
         // shows initial state. No writes from PropA should be visible.
         if let Some(data) = f0 {
-            assert!(data.iter().all(|&v| v == 0.0), "rollback should prevent PropA's writes from being visible");
+            assert!(
+                data.iter().all(|&v| v == 0.0),
+                "rollback should prevent PropA's writes from being visible"
+            );
         }
     }
 
@@ -762,7 +775,10 @@ mod tests {
 
         // Next tick should fail immediately with TickDisabled.
         match engine.execute_tick() {
-            Err(TickError { kind: StepError::TickDisabled, .. }) => {}
+            Err(TickError {
+                kind: StepError::TickDisabled,
+                ..
+            }) => {}
             other => panic!("expected TickDisabled, got {other:?}"),
         }
     }

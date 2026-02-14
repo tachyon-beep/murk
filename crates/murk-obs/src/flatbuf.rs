@@ -27,9 +27,7 @@
 //! [4 bytes] pool_stride (LE u32, if pool_kernel != 0)
 //! ```
 
-use crate::spec::{
-    ObsDtype, ObsEntry, ObsRegion, ObsSpec, ObsTransform, PoolConfig, PoolKernel,
-};
+use crate::spec::{ObsDtype, ObsEntry, ObsRegion, ObsSpec, ObsTransform, PoolConfig, PoolKernel};
 use murk_core::error::ObsError;
 use murk_core::FieldId;
 use murk_space::RegionSpec;
@@ -173,9 +171,7 @@ pub fn deserialize(bytes: &[u8]) -> Result<ObsSpec, ObsError> {
     let version = r.read_u16()?;
     if version > VERSION {
         return Err(ObsError::InvalidObsSpec {
-            reason: format!(
-                "unsupported version {version}, max supported is {VERSION}"
-            ),
+            reason: format!("unsupported version {version}, max supported is {VERSION}"),
         });
     }
 
@@ -267,11 +263,7 @@ fn read_entry(r: &mut Reader<'_>, idx: usize) -> Result<ObsEntry, ObsError> {
     })
 }
 
-fn decode_region(
-    tag: u8,
-    params: &[i32],
-    idx: usize,
-) -> Result<ObsRegion, ObsError> {
+fn decode_region(tag: u8, params: &[i32], idx: usize) -> Result<ObsRegion, ObsError> {
     match tag {
         REGION_ALL => Ok(ObsRegion::Fixed(RegionSpec::All)),
         REGION_DISK => {
@@ -286,7 +278,7 @@ fn decode_region(
             Ok(ObsRegion::Fixed(RegionSpec::Disk { center, radius }))
         }
         REGION_RECT => {
-            if params.is_empty() || params.len() % 2 != 0 {
+            if params.is_empty() || !params.len().is_multiple_of(2) {
                 return Err(ObsError::InvalidObsSpec {
                     reason: format!("entry {idx}: Rect region needs even number of params"),
                 });
@@ -347,8 +339,7 @@ fn decode_region(
                     reason: format!("entry {idx}: AgentRect needs at least 1 param"),
                 });
             }
-            let half_extent: SmallVec<[u32; 4]> =
-                params.iter().map(|&p| p as u32).collect();
+            let half_extent: SmallVec<[u32; 4]> = params.iter().map(|&p| p as u32).collect();
             Ok(ObsRegion::AgentRect { half_extent })
         }
         other => Err(ObsError::InvalidObsSpec {

@@ -135,9 +135,9 @@ impl PingPongArena {
                 staging_descriptor.update_handle(field_id, handle);
             }
             if entry.meta.mutability == FieldMutability::Static {
-                let (off, len) = static_arena.field_location(field_id).ok_or(
-                    ArenaError::UnknownField { field: field_id },
-                )?;
+                let (off, len) = static_arena
+                    .field_location(field_id)
+                    .ok_or(ArenaError::UnknownField { field: field_id })?;
                 let handle =
                     FieldHandle::new(0, off, len, FieldLocation::Static { offset: off, len });
                 staging_descriptor.update_handle(field_id, handle);
@@ -199,7 +199,8 @@ impl PingPongArena {
             &mut self.buffer_a
         };
 
-        let mut alloc_results: Vec<(FieldId, FieldHandle)> = Vec::with_capacity(per_tick_fields.len());
+        let mut alloc_results: Vec<(FieldId, FieldHandle)> =
+            Vec::with_capacity(per_tick_fields.len());
         for (field_id, total_len) in &per_tick_fields {
             let (seg_idx, offset) = staging.alloc(*total_len)?;
             let handle = FieldHandle::new(
@@ -344,8 +345,7 @@ impl PingPongArena {
         self.sparse_slab = SparseSlab::new();
 
         // Rebuild descriptors from field defs.
-        let descriptor =
-            FieldDescriptor::from_field_defs(&self.field_defs, self.config.cell_count);
+        let descriptor = FieldDescriptor::from_field_defs(&self.field_defs, self.config.cell_count);
         self.staging_descriptor = descriptor.clone();
         self.published_descriptor = descriptor;
 
@@ -353,25 +353,19 @@ impl PingPongArena {
         for (field_id, def) in &self.field_defs {
             if def.mutability == FieldMutability::Sparse {
                 let total_len = self.config.cell_count * def.field_type.components();
-                let handle = self.sparse_slab.alloc(
-                    *field_id,
-                    total_len,
-                    0,
-                    &mut self.sparse_segments,
-                )?;
+                let handle =
+                    self.sparse_slab
+                        .alloc(*field_id, total_len, 0, &mut self.sparse_segments)?;
                 self.staging_descriptor.update_handle(*field_id, handle);
                 self.published_descriptor.update_handle(*field_id, handle);
             }
             if def.mutability == FieldMutability::Static {
-                let (off, len) = self.static_arena.field_location(*field_id).ok_or(
-                    ArenaError::UnknownField { field: *field_id },
-                )?;
-                let handle = FieldHandle::new(
-                    0,
-                    off,
-                    len,
-                    FieldLocation::Static { offset: off, len },
-                );
+                let (off, len) = self
+                    .static_arena
+                    .field_location(*field_id)
+                    .ok_or(ArenaError::UnknownField { field: *field_id })?;
+                let handle =
+                    FieldHandle::new(0, off, len, FieldLocation::Static { offset: off, len });
                 self.staging_descriptor.update_handle(*field_id, handle);
                 self.published_descriptor.update_handle(*field_id, handle);
             }
@@ -407,7 +401,6 @@ impl PingPongArena {
     pub fn static_arena(&self) -> &SharedStaticArena {
         &self.static_arena
     }
-
 }
 
 #[cfg(test)]
@@ -706,7 +699,10 @@ mod tests {
         // Empty static arena — FieldId(0) is not present.
         let static_arena = StaticArena::new(&[]).into_shared();
         let result = PingPongArena::new(config, field_defs, static_arena);
-        assert!(matches!(result, Err(ArenaError::UnknownField { field: FieldId(0) })));
+        assert!(matches!(
+            result,
+            Err(ArenaError::UnknownField { field: FieldId(0) })
+        ));
     }
 
     #[test]

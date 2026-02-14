@@ -1,7 +1,10 @@
 [package]
 name = "murk-space"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
 description = "Spatial data structures and field storage for Murk simulations"
 
 [dependencies]

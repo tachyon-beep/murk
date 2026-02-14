@@ -45,17 +45,19 @@ impl Propagator for IdentityPropagator {
     }
 
     fn step(&self, ctx: &mut StepContext<'_>) -> Result<(), PropagatorError> {
-        let input = ctx.reads().read(self.input).ok_or_else(|| {
-            PropagatorError::ExecutionFailed {
-                reason: format!("field {:?} not readable", self.input),
-            }
-        })?;
+        let input =
+            ctx.reads()
+                .read(self.input)
+                .ok_or_else(|| PropagatorError::ExecutionFailed {
+                    reason: format!("field {:?} not readable", self.input),
+                })?;
         let input_copy: Vec<f32> = input.to_vec();
-        let output = ctx.writes().write(self.output).ok_or_else(|| {
-            PropagatorError::ExecutionFailed {
-                reason: format!("field {:?} not writable", self.output),
-            }
-        })?;
+        let output =
+            ctx.writes()
+                .write(self.output)
+                .ok_or_else(|| PropagatorError::ExecutionFailed {
+                    reason: format!("field {:?} not writable", self.output),
+                })?;
         if output.len() != input_copy.len() {
             return Err(PropagatorError::ExecutionFailed {
                 reason: format!(
@@ -107,11 +109,12 @@ impl Propagator for ConstPropagator {
     }
 
     fn step(&self, ctx: &mut StepContext<'_>) -> Result<(), PropagatorError> {
-        let output = ctx.writes().write(self.output).ok_or_else(|| {
-            PropagatorError::ExecutionFailed {
-                reason: format!("field {:?} not writable", self.output),
-            }
-        })?;
+        let output =
+            ctx.writes()
+                .write(self.output)
+                .ok_or_else(|| PropagatorError::ExecutionFailed {
+                    reason: format!("field {:?} not writable", self.output),
+                })?;
         output.fill(self.value);
         Ok(())
     }
@@ -174,11 +177,12 @@ impl Propagator for FailingPropagator {
             });
         }
         // On success, fill output with call index for traceability.
-        let output = ctx.writes().write(self.output).ok_or_else(|| {
-            PropagatorError::ExecutionFailed {
-                reason: format!("field {:?} not writable", self.output),
-            }
-        })?;
+        let output =
+            ctx.writes()
+                .write(self.output)
+                .ok_or_else(|| PropagatorError::ExecutionFailed {
+                    reason: format!("field {:?} not writable", self.output),
+                })?;
         output.fill(n as f32);
         Ok(())
     }

@@ -96,10 +96,7 @@ impl ObsPlanCache {
     /// Returns the cached plan if one exists and was compiled for the
     /// same space (by [`SpaceInstanceId`] and cell count). Otherwise
     /// recompiles from the stored [`ObsSpec`].
-    pub fn get_or_compile(
-        &mut self,
-        space: &dyn Space,
-    ) -> Result<&ObsPlan, ObsError> {
+    pub fn get_or_compile(&mut self, space: &dyn Space) -> Result<&ObsPlan, ObsError> {
         let fingerprint = SpaceFingerprint::of(space);
 
         let needs_recompile = match &self.cached {
@@ -213,11 +210,7 @@ mod tests {
     }
 
     fn snap(gen: u64, tick: u64) -> MockSnapshot {
-        let mut s = MockSnapshot::new(
-            TickId(tick),
-            WorldGenerationId(gen),
-            ParameterVersion(0),
-        );
+        let mut s = MockSnapshot::new(TickId(tick), WorldGenerationId(gen), ParameterVersion(0));
         s.set_field(FieldId(0), vec![1.0; 9]);
         s
     }
@@ -239,7 +232,9 @@ mod tests {
 
         let mut output = vec![0.0f32; 9];
         let mut mask = vec![0u8; 9];
-        cache.execute(&space, &snapshot, None, &mut output, &mut mask).unwrap();
+        cache
+            .execute(&space, &snapshot, None, &mut output, &mut mask)
+            .unwrap();
 
         assert!(cache.is_compiled());
         assert_eq!(cache.output_len(), Some(9));
@@ -256,15 +251,21 @@ mod tests {
 
         let mut output = vec![0.0f32; 9];
         let mut mask = vec![0u8; 9];
-        cache.execute(&space, &snap_gen1, None, &mut output, &mut mask).unwrap();
+        cache
+            .execute(&space, &snap_gen1, None, &mut output, &mut mask)
+            .unwrap();
         assert!(cache.is_compiled());
 
         // Same space, different generation — no recompile.
-        cache.execute(&space, &snap_gen2, None, &mut output, &mut mask).unwrap();
+        cache
+            .execute(&space, &snap_gen2, None, &mut output, &mut mask)
+            .unwrap();
         assert!(cache.is_compiled());
 
         // Third generation — still no recompile.
-        cache.execute(&space, &snap_gen3, None, &mut output, &mut mask).unwrap();
+        cache
+            .execute(&space, &snap_gen3, None, &mut output, &mut mask)
+            .unwrap();
         assert!(cache.is_compiled());
     }
 
@@ -314,14 +315,18 @@ mod tests {
 
         let mut output = vec![0.0f32; 9];
         let mut mask = vec![0u8; 9];
-        cache.execute(&space, &snapshot, None, &mut output, &mut mask).unwrap();
+        cache
+            .execute(&space, &snapshot, None, &mut output, &mut mask)
+            .unwrap();
         assert!(cache.is_compiled());
 
         cache.invalidate();
         assert!(!cache.is_compiled());
 
         // Re-executes fine.
-        cache.execute(&space, &snapshot, None, &mut output, &mut mask).unwrap();
+        cache
+            .execute(&space, &snapshot, None, &mut output, &mut mask)
+            .unwrap();
         assert!(cache.is_compiled());
     }
 
@@ -335,7 +340,9 @@ mod tests {
 
         let mut output = vec![0.0f32; 9];
         let mut mask = vec![0u8; 9];
-        let meta = cache.execute(&space, &snapshot, None, &mut output, &mut mask).unwrap();
+        let meta = cache
+            .execute(&space, &snapshot, None, &mut output, &mut mask)
+            .unwrap();
 
         assert_eq!(meta.age_ticks, 0);
     }

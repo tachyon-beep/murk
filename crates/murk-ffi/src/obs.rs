@@ -8,7 +8,9 @@ use std::sync::Mutex;
 use murk_core::id::FieldId;
 use murk_core::Coord;
 use murk_obs::cache::ObsPlanCache;
-use murk_obs::spec::{ObsDtype, ObsEntry, ObsRegion, ObsSpec, ObsTransform, PoolConfig, PoolKernel};
+use murk_obs::spec::{
+    ObsDtype, ObsEntry, ObsRegion, ObsSpec, ObsTransform, PoolConfig, PoolKernel,
+};
 use murk_space::RegionSpec;
 use smallvec::SmallVec;
 
@@ -114,10 +116,8 @@ pub extern "C" fn murk_obsplan_compile(
                 if n == 0 || n > 8 {
                     return MurkStatus::InvalidArgument as i32;
                 }
-                let half_extent: SmallVec<[u32; 4]> = e.region_params[..n]
-                    .iter()
-                    .map(|&v| v as u32)
-                    .collect();
+                let half_extent: SmallVec<[u32; 4]> =
+                    e.region_params[..n].iter().map(|&v| v as u32).collect();
                 ObsRegion::AgentRect { half_extent }
             }
             _ => return MurkStatus::InvalidArgument as i32,
@@ -389,10 +389,7 @@ mod tests {
         use std::ffi::{c_void, CString};
 
         #[allow(unsafe_code)]
-        unsafe extern "C" fn const_step(
-            _ud: *mut c_void,
-            ctx: *const MurkStepContext,
-        ) -> i32 {
+        unsafe extern "C" fn const_step(_ud: *mut c_void, ctx: *const MurkStepContext) -> i32 {
             let ctx = &*ctx;
             let mut ptr: *mut f32 = std::ptr::null_mut();
             let mut len: usize = 0;
@@ -656,8 +653,7 @@ mod tests {
 
         let mut plan_h: u64 = 0;
         // Empty entries.
-        let status =
-            murk_obsplan_compile(world_h, std::ptr::null(), 0, &mut plan_h);
+        let status = murk_obsplan_compile(world_h, std::ptr::null(), 0, &mut plan_h);
         assert_eq!(status, MurkStatus::InvalidObsSpec as i32);
 
         crate::world::murk_lockstep_destroy(world_h);

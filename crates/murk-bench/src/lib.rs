@@ -90,7 +90,9 @@ pub fn init_agent_positions(cell_count: usize, n: u16, seed: u64) -> Vec<(u16, u
 
     for i in 0..n {
         // Simple deterministic placement: spread agents across the grid
-        let mut pos = ((seed.wrapping_mul(6364136223846793005).wrapping_add(i as u64 * 1442695040888963407))
+        let mut pos = ((seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(i as u64 * 1442695040888963407))
             % cell_count as u64) as usize;
 
         // Linear probe to avoid collisions (guaranteed to terminate: n <= cell_count)

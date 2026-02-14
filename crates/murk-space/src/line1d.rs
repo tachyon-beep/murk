@@ -180,7 +180,12 @@ pub(crate) fn compile_region_1d(
 
 /// BFS-based disk compilation for 1D. Returns cells within `radius` graph-distance
 /// of `center`, handling wrap if enabled.
-fn compile_disk_1d(center: i32, radius: u32, len: u32, wrap: bool) -> Result<RegionPlan, SpaceError> {
+fn compile_disk_1d(
+    center: i32,
+    radius: u32,
+    len: u32,
+    wrap: bool,
+) -> Result<RegionPlan, SpaceError> {
     let n = len as i32;
     let mut visited = vec![false; len as usize];
     let mut queue = VecDeque::new();

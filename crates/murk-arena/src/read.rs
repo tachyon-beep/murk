@@ -71,12 +71,16 @@ impl<'a> Snapshot<'a> {
         let handle = &entry.handle;
 
         match handle.location() {
-            FieldLocation::PerTick { segment_index } => {
-                Some(self.per_tick_segments.slice(segment_index, handle.offset, handle.len()))
-            }
-            FieldLocation::Sparse { segment_index } => {
-                Some(self.sparse_segments.slice(segment_index, handle.offset, handle.len()))
-            }
+            FieldLocation::PerTick { segment_index } => Some(self.per_tick_segments.slice(
+                segment_index,
+                handle.offset,
+                handle.len(),
+            )),
+            FieldLocation::Sparse { segment_index } => Some(self.sparse_segments.slice(
+                segment_index,
+                handle.offset,
+                handle.len(),
+            )),
             FieldLocation::Static { .. } => self.static_arena.read_field(field),
         }
     }
@@ -166,12 +170,16 @@ impl OwnedSnapshot {
         let handle = &entry.handle;
 
         match handle.location() {
-            FieldLocation::PerTick { segment_index } => {
-                Some(self.per_tick_segments.slice(segment_index, handle.offset, handle.len()))
-            }
-            FieldLocation::Sparse { segment_index } => {
-                Some(self.sparse_segments.slice(segment_index, handle.offset, handle.len()))
-            }
+            FieldLocation::PerTick { segment_index } => Some(self.per_tick_segments.slice(
+                segment_index,
+                handle.offset,
+                handle.len(),
+            )),
+            FieldLocation::Sparse { segment_index } => Some(self.sparse_segments.slice(
+                segment_index,
+                handle.offset,
+                handle.len(),
+            )),
             FieldLocation::Static { .. } => self.static_arena.read_field(field),
         }
     }
@@ -210,12 +218,7 @@ mod tests {
     use crate::static_arena::StaticArena;
     use murk_core::{BoundaryBehavior, FieldDef, FieldMutability, FieldType};
 
-    fn make_test_snapshot() -> (
-        SegmentList,
-        SegmentList,
-        StaticArena,
-        FieldDescriptor,
-    ) {
+    fn make_test_snapshot() -> (SegmentList, SegmentList, StaticArena, FieldDescriptor) {
         let defs = vec![
             (
                 FieldId(0),
@@ -273,7 +276,15 @@ mod tests {
         let (s_off, s_len) = static_arena.field_location(FieldId(1)).unwrap();
         desc.update_handle(
             FieldId(1),
-            FieldHandle::new(0, s_off, s_len, FieldLocation::Static { offset: s_off, len: s_len }),
+            FieldHandle::new(
+                0,
+                s_off,
+                s_len,
+                FieldLocation::Static {
+                    offset: s_off,
+                    len: s_len,
+                },
+            ),
         );
 
         let sparse = SegmentList::new(4096, 4);

@@ -89,11 +89,7 @@ mod tests {
     use murk_test_utils::MockSnapshot;
 
     fn make_snapshot(fields: Vec<(FieldId, Vec<f32>)>) -> MockSnapshot {
-        let mut snap = MockSnapshot::new(
-            TickId(1),
-            WorldGenerationId(1),
-            ParameterVersion(0),
-        );
+        let mut snap = MockSnapshot::new(TickId(1), WorldGenerationId(1), ParameterVersion(0));
         for (fid, data) in fields {
             snap.set_field(fid, data);
         }
@@ -116,12 +112,8 @@ mod tests {
 
     #[test]
     fn different_data_different_hash() {
-        let snap_a = make_snapshot(vec![
-            (FieldId(0), vec![1.0, 2.0, 3.0]),
-        ]);
-        let snap_b = make_snapshot(vec![
-            (FieldId(0), vec![1.0, 2.0, 4.0]),
-        ]);
+        let snap_a = make_snapshot(vec![(FieldId(0), vec![1.0, 2.0, 3.0])]);
+        let snap_b = make_snapshot(vec![(FieldId(0), vec![1.0, 2.0, 4.0])]);
 
         assert_ne!(snapshot_hash(&snap_a, 1), snapshot_hash(&snap_b, 1));
     }

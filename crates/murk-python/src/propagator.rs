@@ -179,10 +179,7 @@ pub(crate) fn add_propagator(
 /// - `user_data` must be a valid `*mut TrampolineData` created by `register()`.
 /// - `ctx` must be a valid `*const MurkStepContext` provided by the engine.
 #[allow(unsafe_code)]
-unsafe extern "C" fn python_trampoline(
-    user_data: *mut c_void,
-    ctx: *const MurkStepContext,
-) -> i32 {
+unsafe extern "C" fn python_trampoline(user_data: *mut c_void, ctx: *const MurkStepContext) -> i32 {
     if user_data.is_null() || ctx.is_null() {
         return -10; // PropagatorFailed
     }
@@ -200,11 +197,7 @@ unsafe extern "C" fn python_trampoline(
 }
 
 #[allow(unsafe_code)]
-fn trampoline_inner(
-    py: Python<'_>,
-    data: &TrampolineData,
-    ctx: &MurkStepContext,
-) -> PyResult<()> {
+fn trampoline_inner(py: Python<'_>, data: &TrampolineData, ctx: &MurkStepContext) -> PyResult<()> {
     // Build read arrays (copies from engine buffers).
     let reads = PyList::empty(py);
     for &field_id in &data.reads {

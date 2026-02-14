@@ -4,9 +4,8 @@ use numpy::{PyArray1, PyArrayMethods, PyReadonlyArray2, PyUntypedArrayMethods};
 use pyo3::prelude::*;
 
 use murk_ffi::{
-    murk_obsplan_compile, murk_obsplan_destroy, murk_obsplan_execute,
-    murk_obsplan_execute_agents, murk_obsplan_mask_len, murk_obsplan_output_len, MurkObsEntry,
-    MurkObsResult,
+    murk_obsplan_compile, murk_obsplan_destroy, murk_obsplan_execute, murk_obsplan_execute_agents,
+    murk_obsplan_mask_len, murk_obsplan_output_len, MurkObsEntry, MurkObsResult,
 };
 
 use crate::error::check_status;
@@ -49,6 +48,7 @@ impl ObsEntry {
         pool_kernel_size=0,
         pool_stride=0,
     ))]
+    #[allow(clippy::too_many_arguments)]
     fn new(
         field_id: u32,
         region_type: i32,
@@ -289,10 +289,7 @@ impl ObsPlan {
         });
         check_status(status)?;
 
-        Ok(results
-            .iter()
-            .map(|r| (r.tick_id, r.age_ticks))
-            .collect())
+        Ok(results.iter().map(|r| (r.tick_id, r.age_ticks)).collect())
     }
 
     /// Number of f32 elements in the output buffer.
@@ -327,9 +324,8 @@ impl ObsPlan {
 
 impl ObsPlan {
     fn require_handle(&self) -> PyResult<u64> {
-        self.handle.ok_or_else(|| {
-            pyo3::exceptions::PyRuntimeError::new_err("ObsPlan already destroyed")
-        })
+        self.handle
+            .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("ObsPlan already destroyed"))
     }
 }
 

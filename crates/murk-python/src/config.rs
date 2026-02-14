@@ -121,9 +121,8 @@ impl Config {
         let params_len = params.len();
         let st = space_type as i32;
         // Release GIL: murk_config_set_space locks CONFIGS.
-        let status = py.allow_threads(|| {
-            murk_config_set_space(h, st, params_addr as *const f64, params_len)
-        });
+        let status = py
+            .allow_threads(|| murk_config_set_space(h, st, params_addr as *const f64, params_len));
         check_status(status)
     }
 
@@ -146,9 +145,8 @@ impl Config {
         let mt = mutability as i32;
         let bb = boundary as i32;
         // Release GIL: murk_config_add_field locks CONFIGS.
-        let status = py.allow_threads(|| {
-            murk_config_add_field(h, name_addr as *const i8, ft, mt, dims, bb)
-        });
+        let status =
+            py.allow_threads(|| murk_config_add_field(h, name_addr as *const i8, ft, mt, dims, bb));
         check_status(status)
     }
 

@@ -405,8 +405,8 @@ mod tests {
         let mut q = IngressQueue::new(10);
         q.submit(
             vec![
-                make_cmd(1, 100),                      // no source → source_id=MAX
-                make_sourced_cmd(1, 5, 0, 100),        // source_id=5
+                make_cmd(1, 100),               // no source → source_id=MAX
+                make_sourced_cmd(1, 5, 0, 100), // source_id=5
             ],
             false,
         );
@@ -427,10 +427,7 @@ mod tests {
     #[test]
     fn drain_all_expired() {
         let mut q = IngressQueue::new(10);
-        q.submit(
-            vec![make_cmd(1, 0), make_cmd(1, 1), make_cmd(1, 2)],
-            false,
-        );
+        q.submit(vec![make_cmd(1, 0), make_cmd(1, 1), make_cmd(1, 2)], false);
         let result = q.drain(TickId(10));
         assert!(result.commands.is_empty());
         assert_eq!(result.expired_receipts.len(), 3);
@@ -489,7 +486,12 @@ mod tests {
         use proptest::prelude::*;
 
         fn arb_command() -> impl Strategy<Value = Command> {
-            (0u8..4, any::<u64>(), prop::option::of(0u64..100), prop::option::of(0u64..100))
+            (
+                0u8..4,
+                any::<u64>(),
+                prop::option::of(0u64..100),
+                prop::option::of(0u64..100),
+            )
                 .prop_map(|(prio, expires, src_id, src_seq)| Command {
                     payload: CommandPayload::SetParameter {
                         key: ParameterKey(0),

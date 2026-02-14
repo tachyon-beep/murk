@@ -72,10 +72,7 @@ impl AgentMovementPropagator {
     ///
     /// `initial_positions` maps `(agent_id, flat_index)` for tick-0 placement.
     /// `action_buffer` is shared with the external action source.
-    pub fn new(
-        action_buffer: ActionBuffer,
-        initial_positions: Vec<(u16, usize)>,
-    ) -> Self {
+    pub fn new(action_buffer: ActionBuffer, initial_positions: Vec<(u16, usize)>) -> Self {
         Self {
             action_buffer,
             initial_positions,
@@ -131,22 +128,23 @@ impl Propagator for AgentMovementPropagator {
         };
 
         // Lock actions and sort for deterministic processing
-        let mut actions = self.action_buffer.lock().map_err(|_| {
-            PropagatorError::ExecutionFailed {
-                reason: "action buffer lock poisoned".into(),
-            }
-        })?;
+        let mut actions =
+            self.action_buffer
+                .lock()
+                .map_err(|_| PropagatorError::ExecutionFailed {
+                    reason: "action buffer lock poisoned".into(),
+                })?;
         actions.sort_by_key(|a| a.agent_id);
         let actions_snapshot: Vec<AgentAction> = actions.drain(..).collect();
         drop(actions);
 
         // Now take the mutable write borrow
-        let presence = ctx
-            .writes()
-            .write(AGENT_PRESENCE)
-            .ok_or_else(|| PropagatorError::ExecutionFailed {
-                reason: "agent_presence field not writable".into(),
-            })?;
+        let presence =
+            ctx.writes()
+                .write(AGENT_PRESENCE)
+                .ok_or_else(|| PropagatorError::ExecutionFailed {
+                    reason: "agent_presence field not writable".into(),
+                })?;
 
         // Tick 0 init: if all zeros, place agents at initial positions
         let all_zero = presence.iter().all(|&v| v == 0.0);

@@ -244,7 +244,11 @@ mod tests {
             fields: vec![scalar_field("field0"), scalar_field("field1")],
             propagators: vec![
                 Box::new(ConstPropagator::new("write_f0", FieldId(0), 7.0)),
-                Box::new(IdentityPropagator::new("copy_f0_to_f1", FieldId(0), FieldId(1))),
+                Box::new(IdentityPropagator::new(
+                    "copy_f0_to_f1",
+                    FieldId(0),
+                    FieldId(1),
+                )),
             ],
             dt: 0.1,
             seed: 42,
@@ -312,7 +316,11 @@ mod tests {
             ],
             propagators: vec![
                 Box::new(ConstPropagator::new("write_f0", FieldId(0), 3.0)),
-                Box::new(IdentityPropagator::new("copy_f0_to_f1", FieldId(0), FieldId(1))),
+                Box::new(IdentityPropagator::new(
+                    "copy_f0_to_f1",
+                    FieldId(0),
+                    FieldId(1),
+                )),
                 Box::new(SumPropagator::new(
                     "sum_f0_f1_to_f2",
                     FieldId(0),
@@ -464,10 +472,7 @@ mod tests {
                     let field = FieldId(field_idx);
                     let data_a = result_a.snapshot.read(field).unwrap();
                     let data_b = result_b.snapshot.read(field).unwrap();
-                    assert_eq!(
-                        data_a, data_b,
-                        "field {field_idx} mismatch at tick {tick}"
-                    );
+                    assert_eq!(data_a, data_b, "field {field_idx} mismatch at tick {tick}");
                 }
             }
         }
@@ -592,7 +597,12 @@ mod tests {
 
         // Submit 4 commands — only 2 fit in the queue.
         let result = world
-            .step_sync(vec![make_cmd(100), make_cmd(100), make_cmd(100), make_cmd(100)])
+            .step_sync(vec![
+                make_cmd(100),
+                make_cmd(100),
+                make_cmd(100),
+                make_cmd(100),
+            ])
             .unwrap();
 
         // Should have 4 receipts total: 2 applied + 2 rejected.

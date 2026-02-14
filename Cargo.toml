@@ -15,6 +15,13 @@ members = [
     "crates/murk-bench",
 ]
 
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/tachyon-beep/murk"
+authors = ["John Morrissey"]
+
 [workspace.dependencies]
 crossbeam-channel = "0.5"
 indexmap = "2"

@@ -227,9 +227,7 @@ impl WorldConfig {
 
     /// Build a [`FieldSet`] from the configured field definitions.
     pub(crate) fn defined_field_set(&self) -> FieldSet {
-        (0..self.fields.len())
-            .map(|i| FieldId(i as u32))
-            .collect()
+        (0..self.fields.len()).map(|i| FieldId(i as u32)).collect()
     }
 }
 
@@ -272,11 +270,7 @@ mod tests {
         WorldConfig {
             space: Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()),
             fields: vec![scalar_field("energy")],
-            propagators: vec![Box::new(ConstPropagator::new(
-                "const",
-                FieldId(0),
-                1.0,
-            ))],
+            propagators: vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))],
             dt: 0.1,
             seed: 42,
             ring_buffer_size: 8,
@@ -315,11 +309,8 @@ mod tests {
     fn validate_write_conflict_fails() {
         let mut cfg = valid_config();
         // Two propagators writing the same field.
-        cfg.propagators.push(Box::new(ConstPropagator::new(
-            "conflict",
-            FieldId(0),
-            2.0,
-        )));
+        cfg.propagators
+            .push(Box::new(ConstPropagator::new("conflict", FieldId(0), 2.0)));
         match cfg.validate() {
             Err(ConfigError::Pipeline(PipelineError::WriteConflict(_))) => {}
             other => panic!("expected Pipeline(WriteConflict), got {other:?}"),
@@ -372,7 +363,10 @@ mod tests {
             fn cell_count(&self) -> usize {
                 0
             }
-            fn neighbours(&self, _: &murk_core::Coord) -> smallvec::SmallVec<[murk_core::Coord; 8]> {
+            fn neighbours(
+                &self,
+                _: &murk_core::Coord,
+            ) -> smallvec::SmallVec<[murk_core::Coord; 8]> {
                 smallvec::smallvec![]
             }
             fn distance(&self, _: &murk_core::Coord, _: &murk_core::Coord) -> f64 {
@@ -432,6 +426,9 @@ mod tests {
     fn async_config_resolved_worker_count_auto() {
         let cfg = AsyncConfig::default();
         let count = cfg.resolved_worker_count();
-        assert!(count >= 2 && count <= 16, "auto count {count} out of [2,16]");
+        assert!(
+            count >= 2 && count <= 16,
+            "auto count {count} out of [2,16]"
+        );
     }
 }

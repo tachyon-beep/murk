@@ -26,5 +26,8 @@ __pycache__/
 .env
 .env.local
 
+# Agent config
+.claude/
+
 # Beads internal
 .beads/

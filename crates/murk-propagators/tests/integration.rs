@@ -7,16 +7,10 @@ use murk_core::FieldReader;
 use murk_engine::{BackoffConfig, LockstepWorld, WorldConfig};
 use murk_propagators::agent_movement::{new_action_buffer, AgentAction, Direction};
 use murk_propagators::fields::{AGENT_PRESENCE, HEAT, HEAT_GRADIENT, REWARD, VELOCITY};
-use murk_propagators::{
-    AgentMovementPropagator, DiffusionPropagator, RewardPropagator,
-};
+use murk_propagators::{AgentMovementPropagator, DiffusionPropagator, RewardPropagator};
 use murk_space::{EdgeBehavior, Square4};
 
-fn small_config(
-    rows: u32,
-    cols: u32,
-    seed: u64,
-) -> (WorldConfig, murk_propagators::ActionBuffer) {
+fn small_config(rows: u32, cols: u32, seed: u64) -> (WorldConfig, murk_propagators::ActionBuffer) {
     let ab = new_action_buffer();
     let cell_count = (rows * cols) as usize;
     let initial_positions = vec![(0, cell_count / 2)]; // one agent at center

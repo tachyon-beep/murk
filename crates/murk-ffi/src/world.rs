@@ -355,7 +355,10 @@ fn write_receipts(
 mod tests {
     use super::*;
     use crate::command::MurkCommandType;
-    use crate::config::{murk_config_add_field, murk_config_create, murk_config_set_dt, murk_config_set_seed, murk_config_set_space};
+    use crate::config::{
+        murk_config_add_field, murk_config_create, murk_config_set_dt, murk_config_set_seed,
+        murk_config_set_space,
+    };
     use crate::metrics::murk_step_metrics;
     use crate::propagator::{
         murk_propagator_create, MurkPropagatorDef, MurkStepContext, MurkWriteDecl,

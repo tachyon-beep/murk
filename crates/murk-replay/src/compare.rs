@@ -156,11 +156,7 @@ mod tests {
     use murk_test_utils::MockSnapshot;
 
     fn make_snapshot(field_data: Vec<(u32, Vec<f32>)>) -> MockSnapshot {
-        let mut snap = MockSnapshot::new(
-            TickId(1),
-            WorldGenerationId(1),
-            ParameterVersion(0),
-        );
+        let mut snap = MockSnapshot::new(TickId(1), WorldGenerationId(1), ParameterVersion(0));
         for (fid, data) in field_data {
             snap.set_field(FieldId(fid), data);
         }

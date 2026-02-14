@@ -52,23 +52,23 @@ impl Propagator for RewardPropagator {
                 reason: "heat field not readable".into(),
             })?;
 
-        let presence = ctx
-            .reads()
-            .read(AGENT_PRESENCE)
-            .ok_or_else(|| PropagatorError::ExecutionFailed {
-                reason: "agent_presence field not readable".into(),
-            })?;
+        let presence =
+            ctx.reads()
+                .read(AGENT_PRESENCE)
+                .ok_or_else(|| PropagatorError::ExecutionFailed {
+                    reason: "agent_presence field not readable".into(),
+                })?;
 
         let cell_count = ctx.space().cell_count();
         let heat_copy = heat[..cell_count].to_vec();
         let presence_copy = presence[..cell_count].to_vec();
 
-        let reward = ctx
-            .writes()
-            .write(REWARD)
-            .ok_or_else(|| PropagatorError::ExecutionFailed {
-                reason: "reward field not writable".into(),
-            })?;
+        let reward =
+            ctx.writes()
+                .write(REWARD)
+                .ok_or_else(|| PropagatorError::ExecutionFailed {
+                    reason: "reward field not writable".into(),
+                })?;
 
         for i in 0..cell_count {
             if presence_copy[i] != 0.0 {
@@ -112,7 +112,13 @@ mod tests {
 
         let mut scratch = ScratchRegion::new(0);
         let mut ctx = StepContext::new(
-            &reader, &reader, &mut writer, &mut scratch, &grid, TickId(1), 0.01,
+            &reader,
+            &reader,
+            &mut writer,
+            &mut scratch,
+            &grid,
+            TickId(1),
+            0.01,
         );
 
         prop.step(&mut ctx).unwrap();
@@ -142,7 +148,13 @@ mod tests {
 
         let mut scratch = ScratchRegion::new(0);
         let mut ctx = StepContext::new(
-            &reader, &reader, &mut writer, &mut scratch, &grid, TickId(1), 0.01,
+            &reader,
+            &reader,
+            &mut writer,
+            &mut scratch,
+            &grid,
+            TickId(1),
+            0.01,
         );
 
         prop.step(&mut ctx).unwrap();

@@ -47,5 +47,10 @@ fn bench_1000_ticks_10k(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, bench_tick_10k, bench_tick_100k, bench_1000_ticks_10k);
+criterion_group!(
+    benches,
+    bench_tick_10k,
+    bench_tick_100k,
+    bench_1000_ticks_10k
+);
 criterion_main!(benches);

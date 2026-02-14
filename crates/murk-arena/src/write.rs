@@ -5,8 +5,8 @@
 //! descriptor. It is created by `PingPongArena::begin_tick()` and dropped
 //! before `publish()`.
 
-use murk_core::{FieldId, FieldMutability};
 use murk_core::traits::FieldWriter;
+use murk_core::{FieldId, FieldMutability};
 
 use crate::descriptor::{FieldDescriptor, FieldMeta};
 use crate::handle::FieldLocation;
@@ -126,12 +126,16 @@ impl<'a> WriteArena<'a> {
         let entry = self.descriptor.get(field)?;
         let handle = &entry.handle;
         match handle.location() {
-            FieldLocation::PerTick { segment_index } => {
-                Some(self.per_tick_segments.slice(segment_index, handle.offset, handle.len()))
-            }
-            FieldLocation::Sparse { segment_index } => {
-                Some(self.sparse_segments.slice(segment_index, handle.offset, handle.len()))
-            }
+            FieldLocation::PerTick { segment_index } => Some(self.per_tick_segments.slice(
+                segment_index,
+                handle.offset,
+                handle.len(),
+            )),
+            FieldLocation::Sparse { segment_index } => Some(self.sparse_segments.slice(
+                segment_index,
+                handle.offset,
+                handle.len(),
+            )),
             FieldLocation::Static { .. } => {
                 // Static fields are read from the StaticArena, not through WriteArena.
                 None
@@ -237,12 +241,7 @@ mod tests {
     fn setup_write_arena(
         cell_count: u32,
         generation: u32,
-    ) -> (
-        SegmentList,
-        SegmentList,
-        SparseSlab,
-        FieldDescriptor,
-    ) {
+    ) -> (SegmentList, SegmentList, SparseSlab, FieldDescriptor) {
         let defs = make_defs();
         let mut desc = FieldDescriptor::from_field_defs(&defs, cell_count);
         let mut per_tick = SegmentList::new(4096, 4);
@@ -275,13 +274,7 @@ mod tests {
     #[test]
     fn write_per_tick_returns_mutable_slice() {
         let (mut per_tick, mut sparse_segs, mut slab, mut desc) = setup_write_arena(10, 1);
-        let mut wa = WriteArena::new(
-            &mut per_tick,
-            &mut sparse_segs,
-            &mut slab,
-            &mut desc,
-            1,
-        );
+        let mut wa = WriteArena::new(&mut per_tick, &mut sparse_segs, &mut slab, &mut desc, 1);
         let data = wa.write(FieldId(0)).unwrap();
         assert_eq!(data.len(), 10);
         data[0] = 42.0;
@@ -291,13 +284,7 @@ mod tests {
     #[test]
     fn write_static_returns_none() {
         let (mut per_tick, mut sparse_segs, mut slab, mut desc) = setup_write_arena(10, 1);
-        let mut wa = WriteArena::new(
-            &mut per_tick,
-            &mut sparse_segs,
-            &mut slab,
-            &mut desc,
-            1,
-        );
+        let mut wa = WriteArena::new(&mut per_tick, &mut sparse_segs, &mut slab, &mut desc, 1);
         assert!(wa.write(FieldId(2)).is_none());
     }
 
@@ -306,18 +293,10 @@ mod tests {
         let (mut per_tick, mut sparse_segs, mut slab, mut desc) = setup_write_arena(10, 1);
 
         // Initial sparse allocation at gen 0 (simulating prior state).
-        let handle = slab
-            .alloc(FieldId(1), 10, 0, &mut sparse_segs)
-            .unwrap();
+        let handle = slab.alloc(FieldId(1), 10, 0, &mut sparse_segs).unwrap();
         desc.update_handle(FieldId(1), handle);
 
-        let mut wa = WriteArena::new(
-            &mut per_tick,
-            &mut sparse_segs,
-            &mut slab,
-            &mut desc,
-            1,
-        );
+        let mut wa = WriteArena::new(&mut per_tick, &mut sparse_segs, &mut slab, &mut desc, 1);
 
         // Writing should trigger CoW.
         let data = wa.write(FieldId(1)).unwrap();
@@ -328,13 +307,7 @@ mod tests {
     #[test]
     fn write_unknown_field_returns_none() {
         let (mut per_tick, mut sparse_segs, mut slab, mut desc) = setup_write_arena(10, 1);
-        let mut wa = WriteArena::new(
-            &mut per_tick,
-            &mut sparse_segs,
-            &mut slab,
-            &mut desc,
-            1,
-        );
+        let mut wa = WriteArena::new(&mut per_tick, &mut sparse_segs, &mut slab, &mut desc, 1);
         assert!(wa.write(FieldId(99)).is_none());
     }
 
@@ -343,24 +316,12 @@ mod tests {
         let (mut per_tick, mut sparse_segs, mut slab, mut desc) = setup_write_arena(10, 1);
         // Write some data first.
         {
-            let mut wa = WriteArena::new(
-                &mut per_tick,
-                &mut sparse_segs,
-                &mut slab,
-                &mut desc,
-                1,
-            );
+            let mut wa = WriteArena::new(&mut per_tick, &mut sparse_segs, &mut slab, &mut desc, 1);
             let data = wa.write(FieldId(0)).unwrap();
             data[0] = 7.0;
         }
         // Now read it.
-        let wa = WriteArena::new(
-            &mut per_tick,
-            &mut sparse_segs,
-            &mut slab,
-            &mut desc,
-            1,
-        );
+        let wa = WriteArena::new(&mut per_tick, &mut sparse_segs, &mut slab, &mut desc, 1);
         let data = wa.read(FieldId(0)).unwrap();
         assert_eq!(data[0], 7.0);
     }

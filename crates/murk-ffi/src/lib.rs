@@ -38,22 +38,19 @@ pub use config::{
 };
 pub use metrics::{murk_step_metrics, murk_step_metrics_propagator, MurkStepMetrics};
 pub use obs::{
-    murk_obsplan_compile, murk_obsplan_destroy, murk_obsplan_execute,
-    murk_obsplan_execute_agents, murk_obsplan_mask_len, murk_obsplan_output_len, MurkObsEntry,
-    MurkObsResult,
+    murk_obsplan_compile, murk_obsplan_destroy, murk_obsplan_execute, murk_obsplan_execute_agents,
+    murk_obsplan_mask_len, murk_obsplan_output_len, MurkObsEntry, MurkObsResult,
 };
-pub use propagator::{
-    murk_propagator_create, MurkPropagatorDef, MurkStepContext, MurkWriteDecl,
-};
+pub use propagator::{murk_propagator_create, MurkPropagatorDef, MurkStepContext, MurkWriteDecl};
 pub use status::MurkStatus;
 pub use types::{
     MurkBoundaryBehavior, MurkEdgeBehavior, MurkFieldMutability, MurkFieldType, MurkSpaceType,
     MurkWriteMode,
 };
 pub use world::{
-    murk_consecutive_rollbacks, murk_current_tick, murk_is_tick_disabled,
-    murk_lockstep_create, murk_lockstep_destroy, murk_lockstep_reset, murk_lockstep_step,
-    murk_lockstep_step_vec, murk_seed, murk_snapshot_read_field,
+    murk_consecutive_rollbacks, murk_current_tick, murk_is_tick_disabled, murk_lockstep_create,
+    murk_lockstep_destroy, murk_lockstep_reset, murk_lockstep_step, murk_lockstep_step_vec,
+    murk_seed, murk_snapshot_read_field,
 };
 
 /// ABI version: major in upper 16 bits, minor in lower 16.

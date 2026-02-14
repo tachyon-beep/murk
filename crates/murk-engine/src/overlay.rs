@@ -110,7 +110,10 @@ impl BaseFieldCache {
 
 impl FieldReader for BaseFieldCache {
     fn read(&self, field: FieldId) -> Option<&[f32]> {
-        self.entries.get(&field).filter(|v| !v.is_empty()).map(|v| v.as_slice())
+        self.entries
+            .get(&field)
+            .filter(|v| !v.is_empty())
+            .map(|v| v.as_slice())
     }
 }
 
@@ -152,7 +155,10 @@ impl StagedFieldCache {
 
 impl FieldReader for StagedFieldCache {
     fn read(&self, field: FieldId) -> Option<&[f32]> {
-        self.entries.get(&field).filter(|v| !v.is_empty()).map(|v| v.as_slice())
+        self.entries
+            .get(&field)
+            .filter(|v| !v.is_empty())
+            .map(|v| v.as_slice())
     }
 }
 

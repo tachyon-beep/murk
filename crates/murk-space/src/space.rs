@@ -73,9 +73,7 @@ pub trait Space: Any + Send + Sync + 'static {
     /// Default implementation performs a linear search; backends should
     /// override with O(1) arithmetic when possible.
     fn canonical_rank(&self, coord: &Coord) -> Option<usize> {
-        self.canonical_ordering()
-            .iter()
-            .position(|c| c == coord)
+        self.canonical_ordering().iter().position(|c| c == coord)
     }
 
     /// Unique instance identifier for this space object.

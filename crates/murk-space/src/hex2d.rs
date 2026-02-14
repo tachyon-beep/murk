@@ -8,12 +8,12 @@ use smallvec::{smallvec, SmallVec};
 
 /// Pointy-top hex offsets in axial `(dq, dr)` order: E, NE, NW, W, SW, SE.
 const HEX_OFFSETS: [(i32, i32); 6] = [
-    (1, 0),   // E
-    (1, -1),  // NE
-    (0, -1),  // NW
-    (-1, 0),  // W
-    (-1, 1),  // SW
-    (0, 1),   // SE
+    (1, 0),  // E
+    (1, -1), // NE
+    (0, -1), // NW
+    (-1, 0), // W
+    (-1, 1), // SW
+    (0, 1),  // SE
 ];
 
 /// A two-dimensional hexagonal lattice with axial coordinates.
@@ -122,12 +122,7 @@ impl Hex2D {
     }
 
     /// Compile a hex disk region via direct enumeration.
-    fn compile_hex_disk(
-        &self,
-        center_q: i32,
-        center_r: i32,
-        radius: u32,
-    ) -> RegionPlan {
+    fn compile_hex_disk(&self, center_q: i32, center_r: i32, radius: u32) -> RegionPlan {
         // Clamp effective radius to grid bounds to avoid overflow.
         // No cell can be further than (rows + cols) from center.
         let max_useful = (self.rows as u64 + self.cols as u64).min(i32::MAX as u64) as u32;
@@ -158,8 +153,7 @@ impl Hex2D {
         }
 
         // Sort by (r, q) — canonical ordering for Hex2D.
-        let mut pairs: Vec<(Coord, usize)> =
-            coords.into_iter().zip(tensor_indices).collect();
+        let mut pairs: Vec<(Coord, usize)> = coords.into_iter().zip(tensor_indices).collect();
         pairs.sort_by(|a, b| {
             let ar = a.0[1];
             let aq = a.0[0];
@@ -580,9 +574,15 @@ mod tests {
         assert_eq!(
             order,
             vec![
-                c(0, 0), c(1, 0), c(2, 0),
-                c(0, 1), c(1, 1), c(2, 1),
-                c(0, 2), c(1, 2), c(2, 2),
+                c(0, 0),
+                c(1, 0),
+                c(2, 0),
+                c(0, 1),
+                c(1, 1),
+                c(2, 1),
+                c(0, 2),
+                c(1, 2),
+                c(2, 2),
             ]
         );
     }

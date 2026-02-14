@@ -181,7 +181,13 @@ mod tests {
         let space = Line1D::new(4, EdgeBehavior::Absorb).unwrap();
 
         let mut ctx = StepContext::new(
-            &reader, &reader, &mut writer, &mut scratch, &space, TickId(0), 0.1,
+            &reader,
+            &reader,
+            &mut writer,
+            &mut scratch,
+            &space,
+            TickId(0),
+            0.1,
         );
 
         let buf = ctx.scratch().alloc(8).unwrap();

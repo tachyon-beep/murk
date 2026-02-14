@@ -97,9 +97,12 @@ fn worker_loop_inner(
         // Check for cooperative cancellation before starting.
         if worker_epoch.is_cancelled() {
             worker_epoch.clear_cancel();
-            send_error(&task, murk_core::error::ObsError::ExecutionFailed {
-                reason: "worker cancelled before execution".into(),
-            });
+            send_error(
+                &task,
+                murk_core::error::ObsError::ExecutionFailed {
+                    reason: "worker cancelled before execution".into(),
+                },
+            );
             continue;
         }
 
@@ -107,9 +110,12 @@ fn worker_loop_inner(
         let snapshot = match ring.latest() {
             Some(snap) => snap,
             None => {
-                send_error(&task, murk_core::error::ObsError::ExecutionFailed {
-                    reason: "no snapshot available".into(),
-                });
+                send_error(
+                    &task,
+                    murk_core::error::ObsError::ExecutionFailed {
+                        reason: "no snapshot available".into(),
+                    },
+                );
                 continue;
             }
         };

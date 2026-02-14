@@ -172,9 +172,7 @@ mod tests {
     #[test]
     fn obs_error_to_status() {
         assert_eq!(
-            MurkStatus::from(&ObsError::PlanInvalidated {
-                reason: "x".into()
-            }),
+            MurkStatus::from(&ObsError::PlanInvalidated { reason: "x".into() }),
             MurkStatus::PlanInvalidated
         );
         assert_eq!(
@@ -186,21 +184,15 @@ mod tests {
             MurkStatus::NotAvailable
         );
         assert_eq!(
-            MurkStatus::from(&ObsError::InvalidComposition {
-                reason: "x".into()
-            }),
+            MurkStatus::from(&ObsError::InvalidComposition { reason: "x".into() }),
             MurkStatus::InvalidComposition
         );
         assert_eq!(
-            MurkStatus::from(&ObsError::ExecutionFailed {
-                reason: "x".into()
-            }),
+            MurkStatus::from(&ObsError::ExecutionFailed { reason: "x".into() }),
             MurkStatus::ExecutionFailed
         );
         assert_eq!(
-            MurkStatus::from(&ObsError::InvalidObsSpec {
-                reason: "x".into()
-            }),
+            MurkStatus::from(&ObsError::InvalidObsSpec { reason: "x".into() }),
             MurkStatus::InvalidObsSpec
         );
         assert_eq!(
@@ -215,10 +207,7 @@ mod tests {
             MurkStatus::from(&IngressError::QueueFull),
             MurkStatus::QueueFull
         );
-        assert_eq!(
-            MurkStatus::from(&IngressError::Stale),
-            MurkStatus::Stale
-        );
+        assert_eq!(MurkStatus::from(&IngressError::Stale), MurkStatus::Stale);
         assert_eq!(
             MurkStatus::from(&IngressError::TickRollback),
             MurkStatus::TickRollback

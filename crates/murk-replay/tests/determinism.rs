@@ -11,9 +11,7 @@ use murk_engine::{BackoffConfig, LockstepWorld, WorldConfig};
 use murk_propagators::agent_movement::{
     new_action_buffer, ActionBuffer, AgentAction, AgentMovementPropagator, Direction,
 };
-use murk_propagators::{
-    reference_fields, DiffusionPropagator, RewardPropagator,
-};
+use murk_propagators::{reference_fields, DiffusionPropagator, RewardPropagator};
 use murk_replay::codec::{deserialize_command, serialize_command};
 use murk_replay::hash::snapshot_hash;
 use murk_replay::types::{BuildMetadata, InitDescriptor};
@@ -78,11 +76,7 @@ fn record_run(
 }
 
 /// Replay a recording through a fresh world, comparing hashes at every tick.
-fn verify_replay(
-    buf: &[u8],
-    mut world: LockstepWorld,
-    field_count: u32,
-) {
+fn verify_replay(buf: &[u8], mut world: LockstepWorld, field_count: u32) {
     let mut reader = ReplayReader::open(buf).unwrap();
 
     while let Some(frame) = reader.next_frame().unwrap() {
@@ -157,7 +151,13 @@ fn determinism_sequential_vs_jacobi() {
     let mut buf = Vec::new();
     {
         let mut writer = ReplayWriter::new(&mut buf, &meta, &init).unwrap();
-        record_run(&mut world_record, &mut writer, ticks, field_count, &|_| vec![]);
+        record_run(
+            &mut world_record,
+            &mut writer,
+            ticks,
+            field_count,
+            &|_| vec![],
+        );
     }
 
     // Replay
@@ -223,7 +223,13 @@ fn determinism_multi_source_ordering() {
     let mut buf = Vec::new();
     {
         let mut writer = ReplayWriter::new(&mut buf, &meta, &init).unwrap();
-        record_run(&mut world_record, &mut writer, ticks, field_count, &commands_for_tick);
+        record_run(
+            &mut world_record,
+            &mut writer,
+            ticks,
+            field_count,
+            &commands_for_tick,
+        );
     }
 
     // Replay
@@ -333,7 +339,13 @@ fn determinism_arena_recycling() {
     let mut buf = Vec::new();
     {
         let mut writer = ReplayWriter::new(&mut buf, &meta, &init).unwrap();
-        record_run(&mut world_record, &mut writer, ticks, field_count, &|_| vec![]);
+        record_run(
+            &mut world_record,
+            &mut writer,
+            ticks,
+            field_count,
+            &|_| vec![],
+        );
     }
 
     // Replay
@@ -403,7 +415,13 @@ fn determinism_sparse_field() {
     let mut buf = Vec::new();
     {
         let mut writer = ReplayWriter::new(&mut buf, &meta, &init).unwrap();
-        record_run(&mut world_record, &mut writer, ticks, field_count, &commands_for_tick);
+        record_run(
+            &mut world_record,
+            &mut writer,
+            ticks,
+            field_count,
+            &commands_for_tick,
+        );
     }
 
     // Replay
@@ -572,7 +590,13 @@ fn determinism_global_parameter() {
     let mut buf = Vec::new();
     {
         let mut writer = ReplayWriter::new(&mut buf, &meta, &init).unwrap();
-        record_run(&mut world_record, &mut writer, ticks, field_count, &commands_for_tick);
+        record_run(
+            &mut world_record,
+            &mut writer,
+            ticks,
+            field_count,
+            &commands_for_tick,
+        );
     }
 
     // Replay
@@ -639,7 +663,13 @@ fn determinism_large_pipeline() {
     let mut buf = Vec::new();
     {
         let mut writer = ReplayWriter::new(&mut buf, &meta, &init).unwrap();
-        record_run(&mut world_record, &mut writer, ticks, field_count, &|_| vec![]);
+        record_run(
+            &mut world_record,
+            &mut writer,
+            ticks,
+            field_count,
+            &|_| vec![],
+        );
     }
 
     // Replay

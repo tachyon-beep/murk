@@ -250,8 +250,7 @@ pub extern "C" fn murk_propagator_create(
         if def.reads_previous.is_null() {
             return MurkStatus::InvalidArgument as i32;
         }
-        let slice =
-            unsafe { std::slice::from_raw_parts(def.reads_previous, def.n_reads_previous) };
+        let slice = unsafe { std::slice::from_raw_parts(def.reads_previous, def.n_reads_previous) };
         for &id in slice {
             reads_previous.insert(FieldId(id));
         }
@@ -298,10 +297,7 @@ mod tests {
 
     // Test step function: writes constant 42.0 to field 0.
     #[allow(unsafe_code)]
-    unsafe extern "C" fn test_step_fn(
-        _user_data: *mut c_void,
-        ctx: *const MurkStepContext,
-    ) -> i32 {
+    unsafe extern "C" fn test_step_fn(_user_data: *mut c_void, ctx: *const MurkStepContext) -> i32 {
         let ctx = &*ctx;
         let mut ptr: *mut f32 = std::ptr::null_mut();
         let mut len: usize = 0;

@@ -108,7 +108,8 @@ impl WorkerEpoch {
     /// Pin this worker to the given epoch before accessing a snapshot.
     /// Records the pin-start timestamp for stall detection.
     pub fn pin(&self, epoch: u64) {
-        self.pin_start_ns.store(monotonic_nanos(), Ordering::Release);
+        self.pin_start_ns
+            .store(monotonic_nanos(), Ordering::Release);
         self.pinned.store(epoch, Ordering::Release);
     }
 
@@ -212,7 +213,10 @@ mod tests {
         assert!(!worker.is_pinned());
         assert_eq!(worker.pinned_epoch(), EPOCH_UNPINNED);
         let initial_quiesce = worker.last_quiesce_ns();
-        assert!(initial_quiesce > 0, "quiesce time should be seeded at creation");
+        assert!(
+            initial_quiesce > 0,
+            "quiesce time should be seeded at creation"
+        );
 
         // Pin to epoch 5.
         worker.pin(5);

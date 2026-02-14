@@ -132,8 +132,16 @@ mod tests {
             let f1 = arena.write_field(FieldId(1)).unwrap();
             f1.fill(2.0);
         }
-        assert!(arena.read_field(FieldId(0)).unwrap().iter().all(|&v| v == 1.0));
-        assert!(arena.read_field(FieldId(1)).unwrap().iter().all(|&v| v == 2.0));
+        assert!(arena
+            .read_field(FieldId(0))
+            .unwrap()
+            .iter()
+            .all(|&v| v == 1.0));
+        assert!(arena
+            .read_field(FieldId(1))
+            .unwrap()
+            .iter()
+            .all(|&v| v == 2.0));
     }
 
     #[test]
