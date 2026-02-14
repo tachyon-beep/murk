@@ -47,10 +47,10 @@ pub struct SerializedCommand {
     pub payload: Vec<u8>,
     /// Priority class (lower = higher priority).
     pub priority_class: u8,
-    /// Source identifier for ordering.
-    pub source_id: u64,
-    /// Per-source sequence number.
-    pub source_seq: u64,
+    /// Source identifier for ordering (`None` if not set).
+    pub source_id: Option<u64>,
+    /// Per-source sequence number (`None` if not set).
+    pub source_seq: Option<u64>,
 }
 
 /// A single tick's worth of recorded data.

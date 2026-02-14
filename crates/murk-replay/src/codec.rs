@@ -204,8 +204,22 @@ pub fn encode_frame(w: &mut dyn Write, frame: &Frame) -> Result<(), ReplayError>
         write_u8(w, cmd.payload_type)?;
         write_length_prefixed_bytes(w, &cmd.payload)?;
         write_u8(w, cmd.priority_class)?;
-        write_u64_le(w, cmd.source_id)?;
-        write_u64_le(w, cmd.source_seq)?;
+        // Presence flag + value for optional source_id
+        match cmd.source_id {
+            Some(id) => {
+                write_u8(w, 1)?;
+                write_u64_le(w, id)?;
+            }
+            None => write_u8(w, 0)?,
+        }
+        // Presence flag + value for optional source_seq
+        match cmd.source_seq {
+            Some(seq) => {
+                write_u8(w, 1)?;
+                write_u64_le(w, seq)?;
+            }
+            None => write_u8(w, 0)?,
+        }
     }
 
     write_u64_le(w, frame.snapshot_hash)?;
@@ -217,12 +231,28 @@ pub fn encode_frame(w: &mut dyn Write, frame: &Frame) -> Result<(), ReplayError>
 /// Returns `Ok(None)` on clean EOF (no bytes available), `Ok(Some(frame))`
 /// on success, or an error on truncated/corrupt data.
 pub fn decode_frame(r: &mut dyn Read) -> Result<Option<Frame>, ReplayError> {
-    // Try reading the tick_id — EOF here means no more frames.
+    // Read the tick_id header byte-by-byte to distinguish clean EOF
+    // (zero bytes available) from truncation (1-7 bytes before EOF).
     let mut tick_buf = [0u8; 8];
-    match r.read_exact(&mut tick_buf) {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
-        Err(e) => return Err(ReplayError::Io(e)),
+    let mut filled = 0;
+    while filled < 8 {
+        match r.read(&mut tick_buf[filled..]) {
+            Ok(0) => {
+                if filled == 0 {
+                    // Clean EOF — no more frames.
+                    return Ok(None);
+                }
+                // Partial tick header — truncated/corrupt file.
+                return Err(ReplayError::MalformedFrame {
+                    detail: format!(
+                        "truncated frame header: got {filled} of 8 bytes for tick_id"
+                    ),
+                });
+            }
+            Ok(n) => filled += n,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(ReplayError::Io(e)),
+        }
     }
     let tick_id = u64::from_le_bytes(tick_buf);
 
@@ -233,8 +263,16 @@ pub fn decode_frame(r: &mut dyn Read) -> Result<Option<Frame>, ReplayError> {
         let payload_type = read_u8(r)?;
         let payload = read_length_prefixed_bytes(r)?;
         let priority_class = read_u8(r)?;
-        let source_id = read_u64_le(r)?;
-        let source_seq = read_u64_le(r)?;
+        // Read optional source_id (presence flag + value)
+        let source_id = match read_u8(r)? {
+            0 => None,
+            _ => Some(read_u64_le(r)?),
+        };
+        // Read optional source_seq (presence flag + value)
+        let source_seq = match read_u8(r)? {
+            0 => None,
+            _ => Some(read_u64_le(r)?),
+        };
 
         commands.push(SerializedCommand {
             payload_type,
@@ -362,8 +400,8 @@ pub fn serialize_command(cmd: &Command) -> SerializedCommand {
         payload_type,
         payload,
         priority_class: cmd.priority_class,
-        source_id: cmd.source_id.unwrap_or(0),
-        source_seq: cmd.source_seq.unwrap_or(0),
+        source_id: cmd.source_id,
+        source_seq: cmd.source_seq,
     }
 }
 
@@ -499,23 +537,11 @@ pub fn deserialize_command(sc: &SerializedCommand) -> Result<Command, ReplayErro
         tag => return Err(ReplayError::UnknownPayloadType { tag }),
     };
 
-    // source_id/source_seq: 0 means "not set" → map to None
-    let source_id = if sc.source_id != 0 {
-        Some(sc.source_id)
-    } else {
-        None
-    };
-    let source_seq = if sc.source_seq != 0 {
-        Some(sc.source_seq)
-    } else {
-        None
-    };
-
     Ok(Command {
         payload,
         expires_after_tick: TickId(u64::MAX),
-        source_id,
-        source_seq,
+        source_id: sc.source_id,
+        source_seq: sc.source_seq,
         priority_class: sc.priority_class,
         arrival_seq: 0,
     })
@@ -533,92 +559,123 @@ mod tests {
         prop::collection::vec(-1000i32..1000, 1..=4).prop_map(|v| Coord::from_vec(v))
     }
 
+    /// Strategy for optional u64 that includes None, Some(0), and arbitrary values.
+    fn arb_opt_u64() -> impl Strategy<Value = Option<u64>> {
+        prop_oneof![
+            Just(None),
+            Just(Some(0u64)),
+            any::<u64>().prop_map(Some),
+        ]
+    }
+
     fn arb_command() -> impl Strategy<Value = Command> {
         prop_oneof![
             // Move
-            (any::<u64>(), arb_coord()).prop_map(|(eid, coord)| Command {
-                payload: CommandPayload::Move {
-                    entity_id: eid,
-                    target_coord: coord,
-                },
-                expires_after_tick: TickId(u64::MAX),
-                source_id: Some(1),
-                source_seq: Some(1),
-                priority_class: 1,
-                arrival_seq: 0,
-            }),
+            (any::<u64>(), arb_coord(), arb_opt_u64(), arb_opt_u64()).prop_map(
+                |(eid, coord, sid, sseq)| Command {
+                    payload: CommandPayload::Move {
+                        entity_id: eid,
+                        target_coord: coord,
+                    },
+                    expires_after_tick: TickId(u64::MAX),
+                    source_id: sid,
+                    source_seq: sseq,
+                    priority_class: 1,
+                    arrival_seq: 0,
+                }
+            ),
             // Spawn
             (
                 arb_coord(),
-                prop::collection::vec((0u32..10, any::<f32>()), 0..4)
+                prop::collection::vec((0u32..10, any::<f32>()), 0..4),
+                arb_opt_u64(),
+                arb_opt_u64(),
             )
-                .prop_map(|(coord, fvs)| Command {
+                .prop_map(|(coord, fvs, sid, sseq)| Command {
                     payload: CommandPayload::Spawn {
                         coord,
                         field_values: fvs.into_iter().map(|(f, v)| (FieldId(f), v)).collect(),
                     },
                     expires_after_tick: TickId(u64::MAX),
-                    source_id: Some(2),
-                    source_seq: Some(2),
+                    source_id: sid,
+                    source_seq: sseq,
                     priority_class: 0,
                     arrival_seq: 0,
                 }),
             // Despawn
-            any::<u64>().prop_map(|eid| Command {
+            (any::<u64>(), arb_opt_u64(), arb_opt_u64()).prop_map(|(eid, sid, sseq)| Command {
                 payload: CommandPayload::Despawn { entity_id: eid },
                 expires_after_tick: TickId(u64::MAX),
-                source_id: Some(3),
-                source_seq: Some(3),
+                source_id: sid,
+                source_seq: sseq,
                 priority_class: 1,
                 arrival_seq: 0,
             }),
             // SetField
-            (arb_coord(), 0u32..10, any::<f32>()).prop_map(|(coord, fid, val)| Command {
-                payload: CommandPayload::SetField {
-                    coord,
-                    field_id: FieldId(fid),
-                    value: val,
-                },
-                expires_after_tick: TickId(u64::MAX),
-                source_id: Some(4),
-                source_seq: Some(4),
-                priority_class: 1,
-                arrival_seq: 0,
-            }),
-            // Custom
-            (0u32..100, prop::collection::vec(any::<u8>(), 0..32)).prop_map(|(tid, data)| {
-                Command {
-                    payload: CommandPayload::Custom { type_id: tid, data },
+            (arb_coord(), 0u32..10, any::<f32>(), arb_opt_u64(), arb_opt_u64()).prop_map(
+                |(coord, fid, val, sid, sseq)| Command {
+                    payload: CommandPayload::SetField {
+                        coord,
+                        field_id: FieldId(fid),
+                        value: val,
+                    },
                     expires_after_tick: TickId(u64::MAX),
-                    source_id: Some(5),
-                    source_seq: Some(5),
+                    source_id: sid,
+                    source_seq: sseq,
                     priority_class: 1,
                     arrival_seq: 0,
                 }
-            }),
+            ),
+            // Custom
+            (
+                0u32..100,
+                prop::collection::vec(any::<u8>(), 0..32),
+                arb_opt_u64(),
+                arb_opt_u64(),
+            )
+                .prop_map(|(tid, data, sid, sseq)| {
+                    Command {
+                        payload: CommandPayload::Custom { type_id: tid, data },
+                        expires_after_tick: TickId(u64::MAX),
+                        source_id: sid,
+                        source_seq: sseq,
+                        priority_class: 1,
+                        arrival_seq: 0,
+                    }
+                }),
             // SetParameter
-            (0u32..10, any::<f64>()).prop_map(|(k, v)| Command {
-                payload: CommandPayload::SetParameter {
-                    key: ParameterKey(k),
-                    value: v,
-                },
-                expires_after_tick: TickId(u64::MAX),
-                source_id: Some(6),
-                source_seq: Some(6),
-                priority_class: 1,
-                arrival_seq: 0,
-            }),
+            (0u32..10, any::<f64>(), arb_opt_u64(), arb_opt_u64()).prop_map(
+                |(k, v, sid, sseq)| Command {
+                    payload: CommandPayload::SetParameter {
+                        key: ParameterKey(k),
+                        value: v,
+                    },
+                    expires_after_tick: TickId(u64::MAX),
+                    source_id: sid,
+                    source_seq: sseq,
+                    priority_class: 1,
+                    arrival_seq: 0,
+                }
+            ),
             // SetParameterBatch
-            prop::collection::vec((0u32..10, any::<f64>()), 1..4).prop_map(|params| Command {
-                payload: CommandPayload::SetParameterBatch {
-                    params: params.into_iter().map(|(k, v)| (ParameterKey(k), v)).collect(),
-                },
-                expires_after_tick: TickId(u64::MAX),
-                source_id: Some(7),
-                source_seq: Some(7),
-                priority_class: 1,
-                arrival_seq: 0,
-            }),
+            (
+                prop::collection::vec((0u32..10, any::<f64>()), 1..4),
+                arb_opt_u64(),
+                arb_opt_u64(),
+            )
+                .prop_map(|(params, sid, sseq)| Command {
+                    payload: CommandPayload::SetParameterBatch {
+                        params: params
+                            .into_iter()
+                            .map(|(k, v)| (ParameterKey(k), v))
+                            .collect(),
+                    },
+                    expires_after_tick: TickId(u64::MAX),
+                    source_id: sid,
+                    source_seq: sseq,
+                    priority_class: 1,
+                    arrival_seq: 0,
+                }),
         ]
     }
 
@@ -747,6 +804,8 @@ mod tests {
             // Compare payloads (expires_after_tick and arrival_seq differ by design)
             prop_assert_eq!(&cmd.payload, &got.payload);
             prop_assert_eq!(cmd.priority_class, got.priority_class);
+            prop_assert_eq!(cmd.source_id, got.source_id);
+            prop_assert_eq!(cmd.source_seq, got.source_seq);
         }
     }
 
@@ -808,5 +867,144 @@ mod tests {
         let buf: Vec<u8> = Vec::new();
         let got = decode_frame(&mut buf.as_slice()).unwrap();
         assert!(got.is_none());
+    }
+
+    // ── P1: Partial tick header detection ────────────────────────
+
+    #[test]
+    fn partial_tick_header_is_error_not_eof() {
+        // 1-7 bytes of a tick header should be treated as corruption,
+        // not clean EOF.
+        for partial_len in 1..=7 {
+            let buf = vec![0xAA; partial_len];
+            let result = decode_frame(&mut buf.as_slice());
+            assert!(
+                result.is_err(),
+                "expected error for {partial_len}-byte partial tick header, got Ok"
+            );
+            let err = result.unwrap_err();
+            match &err {
+                ReplayError::MalformedFrame { detail } => {
+                    assert!(
+                        detail.contains("truncated frame header"),
+                        "wrong error detail for {partial_len} bytes: {detail}"
+                    );
+                }
+                other => panic!(
+                    "expected MalformedFrame for {partial_len} bytes, got {other:?}"
+                ),
+            }
+        }
+    }
+
+    #[test]
+    fn complete_tick_header_but_truncated_body_is_error() {
+        // A full 8-byte tick_id followed by truncated body must also error.
+        let buf = 42u64.to_le_bytes().to_vec();
+        let result = decode_frame(&mut buf.as_slice());
+        assert!(result.is_err(), "truncated frame body should error");
+    }
+
+    // ── P2: source_id/source_seq Option round-trip ──────────────
+
+    #[test]
+    fn source_id_none_roundtrips() {
+        let cmd = Command {
+            payload: CommandPayload::Despawn { entity_id: 1 },
+            expires_after_tick: TickId(u64::MAX),
+            source_id: None,
+            source_seq: None,
+            priority_class: 1,
+            arrival_seq: 0,
+        };
+        let sc = serialize_command(&cmd);
+        assert_eq!(sc.source_id, None);
+        assert_eq!(sc.source_seq, None);
+        let got = deserialize_command(&sc).unwrap();
+        assert_eq!(got.source_id, None);
+        assert_eq!(got.source_seq, None);
+    }
+
+    #[test]
+    fn source_id_some_zero_roundtrips_as_some_zero() {
+        // This is the critical case: Some(0) must NOT become None.
+        let cmd = Command {
+            payload: CommandPayload::Despawn { entity_id: 1 },
+            expires_after_tick: TickId(u64::MAX),
+            source_id: Some(0),
+            source_seq: Some(0),
+            priority_class: 1,
+            arrival_seq: 0,
+        };
+        let sc = serialize_command(&cmd);
+        assert_eq!(sc.source_id, Some(0));
+        assert_eq!(sc.source_seq, Some(0));
+        let got = deserialize_command(&sc).unwrap();
+        assert_eq!(got.source_id, Some(0));
+        assert_eq!(got.source_seq, Some(0));
+    }
+
+    #[test]
+    fn source_id_some_zero_frame_roundtrip() {
+        // Verify the wire format also preserves Some(0) through
+        // encode_frame → decode_frame.
+        let frame = Frame {
+            tick_id: 1,
+            commands: vec![SerializedCommand {
+                payload_type: PAYLOAD_DESPAWN,
+                payload: 99u64.to_le_bytes().to_vec(),
+                priority_class: 1,
+                source_id: Some(0),
+                source_seq: Some(0),
+            }],
+            snapshot_hash: 0,
+        };
+
+        let mut buf = Vec::new();
+        encode_frame(&mut buf, &frame).unwrap();
+        let got = decode_frame(&mut buf.as_slice()).unwrap().unwrap();
+        assert_eq!(got.commands[0].source_id, Some(0));
+        assert_eq!(got.commands[0].source_seq, Some(0));
+    }
+
+    #[test]
+    fn source_none_vs_some_zero_distinguishable_on_wire() {
+        // Verify that None and Some(0) produce different wire bytes.
+        let frame_none = Frame {
+            tick_id: 1,
+            commands: vec![SerializedCommand {
+                payload_type: PAYLOAD_DESPAWN,
+                payload: 1u64.to_le_bytes().to_vec(),
+                priority_class: 1,
+                source_id: None,
+                source_seq: None,
+            }],
+            snapshot_hash: 0,
+        };
+        let frame_zero = Frame {
+            tick_id: 1,
+            commands: vec![SerializedCommand {
+                payload_type: PAYLOAD_DESPAWN,
+                payload: 1u64.to_le_bytes().to_vec(),
+                priority_class: 1,
+                source_id: Some(0),
+                source_seq: Some(0),
+            }],
+            snapshot_hash: 0,
+        };
+
+        let mut buf_none = Vec::new();
+        encode_frame(&mut buf_none, &frame_none).unwrap();
+        let mut buf_zero = Vec::new();
+        encode_frame(&mut buf_zero, &frame_zero).unwrap();
+
+        // Different wire representations
+        assert_ne!(buf_none, buf_zero);
+
+        // Both round-trip correctly
+        let got_none = decode_frame(&mut buf_none.as_slice()).unwrap().unwrap();
+        let got_zero = decode_frame(&mut buf_zero.as_slice()).unwrap().unwrap();
+        assert_eq!(got_none.commands[0].source_id, None);
+        assert_eq!(got_zero.commands[0].source_id, Some(0));
     }
 }
