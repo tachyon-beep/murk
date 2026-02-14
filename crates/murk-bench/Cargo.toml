@@ -15,9 +15,30 @@ murk-space = { path = "../murk-space" }
 
 [dev-dependencies]
 criterion = { workspace = true }
+murk-arena = { path = "../murk-arena" }
+murk-obs = { path = "../murk-obs" }
+murk-replay = { path = "../murk-replay" }
+murk-test-utils = { path = "../murk-test-utils" }
+smallvec = "1"
 
 [[bench]]
 name = "reference_profile"
+harness = false
+
+[[bench]]
+name = "arena_ops"
+harness = false
+
+[[bench]]
+name = "space_ops"
+harness = false
+
+[[bench]]
+name = "obs_ops"
+harness = false
+
+[[bench]]
+name = "codec_ops"
 harness = false
 
 [[example]]

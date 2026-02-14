@@ -431,10 +431,15 @@ name = "murk-bench"
 version = "0.1.0"
 dependencies = [
  "criterion",
+ "murk-arena",
  "murk-core",
  "murk-engine",
+ "murk-obs",
  "murk-propagators",
+ "murk-replay",
  "murk-space",
+ "murk-test-utils",
+ "smallvec",
 ]
 
 [[package]]
@@ -453,9 +458,11 @@ dependencies = [
  "crossbeam-channel",
  "indexmap",
  "murk-arena",
+ "murk-bench",
  "murk-core",
  "murk-obs",
  "murk-propagator",
+ "murk-propagators",
  "murk-space",
  "murk-test-utils",
  "proptest",

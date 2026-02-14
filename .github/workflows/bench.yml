@@ -1,0 +1,47 @@
+name: Benchmarks
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # Nightly at 2am UTC
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+# Only allow one benchmark run at a time to avoid gh-pages push conflicts
+concurrency:
+  group: benchmarks
+  cancel-in-progress: false
+
+jobs:
+  benchmark:
+    name: benchmark regression check
+    # TODO: switch to self-hosted runner for stable, isolated benchmark numbers
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: bench
+
+      - name: Run benchmarks
+        run: cargo bench --workspace -- --output-format bencher 2>&1 | tee bench_output.txt
+
+      - name: Store benchmark results
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: Murk Benchmarks
+          tool: cargo
+          output-file-path: bench_output.txt
+          gh-pages-branch: gh-pages
+          benchmark-data-dir-path: dev/bench
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true
+          alert-threshold: '105%'
+          fail-threshold: '110%'
+          comment-on-alert: true
+          alert-comment-cc-users: '@tachyon-beep'
