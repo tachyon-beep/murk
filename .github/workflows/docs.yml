@@ -2,9 +2,22 @@ name: Docs
 
 on: [push, pull_request]
 
+# Allow only one concurrent deployment, skipping runs queued between the
+# run in-progress and latest queued.  Do NOT cancel in-progress runs so
+# the CI "cargo doc" check still completes on every push.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
 env:
   CARGO_TERM_COLOR: always
   RUSTDOCFLAGS: "-D warnings"
+
+# Permissions needed for GitHub Pages deployment.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
 
 jobs:
   docs:
@@ -17,3 +30,26 @@ jobs:
         with:
           shared-key: docs
       - run: cargo doc --workspace --no-deps
+
+      # Upload the generated docs as a Pages artifact (only on main).
+      - name: Add redirect index page
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: echo '<meta http-equiv="refresh" content="0; url=murk_core/index.html">' > target/doc/index.html
+      - name: Upload Pages artifact
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: target/doc
+
+  deploy:
+    name: Deploy to GitHub Pages
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: docs
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

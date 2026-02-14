@@ -1,5 +1,8 @@
 # Murk
 
+[![CI](https://github.com/tachyon-beep/murk/actions/workflows/ci.yml/badge.svg)](https://github.com/tachyon-beep/murk/actions/workflows/ci.yml)
+[![Docs](https://github.com/tachyon-beep/murk/actions/workflows/docs.yml/badge.svg)](https://tachyon-beep.github.io/murk/)
+
 A world simulation engine for reinforcement learning and real-time applications.
 
 Murk provides a tick-based simulation core with pluggable spatial backends,
@@ -151,6 +154,10 @@ for _ in range(1000):
 
 See [`docs/CONCEPTS.md`](docs/CONCEPTS.md) for a guide to Murk's mental model
 (spaces, fields, propagators, commands, observations).
+
+## Documentation
+
+- **[API Reference (rustdoc)](https://tachyon-beep.github.io/murk/)** — auto-published on every push to `main`
 
 ## Design
 
