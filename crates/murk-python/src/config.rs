@@ -278,7 +278,12 @@ impl Config {
         depth: u32,
         edge: EdgeBehavior,
     ) -> PyResult<()> {
-        let params = [width as f64, height as f64, depth as f64, edge as i32 as f64];
+        let params = [
+            width as f64,
+            height as f64,
+            depth as f64,
+            edge as i32 as f64,
+        ];
         self._set_space_raw(py, SpaceType::Fcc12 as i32, &params)
     }
 
