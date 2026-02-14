@@ -13,6 +13,7 @@ from murk._murk import (
     ObsEntry,
     PropagatorDef,
     SpaceType,
+    WriteMode,
 )
 from murk.env import MurkEnv
 
@@ -30,7 +31,7 @@ class SimpleEnv(MurkEnv):
         def step_fn(reads, reads_prev, writes, tick_id, dt, cell_count):
             writes[0][:] = float(tick_id)
 
-        prop = PropagatorDef("inc", step_fn, writes=[(0, 0)])
+        prop = PropagatorDef("inc", step_fn, writes=[(0, WriteMode.Full)])
         prop.register(cfg)
 
         obs_entries = [ObsEntry(0)]
@@ -162,7 +163,7 @@ def test_gymnasium_custom_action_space():
     def step_fn(reads, reads_prev, writes, tick_id, dt, cell_count):
         writes[0][:] = 0.0
 
-    prop = PropagatorDef("noop", step_fn, writes=[(0, 0)])
+    prop = PropagatorDef("noop", step_fn, writes=[(0, WriteMode.Full)])
     prop.register(cfg)
 
     custom_space = spaces.Box(low=-1.0, high=1.0, shape=(3,), dtype=np.float32)

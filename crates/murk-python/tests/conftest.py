@@ -12,6 +12,7 @@ from murk._murk import (
     PropagatorDef,
     SpaceType,
     World,
+    WriteMode,
 )
 
 
@@ -30,7 +31,7 @@ def make_const_world(value=7.0, n_cells=10, seed=42):
     cfg.set_dt(0.1)
     cfg.set_seed(seed)
 
-    prop = PropagatorDef("const", step_fn, writes=[(0, 0)])
+    prop = PropagatorDef("const", step_fn, writes=[(0, WriteMode.Full)])
     prop.register(cfg)
 
     world = World(cfg)
@@ -60,7 +61,7 @@ def make_grid_world(width=5, height=5, n_fields=4, seed=42, step_fn=None):
     cfg.set_dt(0.1)
     cfg.set_seed(seed)
 
-    writes = [(i, 0) for i in range(n_fields)]
+    writes = [(i, WriteMode.Full) for i in range(n_fields)]
     prop = PropagatorDef("grid_prop", step_fn, writes=writes)
     prop.register(cfg)
 

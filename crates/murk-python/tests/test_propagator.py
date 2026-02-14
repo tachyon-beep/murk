@@ -11,6 +11,7 @@ from murk._murk import (
     PropagatorDef,
     SpaceType,
     World,
+    WriteMode,
 )
 
 
@@ -26,7 +27,7 @@ def test_python_propagator_writes_values():
     cfg.set_dt(0.1)
     cfg.set_seed(0)
 
-    prop = PropagatorDef("writer", step_fn, writes=[(0, 0)])
+    prop = PropagatorDef("writer", step_fn, writes=[(0, WriteMode.Full)])
     prop.register(cfg)
 
     world = World(cfg)
@@ -50,7 +51,7 @@ def test_python_propagator_uses_tick_id():
     cfg.set_dt(0.1)
     cfg.set_seed(0)
 
-    prop = PropagatorDef("ticker", step_fn, writes=[(0, 0)])
+    prop = PropagatorDef("ticker", step_fn, writes=[(0, WriteMode.Full)])
     prop.register(cfg)
 
     world = World(cfg)
@@ -78,7 +79,7 @@ def test_python_propagator_cell_count():
     cfg.set_dt(0.1)
     cfg.set_seed(0)
 
-    prop = PropagatorDef("counter", step_fn, writes=[(0, 0)])
+    prop = PropagatorDef("counter", step_fn, writes=[(0, WriteMode.Full)])
     prop.register(cfg)
 
     world = World(cfg)
@@ -101,7 +102,7 @@ def test_python_propagator_multiple_writes():
     cfg.set_dt(0.1)
     cfg.set_seed(0)
 
-    prop = PropagatorDef("multi", step_fn, writes=[(0, 0), (1, 0)])
+    prop = PropagatorDef("multi", step_fn, writes=[(0, WriteMode.Full), (1, WriteMode.Full)])
     prop.register(cfg)
 
     world = World(cfg)
@@ -130,7 +131,7 @@ def test_python_propagator_dt_passed():
     cfg.set_dt(0.05)
     cfg.set_seed(0)
 
-    prop = PropagatorDef("dt_checker", step_fn, writes=[(0, 0)])
+    prop = PropagatorDef("dt_checker", step_fn, writes=[(0, WriteMode.Full)])
     prop.register(cfg)
 
     world = World(cfg)
@@ -152,7 +153,7 @@ def test_python_propagator_convenience_function():
     cfg.set_dt(0.1)
     cfg.set_seed(0)
 
-    add_propagator(cfg, "conv", step_fn, writes=[(0, 0)])
+    add_propagator(cfg, "conv", step_fn, writes=[(0, WriteMode.Full)])
 
     world = World(cfg)
     world.step()
@@ -160,4 +161,28 @@ def test_python_propagator_convenience_function():
     buf = np.zeros(5, dtype=np.float32)
     world.read_field(0, buf)
     np.testing.assert_array_equal(buf, 99.0)
+    world.destroy()
+
+
+def test_propagator_accepts_write_mode_enum():
+    """PropagatorDef accepts WriteMode enum in write tuples."""
+
+    def step_fn(reads, reads_prev, writes, tick_id, dt, cell_count):
+        writes[0][:] = 1.0
+
+    cfg = Config()
+    cfg.set_space(SpaceType.Line1D, [5.0, 0.0])
+    cfg.add_field("x", mutability=FieldMutability.PerTick)
+    cfg.set_dt(0.1)
+    cfg.set_seed(0)
+
+    prop = PropagatorDef("writer", step_fn, writes=[(0, WriteMode.Full)])
+    prop.register(cfg)
+
+    world = World(cfg)
+    world.step()
+
+    buf = np.zeros(5, dtype=np.float32)
+    world.read_field(0, buf)
+    np.testing.assert_array_equal(buf, 1.0)
     world.destroy()

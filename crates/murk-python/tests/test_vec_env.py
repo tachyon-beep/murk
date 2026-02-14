@@ -9,6 +9,7 @@ from murk._murk import (
     ObsEntry,
     PropagatorDef,
     SpaceType,
+    WriteMode,
 )
 from murk.env import MurkEnv
 from murk.vec_env import MurkVecEnv
@@ -27,7 +28,7 @@ class CountEnv(MurkEnv):
         def step_fn(reads, reads_prev, writes, tick_id, dt, cell_count):
             writes[0][:] = float(tick_id)
 
-        prop = PropagatorDef("count", step_fn, writes=[(0, 0)])
+        prop = PropagatorDef("count", step_fn, writes=[(0, WriteMode.Full)])
         prop.register(cfg)
 
         super().__init__(cfg, [ObsEntry(0)], n_actions=2, seed=seed)

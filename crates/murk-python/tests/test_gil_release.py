@@ -12,6 +12,7 @@ from murk._murk import (
     PropagatorDef,
     SpaceType,
     World,
+    WriteMode,
 )
 
 
@@ -28,7 +29,7 @@ def _make_world(seed=42, n_cells=100):
     cfg.set_dt(0.01)
     cfg.set_seed(seed)
 
-    prop = PropagatorDef("work", step_fn, writes=[(0, 0)])
+    prop = PropagatorDef("work", step_fn, writes=[(0, WriteMode.Full)])
     prop.register(cfg)
 
     return World(cfg)

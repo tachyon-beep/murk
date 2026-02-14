@@ -16,6 +16,7 @@ from murk._murk import (
     ObsEntry,
     PropagatorDef,
     SpaceType,
+    WriteMode,
 )
 from murk.env import MurkEnv
 
@@ -71,7 +72,7 @@ class GridNavEnv(MurkEnv):
             "nav",
             self._nav,
             reads=[0, 1, 2, 3],
-            writes=[(0, 0), (1, 0), (2, 0), (3, 0)],
+            writes=[(0, WriteMode.Full), (1, WriteMode.Full), (2, WriteMode.Full), (3, WriteMode.Full)],
         )
         prop.register(cfg)
 

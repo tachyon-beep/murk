@@ -11,6 +11,7 @@ use pyo3::types::PyList;
 
 use murk_ffi::{murk_propagator_create, MurkPropagatorDef, MurkStepContext, MurkWriteDecl};
 
+use crate::command::WriteMode;
 use crate::config::Config;
 use crate::error::check_status;
 
@@ -40,7 +41,7 @@ pub(crate) struct PropagatorDef {
     step_fn: PyObject,
     reads: Vec<u32>,
     reads_previous: Vec<u32>,
-    writes: Vec<(u32, i32)>, // (field_id, write_mode)
+    writes: Vec<(u32, WriteMode)>, // (field_id, write_mode)
 }
 
 #[pymethods]
@@ -52,7 +53,7 @@ impl PropagatorDef {
     ///     step_fn: Python callable `(reads, reads_prev, writes, tick_id, dt, cell_count) -> None`.
     ///     reads: List of field IDs to read (current tick).
     ///     reads_previous: List of field IDs to read (previous tick).
-    ///     writes: List of (field_id, write_mode) tuples. write_mode: 0=Full, 1=Incremental.
+    ///     writes: List of (field_id, WriteMode) tuples.
     #[new]
     #[pyo3(signature = (name, step_fn, reads=vec![], reads_previous=vec![], writes=vec![]))]
     fn new(
@@ -60,7 +61,7 @@ impl PropagatorDef {
         step_fn: PyObject,
         reads: Vec<u32>,
         reads_previous: Vec<u32>,
-        writes: Vec<(u32, i32)>,
+        writes: Vec<(u32, WriteMode)>,
     ) -> Self {
         PropagatorDef {
             name,
@@ -93,7 +94,7 @@ impl PropagatorDef {
             .iter()
             .map(|(fid, mode)| MurkWriteDecl {
                 field_id: *fid,
-                mode: *mode,
+                mode: *mode as i32,
             })
             .collect();
 
@@ -156,7 +157,7 @@ pub(crate) fn add_propagator(
     step_fn: PyObject,
     reads: Vec<u32>,
     reads_previous: Vec<u32>,
-    writes: Vec<(u32, i32)>,
+    writes: Vec<(u32, WriteMode)>,
 ) -> PyResult<()> {
     let def = PropagatorDef {
         name,
