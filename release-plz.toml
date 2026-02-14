@@ -1,0 +1,23 @@
+[workspace]
+changelog_update = true
+git_tag_enable = true
+publish_allow_dirty = false
+
+# Don't publish internal crates
+[[package]]
+name = "murk-test-utils"
+publish = false
+changelog_update = false
+git_tag_enable = false
+
+[[package]]
+name = "murk-bench"
+publish = false
+changelog_update = false
+git_tag_enable = false
+
+[[package]]
+name = "murk-python"
+publish = false
+changelog_update = false
+git_tag_enable = false
