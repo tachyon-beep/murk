@@ -5,12 +5,12 @@ import pytest
 
 from murk._murk import (
     Config,
+    EdgeBehavior,
     FieldMutability,
     FieldType,
     ObsEntry,
     ObsPlan,
     PropagatorDef,
-    SpaceType,
     World,
     WriteMode,
 )
@@ -26,7 +26,7 @@ def make_const_world(value=7.0, n_cells=10, seed=42):
         writes[0][:] = value
 
     cfg = Config()
-    cfg.set_space(SpaceType.Line1D, [float(n_cells), 0.0])
+    cfg.set_space_line1d(n_cells, EdgeBehavior.Absorb)
     cfg.add_field("energy", mutability=FieldMutability.PerTick)
     cfg.set_dt(0.1)
     cfg.set_seed(seed)
@@ -55,7 +55,7 @@ def make_grid_world(width=5, height=5, n_fields=4, seed=42, step_fn=None):
                 w[:] = 0.0
 
     cfg = Config()
-    cfg.set_space(SpaceType.Square4, [float(width), float(height), 0.0])
+    cfg.set_space_square4(width, height, EdgeBehavior.Absorb)
     for i in range(n_fields):
         cfg.add_field(f"field_{i}", mutability=FieldMutability.PerTick)
     cfg.set_dt(0.1)

@@ -5,11 +5,11 @@ import pytest
 
 from murk._murk import (
     Config,
+    EdgeBehavior,
     FieldMutability,
     ObsEntry,
     ObsPlan,
     PropagatorDef,
-    SpaceType,
     World,
     WriteMode,
 )
@@ -22,7 +22,7 @@ def test_python_propagator_writes_values():
         writes[0][:] = 42.0
 
     cfg = Config()
-    cfg.set_space(SpaceType.Line1D, [5.0, 0.0])
+    cfg.set_space_line1d(5, EdgeBehavior.Absorb)
     cfg.add_field("x", mutability=FieldMutability.PerTick)
     cfg.set_dt(0.1)
     cfg.set_seed(0)
@@ -46,7 +46,7 @@ def test_python_propagator_uses_tick_id():
         writes[0][:] = float(tick_id)
 
     cfg = Config()
-    cfg.set_space(SpaceType.Line1D, [5.0, 0.0])
+    cfg.set_space_line1d(5, EdgeBehavior.Absorb)
     cfg.add_field("x", mutability=FieldMutability.PerTick)
     cfg.set_dt(0.1)
     cfg.set_seed(0)
@@ -74,7 +74,7 @@ def test_python_propagator_cell_count():
         writes[0][:] = 0.0
 
     cfg = Config()
-    cfg.set_space(SpaceType.Square4, [3.0, 4.0, 0.0])  # 3x4 = 12 cells
+    cfg.set_space_square4(3, 4, EdgeBehavior.Absorb)  # 3x4 = 12 cells
     cfg.add_field("x", mutability=FieldMutability.PerTick)
     cfg.set_dt(0.1)
     cfg.set_seed(0)
@@ -96,7 +96,7 @@ def test_python_propagator_multiple_writes():
         writes[1][:] = 2.0
 
     cfg = Config()
-    cfg.set_space(SpaceType.Line1D, [5.0, 0.0])
+    cfg.set_space_line1d(5, EdgeBehavior.Absorb)
     cfg.add_field("a", mutability=FieldMutability.PerTick)
     cfg.add_field("b", mutability=FieldMutability.PerTick)
     cfg.set_dt(0.1)
@@ -126,7 +126,7 @@ def test_python_propagator_dt_passed():
         writes[0][:] = 0.0
 
     cfg = Config()
-    cfg.set_space(SpaceType.Line1D, [5.0, 0.0])
+    cfg.set_space_line1d(5, EdgeBehavior.Absorb)
     cfg.add_field("x", mutability=FieldMutability.PerTick)
     cfg.set_dt(0.05)
     cfg.set_seed(0)
@@ -148,7 +148,7 @@ def test_python_propagator_convenience_function():
         writes[0][:] = 99.0
 
     cfg = Config()
-    cfg.set_space(SpaceType.Line1D, [5.0, 0.0])
+    cfg.set_space_line1d(5, EdgeBehavior.Absorb)
     cfg.add_field("x", mutability=FieldMutability.PerTick)
     cfg.set_dt(0.1)
     cfg.set_seed(0)
@@ -171,7 +171,7 @@ def test_propagator_accepts_write_mode_enum():
         writes[0][:] = 1.0
 
     cfg = Config()
-    cfg.set_space(SpaceType.Line1D, [5.0, 0.0])
+    cfg.set_space_line1d(5, EdgeBehavior.Absorb)
     cfg.add_field("x", mutability=FieldMutability.PerTick)
     cfg.set_dt(0.1)
     cfg.set_seed(0)

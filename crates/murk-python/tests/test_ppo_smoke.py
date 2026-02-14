@@ -12,10 +12,10 @@ from gymnasium import spaces
 
 from murk._murk import (
     Config,
+    EdgeBehavior,
     FieldMutability,
     ObsEntry,
     PropagatorDef,
-    SpaceType,
     WriteMode,
 )
 from murk.env import MurkEnv
@@ -62,7 +62,7 @@ class GridNavEnv(MurkEnv):
         self._nav = NavState(self.GRID_SIZE)
 
         cfg = Config()
-        cfg.set_space(SpaceType.Square4, [10.0, 10.0, 0.0])
+        cfg.set_space_square4(10, 10, EdgeBehavior.Absorb)
         for name in ["agent_x", "agent_y", "target_x", "target_y"]:
             cfg.add_field(name, mutability=FieldMutability.PerTick)
         cfg.set_dt(0.1)

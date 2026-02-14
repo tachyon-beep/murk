@@ -9,10 +9,10 @@ from gymnasium import spaces
 from murk._murk import (
     Config,
     Command,
+    EdgeBehavior,
     FieldMutability,
     ObsEntry,
     PropagatorDef,
-    SpaceType,
     WriteMode,
 )
 from murk.env import MurkEnv
@@ -23,7 +23,7 @@ class SimpleEnv(MurkEnv):
 
     def __init__(self, seed=42):
         cfg = Config()
-        cfg.set_space(SpaceType.Line1D, [10.0, 0.0])
+        cfg.set_space_line1d(10, EdgeBehavior.Absorb)
         cfg.add_field("value", mutability=FieldMutability.PerTick)
         cfg.set_dt(0.1)
         cfg.set_seed(seed)
@@ -155,7 +155,7 @@ def test_gymnasium_last_step_metrics():
 def test_gymnasium_custom_action_space():
     """Custom action_space is respected."""
     cfg = Config()
-    cfg.set_space(SpaceType.Line1D, [5.0, 0.0])
+    cfg.set_space_line1d(5, EdgeBehavior.Absorb)
     cfg.add_field("x", mutability=FieldMutability.PerTick)
     cfg.set_dt(0.1)
     cfg.set_seed(0)

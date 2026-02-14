@@ -8,9 +8,9 @@ import pytest
 
 from murk._murk import (
     Config,
+    EdgeBehavior,
     FieldMutability,
     PropagatorDef,
-    SpaceType,
     World,
     WriteMode,
 )
@@ -24,7 +24,7 @@ def _make_world(seed=42, n_cells=100):
         writes[0][:] = float(tick_id) * 0.1
 
     cfg = Config()
-    cfg.set_space(SpaceType.Line1D, [float(n_cells), 0.0])
+    cfg.set_space_line1d(n_cells, EdgeBehavior.Absorb)
     cfg.add_field("x", mutability=FieldMutability.PerTick)
     cfg.set_dt(0.01)
     cfg.set_seed(seed)

@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from murk._murk import Command, Config, FieldMutability, SpaceType, World, PropagatorDef
+from murk._murk import Command, Config, FieldMutability, World, PropagatorDef
 
 from conftest import make_const_world
 

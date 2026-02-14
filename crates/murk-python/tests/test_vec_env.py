@@ -5,10 +5,10 @@ import pytest
 
 from murk._murk import (
     Config,
+    EdgeBehavior,
     FieldMutability,
     ObsEntry,
     PropagatorDef,
-    SpaceType,
     WriteMode,
 )
 from murk.env import MurkEnv
@@ -20,7 +20,7 @@ class CountEnv(MurkEnv):
 
     def __init__(self, seed=42):
         cfg = Config()
-        cfg.set_space(SpaceType.Line1D, [5.0, 0.0])
+        cfg.set_space_line1d(5, EdgeBehavior.Absorb)
         cfg.add_field("x", mutability=FieldMutability.PerTick)
         cfg.set_dt(0.1)
         cfg.set_seed(seed)
