@@ -230,6 +230,7 @@ mod tests {
         assert!(desc.get(FieldId(99)).is_none());
     }
 
+    #[cfg(not(miri))]
     mod proptests {
         use super::*;
         use murk_core::{BoundaryBehavior, FieldType};

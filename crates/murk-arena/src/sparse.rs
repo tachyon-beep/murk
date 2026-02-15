@@ -221,6 +221,7 @@ mod tests {
         assert_eq!(slab.total_slots(), 1);
     }
 
+    #[cfg(not(miri))]
     mod proptests {
         use super::*;
         use proptest::prelude::*;
