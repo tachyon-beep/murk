@@ -166,12 +166,7 @@ See [`docs/CONCEPTS.md`](docs/CONCEPTS.md) for a guide to Murk's mental model
 
 ## Design
 
-Murk's architecture is documented in detail:
-
-- [`docs/HLD.md`](docs/HLD.md) — High-Level Design (authoritative, v3.1)
-- [`docs/DESIGN.md`](docs/DESIGN.md) — Requirements and architecture specification
-- [`docs/IMPLEMENTATION-PLAN.md`](docs/IMPLEMENTATION-PLAN.md) — Work package breakdown
-- [`docs/design/epoch-reclamation.md`](docs/design/epoch-reclamation.md) — Epoch-based memory reclamation
+Murk's architecture is documented in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 Key design decisions:
 

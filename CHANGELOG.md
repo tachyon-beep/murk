@@ -96,8 +96,7 @@ for reinforcement learning and real-time applications.
 #### Documentation
 - Concepts guide (`docs/CONCEPTS.md`) covering spaces, fields, propagators,
   commands, observations, runtime modes, and arena memory.
-- High-level design document (`docs/HLD.md`, v3.1).
-- Architecture specification (`docs/DESIGN.md`).
+- Architecture document (`docs/ARCHITECTURE.md`).
 - Replay format specification (`docs/replay-format.md`).
 - Error reference (`docs/error-reference.md`).
 

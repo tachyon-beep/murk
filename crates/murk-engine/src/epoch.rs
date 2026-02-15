@@ -3,7 +3,7 @@
 //! Provides [`EpochCounter`] (global monotonic epoch) and [`WorkerEpoch`]
 //! (per-worker pin/unpin state with cache-line padding). These are the
 //! building blocks for the epoch reclamation protocol described in
-//! `docs/design/epoch-reclamation.md`.
+//! the [Architecture documentation](https://tachyon-beep.github.io/murk/architecture.html).
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::OnceLock;
