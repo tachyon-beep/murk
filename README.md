@@ -74,18 +74,17 @@ generational allocation for deterministic, zero-GC memory management.
 
 ### Installation
 
-Murk is not yet on PyPI or crates.io. Install from source:
+**Rust** (from [crates.io](https://crates.io/crates/murk)):
+
+```bash
+cargo add murk
+```
+
+**Python** (build from source — PyPI packages coming soon):
 
 ```bash
 git clone https://github.com/tachyon-beep/murk.git
-cd murk
-
-# Rust: build and test
-cargo build --workspace
-cargo test --workspace
-
-# Python: build native extension in development mode
-cd crates/murk-python
+cd murk/crates/murk-python
 pip install maturin
 maturin develop --release
 ```
@@ -181,7 +180,7 @@ Key design decisions:
 
 ## Testing
 
-640+ tests across the workspace, all passing:
+660+ tests across the workspace, all passing:
 
 ```bash
 cargo test --workspace           # Unit and integration tests

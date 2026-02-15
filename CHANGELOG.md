@@ -106,12 +106,16 @@ for reinforcement learning and real-time applications.
 - `crystal_nav` — FCC12 crystal lattice navigation demo.
 - `hex_pursuit` — Multi-agent predator-prey on Hex2D with AgentDisk foveation
   and `execute_agents()` batched observation.
+- `layered_hex` — ProductSpace (Hex2D × Line1D) multi-floor navigation demo.
 - `quickstart.rs` — Compilable Rust example: diffusion propagator, command
   injection, snapshot reading, and world reset.
+- `realtime_async.rs` — RealtimeAsyncWorld: background ticking, observe,
+  and graceful shutdown.
+- `replay.rs` — Deterministic replay: record, verify, and prove determinism.
 - `lockstep_rl.rs` — End-to-end Rust RL loop with reference propagators.
 
 #### Testing
-- 640+ tests across the workspace (unit, integration, property, stress).
+- 660+ tests across the workspace (unit, integration, property, stress).
 - Miri verification for `murk-arena` memory safety.
 - CI: check, test, clippy, rustfmt, and Miri on every push and PR.
 
