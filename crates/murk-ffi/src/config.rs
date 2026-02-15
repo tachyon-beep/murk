@@ -9,7 +9,9 @@ use std::sync::Mutex;
 
 use murk_core::{BoundaryBehavior, FieldDef, FieldMutability, FieldType};
 use murk_propagator::Propagator;
-use murk_space::{EdgeBehavior, Fcc12, Hex2D, Line1D, ProductSpace, Ring1D, Space, Square4, Square8};
+use murk_space::{
+    EdgeBehavior, Fcc12, Hex2D, Line1D, ProductSpace, Ring1D, Space, Square4, Square8,
+};
 
 use crate::handle::HandleTable;
 use crate::status::MurkStatus;

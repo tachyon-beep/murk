@@ -16,7 +16,7 @@ use murk_core::{
 };
 use murk_engine::{BackoffConfig, LockstepWorld, WorldConfig};
 use murk_propagator::{Propagator, StepContext, WriteMode};
-use murk_space::{EdgeBehavior, Square4, Space};
+use murk_space::{EdgeBehavior, Space, Square4};
 use smallvec::smallvec;
 
 // ─── Field IDs ──────────────────────────────────────────────────
@@ -68,22 +68,24 @@ impl Propagator for DiffusionPropagator {
     }
 
     fn step(&self, ctx: &mut StepContext<'_>) -> Result<(), PropagatorError> {
-        let prev_heat = ctx.reads_previous().read(HEAT).ok_or_else(|| {
-            PropagatorError::ExecutionFailed {
-                reason: "heat field not readable".into(),
-            }
-        })?;
+        let prev_heat =
+            ctx.reads_previous()
+                .read(HEAT)
+                .ok_or_else(|| PropagatorError::ExecutionFailed {
+                    reason: "heat field not readable".into(),
+                })?;
 
         // Copy into a local buffer — we need random access while
         // holding the mutable write buffer (split-borrow limitation).
         let prev: Vec<f32> = prev_heat.to_vec();
         let dt = ctx.dt();
 
-        let out = ctx.writes().write(HEAT).ok_or_else(|| {
-            PropagatorError::ExecutionFailed {
+        let out = ctx
+            .writes()
+            .write(HEAT)
+            .ok_or_else(|| PropagatorError::ExecutionFailed {
                 reason: "heat field not writable".into(),
-            }
-        })?;
+            })?;
 
         for r in 0..ROWS as usize {
             for c in 0..COLS as usize {
@@ -96,10 +98,26 @@ impl Propagator for DiffusionPropagator {
                 }
 
                 // 4-connected Laplacian with absorb boundary (edge = self).
-                let n = if r > 0 { prev[(r - 1) * COLS as usize + c] } else { prev[idx] };
-                let s = if r < ROWS as usize - 1 { prev[(r + 1) * COLS as usize + c] } else { prev[idx] };
-                let w = if c > 0 { prev[r * COLS as usize + c - 1] } else { prev[idx] };
-                let e = if c < COLS as usize - 1 { prev[r * COLS as usize + c + 1] } else { prev[idx] };
+                let n = if r > 0 {
+                    prev[(r - 1) * COLS as usize + c]
+                } else {
+                    prev[idx]
+                };
+                let s = if r < ROWS as usize - 1 {
+                    prev[(r + 1) * COLS as usize + c]
+                } else {
+                    prev[idx]
+                };
+                let w = if c > 0 {
+                    prev[r * COLS as usize + c - 1]
+                } else {
+                    prev[idx]
+                };
+                let e = if c < COLS as usize - 1 {
+                    prev[r * COLS as usize + c + 1]
+                } else {
+                    prev[idx]
+                };
 
                 let laplacian = n + s + e + w - 4.0 * prev[idx];
                 let new_val = prev[idx] + (DIFFUSION * dt) as f32 * laplacian;
@@ -120,20 +138,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let space = Square4::new(ROWS, COLS, EdgeBehavior::Absorb)?;
     println!(
         "Space: {}x{} Square4, {} cells, {} neighbors/cell (interior)",
-        ROWS, COLS, space.cell_count(), 4
+        ROWS,
+        COLS,
+        space.cell_count(),
+        4
     );
 
     // 2. Define fields.
-    let fields = vec![
-        FieldDef {
-            name: "heat".into(),
-            field_type: FieldType::Scalar,
-            mutability: FieldMutability::PerTick,
-            units: Some("kelvin".into()),
-            bounds: None,
-            boundary_behavior: BoundaryBehavior::Clamp,
-        },
-    ];
+    let fields = vec![FieldDef {
+        name: "heat".into(),
+        field_type: FieldType::Scalar,
+        mutability: FieldMutability::PerTick,
+        units: Some("kelvin".into()),
+        bounds: None,
+        boundary_behavior: BoundaryBehavior::Clamp,
+    }];
     println!("Fields: heat (PerTick)");
 
     // 3. Build config.
@@ -154,7 +173,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("World created. Seed: {}\n", world.seed());
 
     // 5. Run 50 ticks of diffusion, printing progress.
-    println!("Running diffusion (source at ({}, {}))...", SOURCE_R, SOURCE_C);
+    println!(
+        "Running diffusion (source at ({}, {}))...",
+        SOURCE_R, SOURCE_C
+    );
     for _ in 0..50 {
         let result = world.step_sync(vec![])?;
         let tick = result.snapshot.tick_id().0;

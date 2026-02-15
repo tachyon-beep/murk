@@ -29,9 +29,7 @@ use murk_engine::{AsyncConfig, BackoffConfig, RealtimeAsyncWorld, WorldConfig};
 use murk_obs::spec::{ObsDtype, ObsRegion, ObsTransform};
 use murk_obs::{ObsEntry, ObsPlan, ObsSpec};
 use murk_propagators::agent_movement::new_action_buffer;
-use murk_propagators::{
-    AgentMovementPropagator, DiffusionPropagator, RewardPropagator,
-};
+use murk_propagators::{AgentMovementPropagator, DiffusionPropagator, RewardPropagator};
 use murk_space::{EdgeBehavior, RegionSpec, Square4};
 
 /// Tick budget at 60 Hz in microseconds.
@@ -313,9 +311,7 @@ fn stress_death_spiral_resistance() {
     let late_overruns = counters.late_overruns.load(Ordering::Relaxed);
 
     eprintln!("=== Death Spiral Resistance Results ===");
-    eprintln!(
-        "Baseline window (tick 200..300): {baseline_overruns}/{baseline_total} overruns"
-    );
+    eprintln!("Baseline window (tick 200..300): {baseline_overruns}/{baseline_total} overruns");
     eprintln!("Late window (tick 500..600): {late_overruns}/{late_total} overruns");
 
     // Guard against degenerate test runs with too few samples.
@@ -346,7 +342,9 @@ fn stress_death_spiral_resistance() {
     // If baseline rate is zero or very small, we can't meaningfully compute
     // a ratio. In that case, the system is handling the load fine — pass.
     if baseline_rate < 0.001 {
-        eprintln!("Baseline overrun rate is negligible ({baseline_rate:.6}); system is not overloaded.");
+        eprintln!(
+            "Baseline overrun rate is negligible ({baseline_rate:.6}); system is not overloaded."
+        );
         eprintln!("Checking absolute late rate instead...");
         // Even under 2x load, if overrun rate stays below 10% absolute, that's fine.
         assert!(

@@ -60,20 +60,22 @@ impl Propagator for DiffusionPropagator {
     }
 
     fn step(&self, ctx: &mut StepContext<'_>) -> Result<(), PropagatorError> {
-        let prev_heat = ctx.reads_previous().read(HEAT).ok_or_else(|| {
-            PropagatorError::ExecutionFailed {
-                reason: "heat field not readable".into(),
-            }
-        })?;
+        let prev_heat =
+            ctx.reads_previous()
+                .read(HEAT)
+                .ok_or_else(|| PropagatorError::ExecutionFailed {
+                    reason: "heat field not readable".into(),
+                })?;
 
         let prev: Vec<f32> = prev_heat.to_vec();
         let dt = ctx.dt();
 
-        let out = ctx.writes().write(HEAT).ok_or_else(|| {
-            PropagatorError::ExecutionFailed {
+        let out = ctx
+            .writes()
+            .write(HEAT)
+            .ok_or_else(|| PropagatorError::ExecutionFailed {
                 reason: "heat field not writable".into(),
-            }
-        })?;
+            })?;
 
         for r in 0..ROWS as usize {
             for c in 0..COLS as usize {
@@ -84,13 +86,21 @@ impl Propagator for DiffusionPropagator {
                     continue;
                 }
 
-                let n = if r > 0 { prev[(r - 1) * COLS as usize + c] } else { prev[idx] };
+                let n = if r > 0 {
+                    prev[(r - 1) * COLS as usize + c]
+                } else {
+                    prev[idx]
+                };
                 let s = if r < ROWS as usize - 1 {
                     prev[(r + 1) * COLS as usize + c]
                 } else {
                     prev[idx]
                 };
-                let w = if c > 0 { prev[r * COLS as usize + c - 1] } else { prev[idx] };
+                let w = if c > 0 {
+                    prev[r * COLS as usize + c - 1]
+                } else {
+                    prev[idx]
+                };
                 let e = if c < COLS as usize - 1 {
                     prev[r * COLS as usize + c + 1]
                 } else {
@@ -111,8 +121,7 @@ impl Propagator for DiffusionPropagator {
 
 /// Build a WorldConfig for the diffusion simulation.
 fn make_config() -> WorldConfig {
-    let space = Square4::new(ROWS, COLS, EdgeBehavior::Absorb)
-        .expect("failed to create space");
+    let space = Square4::new(ROWS, COLS, EdgeBehavior::Absorb).expect("failed to create space");
 
     WorldConfig {
         space: Box::new(space),
@@ -238,15 +247,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
             mismatches += 1;
         } else if frame.tick_id % 10 == 0 || frame.tick_id == 1 {
-            println!(
-                "  tick {:>3}: hash={:#018x}  OK",
-                frame.tick_id, live_hash
-            );
+            println!("  tick {:>3}: hash={:#018x}  OK", frame.tick_id, live_hash);
         }
     }
 
     if mismatches == 0 {
-        println!("\nAll {} frames verified -- hashes match!\n", frames_written);
+        println!(
+            "\nAll {} frames verified -- hashes match!\n",
+            frames_written
+        );
     } else {
         println!(
             "\nWARNING: {} mismatches out of {} frames!\n",

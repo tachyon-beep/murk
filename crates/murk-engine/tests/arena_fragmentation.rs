@@ -7,7 +7,9 @@
 
 use murk_core::command::{Command, CommandPayload};
 use murk_core::id::{FieldId, TickId};
-use murk_core::{BoundaryBehavior, FieldDef, FieldMutability, FieldSet, FieldType, PropagatorError};
+use murk_core::{
+    BoundaryBehavior, FieldDef, FieldMutability, FieldSet, FieldType, PropagatorError,
+};
 use murk_engine::config::{BackoffConfig, WorldConfig};
 use murk_engine::lockstep::LockstepWorld;
 use murk_propagator::context::StepContext;
@@ -49,12 +51,12 @@ impl Propagator for FillPropagator {
     }
 
     fn step(&self, ctx: &mut StepContext<'_>) -> Result<(), PropagatorError> {
-        let out = ctx
-            .writes()
-            .write(self.output)
-            .ok_or_else(|| PropagatorError::ExecutionFailed {
-                reason: format!("field {:?} not writable", self.output),
-            })?;
+        let out =
+            ctx.writes()
+                .write(self.output)
+                .ok_or_else(|| PropagatorError::ExecutionFailed {
+                    reason: format!("field {:?} not writable", self.output),
+                })?;
         out.fill(self.value);
         Ok(())
     }
@@ -83,11 +85,13 @@ fn sparse_churn_config() -> WorldConfig {
     ];
 
     WorldConfig {
-        space: Box::new(
-            murk_space::Line1D::new(100, murk_space::EdgeBehavior::Absorb).unwrap(),
-        ),
+        space: Box::new(murk_space::Line1D::new(100, murk_space::EdgeBehavior::Absorb).unwrap()),
         fields,
-        propagators: vec![Box::new(FillPropagator::new("fill_energy", FieldId(0), 1.0))],
+        propagators: vec![Box::new(FillPropagator::new(
+            "fill_energy",
+            FieldId(0),
+            1.0,
+        ))],
         dt: 0.1,
         seed: 42,
         ring_buffer_size: 8,

@@ -107,11 +107,10 @@ impl Fcc12 {
             });
         }
 
-        let cell_count = count_fcc_cells_checked(w, h, d).ok_or_else(|| {
-            SpaceError::InvalidComposition {
+        let cell_count =
+            count_fcc_cells_checked(w, h, d).ok_or_else(|| SpaceError::InvalidComposition {
                 reason: format!("FCC12 {w}x{h}x{d} exceeds maximum cell count"),
-            }
-        })?;
+            })?;
 
         Ok(Self {
             w,
@@ -157,16 +156,14 @@ impl Fcc12 {
             });
         }
         let (x, y, z) = (coord[0], coord[1], coord[2]);
-        if x < 0
-            || x >= self.w as i32
-            || y < 0
-            || y >= self.h as i32
-            || z < 0
-            || z >= self.d as i32
+        if x < 0 || x >= self.w as i32 || y < 0 || y >= self.h as i32 || z < 0 || z >= self.d as i32
         {
             return Err(SpaceError::CoordOutOfBounds {
                 coord: coord.clone(),
-                bounds: format!("x in [0, {}), y in [0, {}), z in [0, {})", self.w, self.h, self.d),
+                bounds: format!(
+                    "x in [0, {}), y in [0, {}), z in [0, {})",
+                    self.w, self.h, self.d
+                ),
             });
         }
         if (x + y + z) % 2 != 0 {
@@ -243,9 +240,7 @@ impl Space for Fcc12 {
             // Drop the move if any axis was absorbed OR clamped.
             // Clamping cancels one of the two ±1 changes, breaking parity.
             match (nx, ny, nz) {
-                (Some(nx), Some(ny), Some(nz))
-                    if !(x_clamped || y_clamped || z_clamped) =>
-                {
+                (Some(nx), Some(ny), Some(nz)) if !(x_clamped || y_clamped || z_clamped) => {
                     result.push(smallvec![nx, ny, nz]);
                 }
                 _ => {}
@@ -377,12 +372,7 @@ impl Space for Fcc12 {
         let (x, y, z) = (coord[0], coord[1], coord[2]);
 
         // Bounds check.
-        if x < 0
-            || x >= self.w as i32
-            || y < 0
-            || y >= self.h as i32
-            || z < 0
-            || z >= self.d as i32
+        if x < 0 || x >= self.w as i32 || y < 0 || y >= self.h as i32 || z < 0 || z >= self.d as i32
         {
             return None;
         }
@@ -664,7 +654,11 @@ mod tests {
         let n = s.neighbours(&c(0, 0, 0));
         // (0,0,0) with Absorb: offsets with any negative component are dropped.
         // Valid: (+1,+1,0), (+1,0,+1), (0,+1,+1) = 3 neighbours.
-        assert_eq!(n.len(), 3, "corner origin should have 3 neighbours with Absorb");
+        assert_eq!(
+            n.len(),
+            3,
+            "corner origin should have 3 neighbours with Absorb"
+        );
         assert!(n.contains(&c(1, 1, 0)));
         assert!(n.contains(&c(1, 0, 1)));
         assert!(n.contains(&c(0, 1, 1)));
@@ -697,7 +691,11 @@ mod tests {
         let s = Fcc12::new(4, 4, 4, EdgeBehavior::Clamp).unwrap();
         let n = s.neighbours(&c(0, 0, 0));
         // Clamp degrades to Absorb for FCC, so same as Absorb.
-        assert_eq!(n.len(), 3, "Clamp at corner should drop parity-breaking moves");
+        assert_eq!(
+            n.len(),
+            3,
+            "Clamp at corner should drop parity-breaking moves"
+        );
     }
 
     #[test]
@@ -715,13 +713,7 @@ mod tests {
         let s_absorb = Fcc12::new(4, 4, 4, EdgeBehavior::Absorb).unwrap();
 
         // Check several boundary coords.
-        let boundary_coords = [
-            c(0, 0, 0),
-            c(3, 3, 2),
-            c(0, 2, 0),
-            c(2, 0, 2),
-            c(0, 3, 3),
-        ];
+        let boundary_coords = [c(0, 0, 0), c(3, 3, 2), c(0, 2, 0), c(2, 0, 2), c(0, 3, 3)];
         for coord in &boundary_coords {
             let mut n_clamp: Vec<Coord> = s_clamp.neighbours(coord).into_vec();
             let mut n_absorb: Vec<Coord> = s_absorb.neighbours(coord).into_vec();

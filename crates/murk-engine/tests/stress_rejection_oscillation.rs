@@ -137,8 +137,7 @@ fn stress_rejection_oscillation_stability() {
     let mean: f64 = rates.iter().sum::<f64>() / rates.len() as f64;
 
     // Compute standard deviation.
-    let variance: f64 =
-        rates.iter().map(|&r| (r - mean).powi(2)).sum::<f64>() / rates.len() as f64;
+    let variance: f64 = rates.iter().map(|&r| (r - mean).powi(2)).sum::<f64>() / rates.len() as f64;
     let stddev = variance.sqrt();
 
     // Coefficient of variation.
