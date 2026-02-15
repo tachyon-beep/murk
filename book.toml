@@ -1,0 +1,12 @@
+[book]
+title = "Murk Documentation"
+authors = ["John Morrissey"]
+language = "en"
+src = "book/src"
+
+[build]
+build-dir = "book/build"
+
+[output.html]
+git-repository-url = "https://github.com/tachyon-beep/murk"
+edit-url-template = "https://github.com/tachyon-beep/murk/edit/main/{path}"
