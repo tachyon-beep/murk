@@ -114,7 +114,7 @@ pub struct RealtimeAsyncWorld {
     state: ShutdownState,
     /// Recovered from tick thread on shutdown, used for `reset()`.
     /// Wrapped in Mutex so RealtimeAsyncWorld is Sync (TickEngine
-    /// contains Vec<Box<dyn Propagator>> which is Send but not Sync).
+    /// contains `Vec<Box<dyn Propagator>>` which is Send but not Sync).
     /// Never contended: only accessed during reset() which takes &mut self.
     recovered_engine: Mutex<Option<TickEngine>>,
     config: AsyncConfig,

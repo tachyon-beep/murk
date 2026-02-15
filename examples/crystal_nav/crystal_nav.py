@@ -28,7 +28,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv
 from stable_baselines3.common.utils import set_random_seed
 
 import murk
-from murk import Command, Config, ObsEntry, SpaceType, FieldMutability, FieldType
+from murk import Command, Config, ObsEntry, FieldMutability, FieldType, EdgeBehavior, WriteMode
 
 # ─── World parameters ───────────────────────────────────────────
 
@@ -302,9 +302,7 @@ class CrystalNavEnv(murk.MurkEnv):
         config = Config()
 
         # Space: 8x8x8 FCC12 lattice with absorb boundaries.
-        config.set_space(SpaceType.Fcc12, [
-            float(GRID_W), float(GRID_H), float(GRID_D), 0.0,  # 0 = Absorb
-        ])
+        config.set_space_fcc12(GRID_W, GRID_H, GRID_D, EdgeBehavior.Absorb)
 
         # Fields: beacon scent, radiation hazard, agent position.
         config.add_field("beacon_scent", FieldType.Scalar, FieldMutability.PerTick)
@@ -322,7 +320,7 @@ class CrystalNavEnv(murk.MurkEnv):
             name="dual_diffusion",
             step_fn=dual_diffusion_step,
             reads_previous=[BEACON_FIELD, RADIATION_FIELD],
-            writes=[(BEACON_FIELD, 0), (RADIATION_FIELD, 0)],
+            writes=[(BEACON_FIELD, WriteMode.Full), (RADIATION_FIELD, WriteMode.Full)],
         )
 
         # Observation plan: all three fields in full.

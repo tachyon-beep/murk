@@ -1,0 +1,23 @@
+[package]
+name = "murk"
+description = "World simulation engine for reinforcement learning and real-time applications"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+readme = "README.md"
+
+[dependencies]
+murk-core = { path = "../murk-core", version = "0.1.0" }
+murk-space = { path = "../murk-space", version = "0.1.0" }
+murk-propagator = { path = "../murk-propagator", version = "0.1.0" }
+murk-propagators = { path = "../murk-propagators", version = "0.1.0" }
+murk-obs = { path = "../murk-obs", version = "0.1.0" }
+murk-engine = { path = "../murk-engine", version = "0.1.0" }
+murk-replay = { path = "../murk-replay", version = "0.1.0" }

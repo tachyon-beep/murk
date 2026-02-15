@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/murk",
     "crates/murk-core",
     "crates/murk-arena",
     "crates/murk-space",
@@ -25,7 +26,7 @@ homepage = "https://github.com/tachyon-beep/murk"
 documentation = "https://tachyon-beep.github.io/murk/"
 keywords = ["simulation", "reinforcement-learning", "arena", "gymnasium", "tick-based"]
 categories = ["simulation", "science", "game-development"]
-rust-version = "1.75"
+rust-version = "1.87"
 
 [workspace.dependencies]
 crossbeam-channel = "0.5"

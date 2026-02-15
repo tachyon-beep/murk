@@ -99,7 +99,9 @@ impl Fcc12 {
         }
 
         // Wrap requires even dimensions for parity consistency.
-        if edge == EdgeBehavior::Wrap && (w % 2 != 0 || h % 2 != 0 || d % 2 != 0) {
+        if edge == EdgeBehavior::Wrap
+            && (!w.is_multiple_of(2) || !h.is_multiple_of(2) || !d.is_multiple_of(2))
+        {
             return Err(SpaceError::InvalidComposition {
                 reason: "FCC12 with Wrap requires even dimensions for parity consistency".into(),
             });
@@ -350,7 +352,7 @@ impl Space for Fcc12 {
         let mut out = Vec::with_capacity(self.cell_count);
         for z in 0..self.d as i32 {
             for y in 0..self.h as i32 {
-                let x_start = ((y + z) % 2) as i32;
+                let x_start = (y + z) % 2;
                 let mut x = x_start;
                 while x < self.w as i32 {
                     out.push(smallvec![x, y, z]);
@@ -391,11 +393,11 @@ impl Space for Fcc12 {
         }
 
         let w = self.w as usize;
-        let x_even = (w + 1) / 2; // valid x count when row start = 0
+        let x_even = w.div_ceil(2); // valid x count when row start = 0
         let x_odd = w / 2; // valid x count when row start = 1
 
         let h = self.h as usize;
-        let y_even_rows = (h + 1) / 2; // count of even-index y rows
+        let y_even_rows = h.div_ceil(2); // count of even-index y rows
         let y_odd_rows = h / 2; // count of odd-index y rows
 
         // Two slice sizes: slice cell count depends on z parity.
@@ -408,14 +410,14 @@ impl Space for Fcc12 {
 
         // Count cells in all complete z-slices before this one.
         let z_us = z as usize;
-        let z_even_ct = (z_us + 1) / 2; // even z values in [0, z): 0, 2, 4, ...
+        let z_even_ct = z_us.div_ceil(2); // even z values in [0, z): 0, 2, 4, ...
         let z_odd_ct = z_us / 2; // odd z values in [0, z): 1, 3, 5, ...
         let cells_before_z = z_even_ct * slice_even + z_odd_ct * slice_odd;
 
         // Count cells in complete y-rows within this z-slice.
         let y_us = y as usize;
         let z_parity = (z & 1) as usize;
-        let y_even_ct = (y_us + 1) / 2; // even y values in [0, y)
+        let y_even_ct = y_us.div_ceil(2); // even y values in [0, y)
         let y_odd_ct = y_us / 2; // odd y values in [0, y)
         let cells_before_y = if z_parity == 0 {
             y_even_ct * x_even + y_odd_ct * x_odd
@@ -424,7 +426,7 @@ impl Space for Fcc12 {
         };
 
         // Count cells before x in this row.
-        let x_start = ((y + z) & 1) as i32;
+        let x_start = (y + z) & 1;
         let cells_before_x = ((x - x_start) / 2) as usize;
 
         Some(cells_before_z + cells_before_y + cells_before_x)
@@ -440,9 +442,9 @@ impl Space for Fcc12 {
 /// Count valid FCC cells for dimensions `w × h × d` with overflow protection.
 fn count_fcc_cells_checked(w: u32, h: u32, d: u32) -> Option<usize> {
     let hd = (h as usize).checked_mul(d as usize)?;
-    let n_even_rows = (hd + 1) / 2; // rows where (y+z) % 2 == 0
+    let n_even_rows = hd.div_ceil(2); // rows where (y+z) % 2 == 0
     let n_odd_rows = hd / 2; // rows where (y+z) % 2 == 1
-    let x_even = ((w as usize) + 1) / 2; // valid x count when start=0
+    let x_even = (w as usize).div_ceil(2); // valid x count when start=0
     let x_odd = (w as usize) / 2; // valid x count when start=1
     let a = n_even_rows.checked_mul(x_even)?;
     let b = n_odd_rows.checked_mul(x_odd)?;

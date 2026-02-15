@@ -418,6 +418,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "murk"
+version = "0.1.0"
+dependencies = [
+ "murk-core",
+ "murk-engine",
+ "murk-obs",
+ "murk-propagator",
+ "murk-propagators",
+ "murk-replay",
+ "murk-space",
+]
+
+[[package]]
 name = "murk-arena"
 version = "0.1.0"
 dependencies = [

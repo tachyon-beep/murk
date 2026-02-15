@@ -34,6 +34,20 @@ impl Square4 {
     ///
     /// Returns `Err(SpaceError::EmptySpace)` if either dimension is 0, or
     /// `Err(SpaceError::DimensionTooLarge)` if either exceeds `i32::MAX`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use murk_space::{Square4, EdgeBehavior, Space};
+    ///
+    /// let grid = Square4::new(16, 16, EdgeBehavior::Absorb).unwrap();
+    /// assert_eq!(grid.cell_count(), 256);
+    /// assert_eq!(grid.ndim(), 2);
+    ///
+    /// // Neighbors of corner cell [0, 0] with Absorb: only 2 neighbors.
+    /// let coord = vec![0i32, 0].into();
+    /// assert_eq!(grid.neighbours(&coord).len(), 2);
+    /// ```
     pub fn new(rows: u32, cols: u32, edge: EdgeBehavior) -> Result<Self, SpaceError> {
         if rows == 0 || cols == 0 {
             return Err(SpaceError::EmptySpace);

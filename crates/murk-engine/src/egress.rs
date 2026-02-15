@@ -1,6 +1,6 @@
 //! Egress worker pool for RealtimeAsync observation extraction.
 //!
-//! Each worker receives [`ObsTask`] requests via a crossbeam channel,
+//! Each worker receives `ObsTask` requests via a crossbeam channel,
 //! pins to the latest snapshot epoch, executes the observation plan,
 //! unpins, and sends the result back via a bounded(1) reply channel.
 //!

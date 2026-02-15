@@ -59,6 +59,32 @@ pub enum FieldMutability {
 /// Fields are the fundamental unit of per-cell state. Each field has a type,
 /// mutability class, optional bounds, and boundary behavior. Fields are
 /// registered at world creation; `FieldId` is the index into the field list.
+///
+/// # Examples
+///
+/// ```
+/// use murk_core::{FieldDef, FieldType, FieldMutability, BoundaryBehavior};
+///
+/// // A scalar field that is reallocated every tick.
+/// let heat = FieldDef {
+///     name: "heat".into(),
+///     field_type: FieldType::Scalar,
+///     mutability: FieldMutability::PerTick,
+///     units: Some("kelvin".into()),
+///     bounds: Some((0.0, 1000.0)),
+///     boundary_behavior: BoundaryBehavior::Clamp,
+/// };
+///
+/// // A 3D velocity vector allocated once (static terrain data).
+/// let velocity = FieldDef {
+///     name: "wind".into(),
+///     field_type: FieldType::Vector { dims: 3 },
+///     mutability: FieldMutability::Static,
+///     units: None,
+///     bounds: None,
+///     boundary_behavior: BoundaryBehavior::Clamp,
+/// };
+/// ```
 #[derive(Clone, Debug, PartialEq)]
 pub struct FieldDef {
     /// Human-readable name for debugging and logging.
@@ -80,6 +106,22 @@ pub struct FieldDef {
 /// Used by propagators to declare which fields they read and write,
 /// enabling the engine to validate the dependency graph and compute
 /// overlay resolution plans.
+///
+/// # Examples
+///
+/// ```
+/// use murk_core::{FieldSet, FieldId};
+///
+/// let mut set = FieldSet::empty();
+/// set.insert(FieldId(0));
+/// set.insert(FieldId(3));
+/// assert!(set.contains(FieldId(0)));
+/// assert!(!set.contains(FieldId(1)));
+///
+/// // Collect all IDs.
+/// let ids: Vec<_> = set.iter().collect();
+/// assert_eq!(ids, vec![FieldId(0), FieldId(3)]);
+/// ```
 #[derive(Clone, Debug)]
 pub struct FieldSet {
     bits: Vec<u64>,

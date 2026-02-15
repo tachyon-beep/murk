@@ -131,6 +131,7 @@ for _ in range(1000):
 
 | Crate | Description |
 |---|---|
+| **`murk`** | **Top-level facade — add this one dependency for the full Rust API** |
 | `murk-core` | Leaf crate: IDs, field definitions, commands, core traits |
 | `murk-arena` | Arena-based generational allocation (ping-pong, sparse, static) |
 | `murk-space` | Spatial backends and region planning |

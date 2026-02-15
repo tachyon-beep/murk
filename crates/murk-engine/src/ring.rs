@@ -15,8 +15,8 @@ type Slot = Option<(u64, Arc<OwnedSnapshot>)>;
 
 /// A fixed-capacity ring buffer of `Arc<OwnedSnapshot>`.
 ///
-/// Single-producer: only one thread calls [`push`]. Multi-consumer: any
-/// thread can call [`latest`] or [`get_by_pos`] to read snapshots.
+/// Single-producer: only one thread calls `push`. Multi-consumer: any
+/// thread can call `latest` or `get_by_pos` to read snapshots.
 ///
 /// The write position is monotonically increasing (never wraps). Slot
 /// index is computed as `pos % capacity`. Each slot stores a position

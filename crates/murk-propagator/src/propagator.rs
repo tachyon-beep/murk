@@ -35,6 +35,39 @@ pub enum WriteMode {
 ///
 /// This trait is object-safe; the engine stores propagators as
 /// `Vec<Box<dyn Propagator>>`.
+///
+/// # Examples
+///
+/// A minimal propagator that fills a field with a constant value:
+///
+/// ```
+/// use murk_propagator::{Propagator, StepContext, WriteMode};
+/// use murk_core::{FieldId, FieldSet, PropagatorError};
+///
+/// struct ConstantFill {
+///     field: FieldId,
+///     value: f32,
+/// }
+///
+/// impl Propagator for ConstantFill {
+///     fn name(&self) -> &str { "constant_fill" }
+///
+///     fn reads(&self) -> FieldSet { FieldSet::empty() }
+///
+///     fn writes(&self) -> Vec<(FieldId, WriteMode)> {
+///         vec![(self.field, WriteMode::Full)]
+///     }
+///
+///     fn step(&self, ctx: &mut StepContext<'_>) -> Result<(), PropagatorError> {
+///         let buf = ctx.writes().write(self.field).unwrap();
+///         buf.fill(self.value);
+///         Ok(())
+///     }
+/// }
+///
+/// let prop = ConstantFill { field: FieldId(0), value: 42.0 };
+/// assert_eq!(prop.name(), "constant_fill");
+/// ```
 pub trait Propagator: Send + 'static {
     /// Human-readable name for error reporting and telemetry.
     fn name(&self) -> &str;

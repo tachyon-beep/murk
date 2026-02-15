@@ -25,8 +25,8 @@ pub enum GridConnectivity {
 /// - O(1) `is_interior` check (no BFS, no bounds-check per cell)
 /// - Direct stride arithmetic for the fast gather path
 ///
-/// `coord_dims[i]` is the valid range for `coord[i]` (0..coord_dims[i]).
-/// `coord_strides[i]` is the stride for `coord[i]` in canonical rank.
+/// `coord_dims\[i\]` is the valid range for `coord\[i\]` (0..coord_dims\[i\]).
+/// `coord_strides\[i\]` is the stride for `coord\[i\]` in canonical rank.
 #[derive(Debug, Clone)]
 pub struct GridGeometry {
     /// Valid range per coordinate index: `coord[i]` must be in `0..coord_dims[i]`.
