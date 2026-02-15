@@ -97,7 +97,7 @@ jobs:
       - name: Run coverage
         run: cargo tarpaulin --workspace --exclude murk-python --out xml --skip-clean
       - name: Upload to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         with:
           file: cobertura.xml
           fail_ci_if_error: false
