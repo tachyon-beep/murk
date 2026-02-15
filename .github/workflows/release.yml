@@ -129,6 +129,9 @@ jobs:
     name: Publish to PyPI
     needs: [release, build-wheels, build-sdist]
     runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
     steps:
       - name: Download all wheel artifacts
         uses: actions/download-artifact@v4

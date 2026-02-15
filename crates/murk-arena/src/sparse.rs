@@ -220,4 +220,57 @@ mod tests {
         // (free_list pops the old slot, then it's reused for the new one.)
         assert_eq!(slab.total_slots(), 1);
     }
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            #[test]
+            fn live_count_equals_distinct_fields(
+                field_ids in proptest::collection::vec(0u32..16, 1..20),
+            ) {
+                let mut slab = SparseSlab::new();
+                let mut segs = make_segments();
+                for (gen, &fid) in field_ids.iter().enumerate() {
+                    let _ = slab.alloc(FieldId(fid), 10, gen as u32, &mut segs);
+                }
+                // Live count = number of distinct field IDs allocated.
+                let distinct: std::collections::HashSet<_> = field_ids.iter().collect();
+                prop_assert_eq!(slab.live_count(), distinct.len());
+            }
+
+            #[test]
+            fn get_handle_returns_latest_generation(
+                gens in proptest::collection::vec(1u32..100, 2..10),
+            ) {
+                let mut slab = SparseSlab::new();
+                let mut segs = make_segments();
+                let field = FieldId(0);
+                let mut last_gen = 0;
+                for &gen in &gens {
+                    let _ = slab.alloc(field, 10, gen, &mut segs);
+                    last_gen = gen;
+                }
+                let handle = slab.get_handle(field).unwrap();
+                prop_assert_eq!(handle.generation(), last_gen);
+            }
+
+            #[test]
+            fn total_slots_bounded_by_alloc_count(
+                ops in proptest::collection::vec((0u32..8, 1u32..50), 1..30),
+            ) {
+                let mut slab = SparseSlab::new();
+                let mut segs = make_segments();
+                let mut alloc_count = 0u32;
+                for (gen, (fid, len)) in ops.iter().enumerate() {
+                    if slab.alloc(FieldId(*fid), *len, gen as u32, &mut segs).is_ok() {
+                        alloc_count += 1;
+                    }
+                }
+                // Total slots can be less than alloc count due to free list reuse.
+                prop_assert!(slab.total_slots() as u32 <= alloc_count);
+            }
+        }
+    }
 }
