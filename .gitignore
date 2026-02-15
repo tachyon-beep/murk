@@ -31,6 +31,3 @@ book/build/
 
 # Agent config
 .claude/
-
-# Beads internal
-.beads/
