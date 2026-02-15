@@ -158,7 +158,7 @@ See [`docs/CONCEPTS.md`](docs/CONCEPTS.md) for a guide to Murk's mental model
 
 ## Documentation
 
-- **[API Reference (rustdoc)](https://tachyon-beep.github.io/murk/)** — auto-published on every push to `main`
+- **[API Reference (rustdoc)](https://tachyon-beep.github.io/murk/api/)** — auto-published on every push to `main`
 
 ## Design
 

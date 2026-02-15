@@ -21,25 +21,37 @@ permissions:
 
 jobs:
   docs:
-    name: cargo doc
+    name: build docs
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: docs
+
+      # Build rustdoc
       - run: cargo doc --workspace --no-deps
 
-      # Upload the generated docs as a Pages artifact (only on main).
-      - name: Add redirect index page
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        run: echo '<meta http-equiv="refresh" content="0; url=murk_core/index.html">' > target/doc/index.html
+      # Build mdBook
+      - name: Install mdbook
+        run: cargo install mdbook
+      - name: Build mdbook
+        run: mdbook build
+
+      # Combine: rustdoc as /api/ subdirectory of mdBook
+      - name: Combine docs
+        run: |
+          cp -r target/doc book/build/api
+          echo '<meta http-equiv="refresh" content="0; url=api/murk_core/index.html">' > book/build/api/index.html
+
+      # Deploy (only on main push)
       - name: Upload Pages artifact
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         uses: actions/upload-pages-artifact@v3
         with:
-          path: target/doc
+          path: book/build
 
   deploy:
     name: Deploy to GitHub Pages
