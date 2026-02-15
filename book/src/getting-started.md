@@ -3,7 +3,7 @@
 ## Prerequisites
 
 **Rust** (for building from source or using the Rust API):
-- Rust toolchain (stable, 1.75+): [rustup.rs](https://rustup.rs/)
+- Rust toolchain (stable, 1.87+): [rustup.rs](https://rustup.rs/)
 
 **Python** (for the Gymnasium bindings):
 - Python 3.9+

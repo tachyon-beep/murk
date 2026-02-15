@@ -565,7 +565,7 @@ mod tests {
     // ── Proptest strategies ─────────────────────────────────────
 
     fn arb_coord() -> impl Strategy<Value = Coord> {
-        prop::collection::vec(-1000i32..1000, 1..=4).prop_map(|v| Coord::from_vec(v))
+        prop::collection::vec(-1000i32..1000, 1..=4).prop_map(Coord::from_vec)
     }
 
     /// Strategy for optional u64 that includes None, Some(0), and arbitrary values.
@@ -843,7 +843,7 @@ mod tests {
                 serialize_command(&Command {
                     payload: CommandPayload::SetParameter {
                         key: ParameterKey(0),
-                        value: 3.14,
+                        value: 2.78,
                     },
                     expires_after_tick: TickId(u64::MAX),
                     source_id: Some(1),

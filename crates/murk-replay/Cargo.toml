@@ -11,16 +11,17 @@ keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true
 description = "Deterministic replay and action logging for Murk simulations"
+readme = "README.md"
 
 [dependencies]
-murk-core = { path = "../murk-core" }
+murk-core = { path = "../murk-core", version = "0.1.0" }
 indexmap = { workspace = true }
 
 [dev-dependencies]
-murk-engine = { path = "../murk-engine" }
-murk-space = { path = "../murk-space" }
-murk-propagator = { path = "../murk-propagator" }
-murk-propagators = { path = "../murk-propagators" }
+murk-engine = { path = "../murk-engine", version = "0.1.0" }
+murk-space = { path = "../murk-space", version = "0.1.0" }
+murk-propagator = { path = "../murk-propagator", version = "0.1.0" }
+murk-propagators = { path = "../murk-propagators", version = "0.1.0" }
 murk-test-utils = { path = "../murk-test-utils" }
 murk-bench = { path = "../murk-bench" }
 proptest = { workspace = true }

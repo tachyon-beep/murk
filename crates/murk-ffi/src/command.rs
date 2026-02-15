@@ -135,7 +135,7 @@ mod tests {
             field_id: 0,
             param_key: 7,
             float_value: 0.0,
-            double_value: 3.14,
+            double_value: 2.78,
             coord: [0; 4],
             coord_ndim: 0,
         };
@@ -147,7 +147,7 @@ mod tests {
         match rust_cmd.payload {
             CommandPayload::SetParameter { key, value } => {
                 assert_eq!(key, ParameterKey(7));
-                assert!((value - 3.14).abs() < 1e-10);
+                assert!((value - 2.78).abs() < 1e-10);
             }
             other => panic!("expected SetParameter, got {other:?}"),
         }

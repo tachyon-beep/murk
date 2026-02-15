@@ -188,7 +188,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!(
         "  tick {:>3}: command accepted={}, time={}μs",
         result.snapshot.tick_id().0,
-        result.receipts.first().map_or(false, |r| r.accepted),
+        result.receipts.first().is_some_and(|r| r.accepted),
         result.metrics.total_us,
     );
 

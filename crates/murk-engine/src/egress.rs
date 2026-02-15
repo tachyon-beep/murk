@@ -84,7 +84,7 @@ pub(crate) fn worker_loop(
     epoch_counter: Arc<EpochCounter>,
     worker_epoch: Arc<WorkerEpoch>,
 ) {
-    worker_loop_inner(task_rx, ring, epoch_counter, &*worker_epoch);
+    worker_loop_inner(task_rx, ring, epoch_counter, &worker_epoch);
 }
 
 fn worker_loop_inner(

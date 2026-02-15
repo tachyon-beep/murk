@@ -14,6 +14,36 @@ use smallvec::SmallVec;
 /// An `ObsSpec` is a list of entries, each describing one slice of the
 /// output tensor. Entries are gathered in order: entry 0 fills the first
 /// `N_0` elements, entry 1 fills the next `N_1`, etc.
+///
+/// # Examples
+///
+/// ```
+/// use murk_obs::{ObsSpec, ObsEntry, ObsDtype, ObsTransform, ObsRegion};
+/// use murk_core::FieldId;
+/// use murk_space::RegionSpec;
+///
+/// let spec = ObsSpec {
+///     entries: vec![
+///         ObsEntry {
+///             field_id: FieldId(0),
+///             region: ObsRegion::Fixed(RegionSpec::All),
+///             pool: None,
+///             transform: ObsTransform::Identity,
+///             dtype: ObsDtype::F32,
+///         },
+///         ObsEntry {
+///             field_id: FieldId(1),
+///             region: ObsRegion::AgentDisk { radius: 3 },
+///             pool: None,
+///             transform: ObsTransform::Normalize { min: 0.0, max: 100.0 },
+///             dtype: ObsDtype::F32,
+///         },
+///     ],
+/// };
+///
+/// assert_eq!(spec.entries.len(), 2);
+/// assert_eq!(spec.entries[0].field_id, FieldId(0));
+/// ```
 #[derive(Clone, Debug, PartialEq)]
 pub struct ObsSpec {
     /// Ordered observation entries.
@@ -61,6 +91,22 @@ pub enum PoolKernel {
 }
 
 /// Configuration for spatial pooling applied after gather.
+///
+/// # Examples
+///
+/// ```
+/// use murk_obs::{PoolConfig, PoolKernel};
+///
+/// let pool = PoolConfig {
+///     kernel: PoolKernel::Mean,
+///     kernel_size: 3,
+///     stride: 2,
+/// };
+///
+/// assert_eq!(pool.kernel, PoolKernel::Mean);
+/// assert_eq!(pool.kernel_size, 3);
+/// assert_eq!(pool.stride, 2);
+/// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PoolConfig {
     /// Pooling kernel type.
@@ -72,6 +118,26 @@ pub struct PoolConfig {
 }
 
 /// A single observation entry targeting one field over a spatial region.
+///
+/// # Examples
+///
+/// ```
+/// use murk_obs::{ObsEntry, ObsDtype, ObsTransform, ObsRegion};
+/// use murk_core::FieldId;
+/// use murk_space::RegionSpec;
+///
+/// let entry = ObsEntry {
+///     field_id: FieldId(0),
+///     region: RegionSpec::All.into(),
+///     pool: None,
+///     transform: ObsTransform::Identity,
+///     dtype: ObsDtype::F32,
+/// };
+///
+/// assert_eq!(entry.field_id, FieldId(0));
+/// assert!(entry.pool.is_none());
+/// assert!(matches!(entry.region, ObsRegion::Fixed(RegionSpec::All)));
+/// ```
 #[derive(Clone, Debug, PartialEq)]
 pub struct ObsEntry {
     /// Which simulation field to observe.
@@ -90,6 +156,18 @@ pub struct ObsEntry {
 ///
 /// v1 supports `Identity` and `Normalize`. Additional transforms
 /// are deferred to v1.5+.
+///
+/// # Examples
+///
+/// ```
+/// use murk_obs::ObsTransform;
+///
+/// let t = ObsTransform::Normalize { min: 0.0, max: 1.0 };
+/// assert!(matches!(t, ObsTransform::Normalize { min, max } if max > min));
+///
+/// let identity = ObsTransform::Identity;
+/// assert_ne!(identity, t);
+/// ```
 #[derive(Clone, Debug, PartialEq)]
 pub enum ObsTransform {
     /// Pass values through unchanged.

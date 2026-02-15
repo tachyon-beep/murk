@@ -26,6 +26,31 @@ const HEX_OFFSETS: [(i32, i32); 6] = [
 /// the graph geodesic on the hex grid.
 ///
 /// Canonical ordering is r-then-q: outer loop over r, inner loop over q.
+///
+/// # Examples
+///
+/// ```
+/// use murk_space::{Hex2D, Space};
+///
+/// let hex = Hex2D::new(5, 5).unwrap();
+/// assert_eq!(hex.rows(), 5);
+/// assert_eq!(hex.cols(), 5);
+/// assert_eq!(hex.cell_count(), 25);
+/// assert_eq!(hex.ndim(), 2);
+///
+/// // Interior cell has 6 neighbours.
+/// let interior: murk_core::Coord = vec![2i32, 2].into();
+/// assert_eq!(hex.neighbours(&interior).len(), 6);
+///
+/// // Corner cell has fewer neighbours (absorb boundary).
+/// let corner: murk_core::Coord = vec![0i32, 0].into();
+/// assert_eq!(hex.neighbours(&corner).len(), 2);
+///
+/// // Cube distance between adjacent cells is 1.
+/// let a: murk_core::Coord = vec![2i32, 1].into();
+/// let b: murk_core::Coord = vec![3i32, 1].into();
+/// assert_eq!(hex.distance(&a, &b), 1.0);
+/// ```
 #[derive(Debug, Clone)]
 pub struct Hex2D {
     rows: u32,

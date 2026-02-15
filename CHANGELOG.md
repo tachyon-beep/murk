@@ -112,7 +112,7 @@ for reinforcement learning and real-time applications.
 - `lockstep_rl.rs` — End-to-end Rust RL loop with reference propagators.
 
 #### Testing
-- 580+ tests across the workspace (unit, integration, property, stress).
+- 640+ tests across the workspace (unit, integration, property, stress).
 - Miri verification for `murk-arena` memory safety.
 - CI: check, test, clippy, rustfmt, and Miri on every push and PR.
 

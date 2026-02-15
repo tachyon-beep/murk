@@ -3,6 +3,16 @@
 use crate::id::FieldId;
 
 /// Classification of a field's data type.
+///
+/// # Examples
+///
+/// ```
+/// use murk_core::FieldType;
+///
+/// assert_eq!(FieldType::Scalar.components(), 1);
+/// assert_eq!(FieldType::Vector { dims: 3 }.components(), 3);
+/// assert_eq!(FieldType::Categorical { n_values: 10 }.components(), 1);
+/// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FieldType {
     /// A single floating-point value per cell.
@@ -31,6 +41,31 @@ impl FieldType {
 }
 
 /// Boundary behavior when field values exceed declared bounds.
+///
+/// # Examples
+///
+/// ```
+/// use murk_core::BoundaryBehavior;
+///
+/// let behaviors = [
+///     BoundaryBehavior::Clamp,
+///     BoundaryBehavior::Reflect,
+///     BoundaryBehavior::Absorb,
+///     BoundaryBehavior::Wrap,
+/// ];
+///
+/// // All four variants are distinct.
+/// for (i, a) in behaviors.iter().enumerate() {
+///     for (j, b) in behaviors.iter().enumerate() {
+///         assert_eq!(i == j, a == b);
+///     }
+/// }
+///
+/// // Copy semantics.
+/// let a = BoundaryBehavior::Wrap;
+/// let b = a;
+/// assert_eq!(a, b);
+/// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BoundaryBehavior {
     /// Clamp the value to the nearest bound.
@@ -44,6 +79,19 @@ pub enum BoundaryBehavior {
 }
 
 /// How a field's allocation is managed across ticks.
+///
+/// # Examples
+///
+/// ```
+/// use murk_core::FieldMutability;
+///
+/// // Static fields are shared across all snapshots.
+/// let m = FieldMutability::Static;
+/// assert_eq!(m, FieldMutability::Static);
+///
+/// // PerTick fields get a new allocation each tick.
+/// assert_ne!(FieldMutability::PerTick, FieldMutability::Sparse);
+/// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FieldMutability {
     /// Generation 0 forever. Shared across all snapshots and vectorized envs.
@@ -153,6 +201,20 @@ impl FieldSet {
     }
 
     /// Return the union of two sets (`self | other`).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use murk_core::{FieldSet, FieldId};
+    ///
+    /// let a: FieldSet = [FieldId(0), FieldId(1)].into_iter().collect();
+    /// let b: FieldSet = [FieldId(1), FieldId(2)].into_iter().collect();
+    /// let u = a.union(&b);
+    /// assert_eq!(u.len(), 3);
+    /// assert!(u.contains(FieldId(0)));
+    /// assert!(u.contains(FieldId(1)));
+    /// assert!(u.contains(FieldId(2)));
+    /// ```
     pub fn union(&self, other: &Self) -> Self {
         let max_len = self.bits.len().max(other.bits.len());
         let mut bits = Vec::with_capacity(max_len);
@@ -165,6 +227,18 @@ impl FieldSet {
     }
 
     /// Return the intersection of two sets (`self & other`).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use murk_core::{FieldSet, FieldId};
+    ///
+    /// let a: FieldSet = [FieldId(0), FieldId(1)].into_iter().collect();
+    /// let b: FieldSet = [FieldId(1), FieldId(2)].into_iter().collect();
+    /// let inter = a.intersection(&b);
+    /// assert_eq!(inter.len(), 1);
+    /// assert!(inter.contains(FieldId(1)));
+    /// ```
     pub fn intersection(&self, other: &Self) -> Self {
         let min_len = self.bits.len().min(other.bits.len());
         let mut bits = Vec::with_capacity(min_len);
@@ -178,6 +252,20 @@ impl FieldSet {
     }
 
     /// Return the set difference (`self - other`): elements in `self` but not `other`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use murk_core::{FieldSet, FieldId};
+    ///
+    /// let a: FieldSet = [FieldId(0), FieldId(1), FieldId(2)].into_iter().collect();
+    /// let b: FieldSet = [FieldId(1)].into_iter().collect();
+    /// let diff = a.difference(&b);
+    /// assert_eq!(diff.len(), 2);
+    /// assert!(diff.contains(FieldId(0)));
+    /// assert!(!diff.contains(FieldId(1)));
+    /// assert!(diff.contains(FieldId(2)));
+    /// ```
     pub fn difference(&self, other: &Self) -> Self {
         let mut bits = Vec::with_capacity(self.bits.len());
         for i in 0..self.bits.len() {

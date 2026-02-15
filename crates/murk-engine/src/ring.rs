@@ -441,8 +441,8 @@ mod tests {
 
         let handles: Vec<_> = workers
             .iter()
-            .cloned()
             .map(|worker| {
+                let worker = worker.clone();
                 thread::spawn(move || {
                     for epoch in 0..100u64 {
                         worker.pin(epoch);

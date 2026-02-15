@@ -15,6 +15,25 @@ use std::collections::VecDeque;
 /// - **Absorb**: edge cells have fewer neighbors
 /// - **Clamp**: edge cells self-loop
 /// - **Wrap**: periodic boundary (equivalent to [`Ring1D`](crate::Ring1D))
+///
+/// # Examples
+///
+/// ```
+/// use murk_space::{Line1D, EdgeBehavior, Space};
+///
+/// let line = Line1D::new(5, EdgeBehavior::Absorb).unwrap();
+/// assert_eq!(line.len(), 5);
+/// assert_eq!(line.cell_count(), 5);
+/// assert_eq!(line.ndim(), 1);
+///
+/// // Interior cell has two neighbours.
+/// let coord: murk_core::Coord = vec![2i32].into();
+/// assert_eq!(line.neighbours(&coord).len(), 2);
+///
+/// // Edge cell (absorb) has only one neighbour.
+/// let edge: murk_core::Coord = vec![0i32].into();
+/// assert_eq!(line.neighbours(&edge).len(), 1);
+/// ```
 #[derive(Debug, Clone)]
 pub struct Line1D {
     len: u32,

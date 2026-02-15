@@ -356,7 +356,7 @@ mod tests {
     fn callback_propagator_declarations_match() {
         let name = CString::new("decl_test").unwrap();
         let reads = [0u32, 1];
-        let writes = vec![
+        let writes = [
             MurkWriteDecl {
                 field_id: 2,
                 mode: MurkWriteMode::Full as i32,
@@ -409,7 +409,7 @@ mod tests {
     #[test]
     fn null_step_fn_returns_invalid_argument() {
         let name = CString::new("bad").unwrap();
-        let writes = vec![MurkWriteDecl {
+        let writes = [MurkWriteDecl {
             field_id: 0,
             mode: MurkWriteMode::Full as i32,
         }];
@@ -435,7 +435,7 @@ mod tests {
     #[test]
     fn null_reads_with_nonzero_count_returns_invalid_argument() {
         let name = CString::new("bad_reads").unwrap();
-        let writes = vec![MurkWriteDecl {
+        let writes = [MurkWriteDecl {
             field_id: 0,
             mode: MurkWriteMode::Full as i32,
         }];
@@ -483,7 +483,7 @@ mod tests {
     #[test]
     fn invalid_write_mode_returns_invalid_argument() {
         let name = CString::new("bad_mode").unwrap();
-        let writes = vec![MurkWriteDecl {
+        let writes = [MurkWriteDecl {
             field_id: 0,
             mode: 999, // invalid write mode
         }];

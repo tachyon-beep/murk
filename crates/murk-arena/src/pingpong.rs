@@ -502,7 +502,8 @@ mod tests {
     fn publish_increments_generation() {
         let mut arena = make_arena();
         let _guard = arena.begin_tick().unwrap();
-        drop(_guard);
+        // Let _guard go out of scope (it doesn't implement Drop).
+        let _ = _guard;
         arena.publish(TickId(1), ParameterVersion(0));
         assert_eq!(arena.generation(), 1);
     }

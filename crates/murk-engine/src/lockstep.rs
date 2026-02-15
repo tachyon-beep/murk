@@ -569,8 +569,10 @@ mod tests {
         let snap = world.snapshot();
         let data = snap.read(FieldId(0)).unwrap();
         assert_eq!(data[0], 42.0);
-        // snap must be dropped before calling step_sync again.
-        drop(snap);
+        // snap must go out of scope before calling step_sync again.
+        // (Snapshot does not implement Drop, so explicit drop() is not needed;
+        //  the binding just needs to end here.)
+        let _ = snap;
 
         // Now we can step again.
         world.step_sync(vec![]).unwrap();

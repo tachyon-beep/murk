@@ -13,6 +13,32 @@ use crate::types::{BuildMetadata, Frame, InitDescriptor};
 ///
 /// Generic over `R: Read` so tests can use `&[u8]` and production
 /// code can use `BufReader<File>`.
+///
+/// # Examples
+///
+/// ```
+/// use murk_replay::{ReplayWriter, ReplayReader, BuildMetadata, InitDescriptor, Frame};
+///
+/// # let meta = BuildMetadata {
+/// #     toolchain: "test".into(),
+/// #     target_triple: "test".into(),
+/// #     murk_version: "0.1.0".into(),
+/// #     compile_flags: "test".into(),
+/// # };
+/// # let init = InitDescriptor {
+/// #     seed: 0, config_hash: 0, field_count: 0,
+/// #     cell_count: 0, space_descriptor: vec![],
+/// # };
+/// # let mut buf = Vec::new();
+/// # let mut w = ReplayWriter::new(&mut buf, &meta, &init).unwrap();
+/// # w.write_raw_frame(&Frame { tick_id: 1, commands: vec![], snapshot_hash: 0 }).unwrap();
+/// # drop(w);
+/// // Open a replay stream and iterate over frames.
+/// let reader = ReplayReader::open(buf.as_slice()).unwrap();
+/// let frames: Vec<Frame> = reader.frames().collect::<Result<_, _>>().unwrap();
+/// assert_eq!(frames.len(), 1);
+/// assert_eq!(frames[0].tick_id, 1);
+/// ```
 pub struct ReplayReader<R: Read> {
     reader: R,
     metadata: BuildMetadata,

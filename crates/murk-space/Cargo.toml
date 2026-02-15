@@ -11,9 +11,10 @@ keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true
 description = "Spatial data structures and field storage for Murk simulations"
+readme = "README.md"
 
 [dependencies]
-murk-core = { path = "../murk-core" }
+murk-core = { path = "../murk-core", version = "0.1.0" }
 indexmap = { workspace = true }
 smallvec = { workspace = true }
 

@@ -19,10 +19,23 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo check --workspace
 
-  test:
-    name: cargo test
+  msrv:
+    name: MSRV (1.87)
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.87.0
+      - run: cargo check --workspace
+
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

@@ -11,13 +11,14 @@ keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true
 description = "Simulation engine orchestrating Murk environments"
+readme = "README.md"
 
 [dependencies]
-murk-core = { path = "../murk-core" }
-murk-arena = { path = "../murk-arena" }
-murk-space = { path = "../murk-space" }
-murk-propagator = { path = "../murk-propagator" }
-murk-obs = { path = "../murk-obs" }
+murk-core = { path = "../murk-core", version = "0.1.0" }
+murk-arena = { path = "../murk-arena", version = "0.1.0" }
+murk-space = { path = "../murk-space", version = "0.1.0" }
+murk-propagator = { path = "../murk-propagator", version = "0.1.0" }
+murk-obs = { path = "../murk-obs", version = "0.1.0" }
 crossbeam-channel = { workspace = true }
 indexmap = { workspace = true }
 smallvec = { workspace = true }
@@ -25,6 +26,6 @@ smallvec = { workspace = true }
 [dev-dependencies]
 murk-test-utils = { path = "../murk-test-utils" }
 murk-bench = { path = "../murk-bench" }
-murk-propagators = { path = "../murk-propagators" }
+murk-propagators = { path = "../murk-propagators", version = "0.1.0" }
 proptest = { workspace = true }
 smallvec = { workspace = true }

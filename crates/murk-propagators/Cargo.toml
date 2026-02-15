@@ -11,13 +11,14 @@ keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true
 description = "Reference propagators for the Murk simulation framework"
+readme = "README.md"
 
 [dependencies]
-murk-core = { path = "../murk-core" }
-murk-propagator = { path = "../murk-propagator" }
-murk-space = { path = "../murk-space" }
+murk-core = { path = "../murk-core", version = "0.1.0" }
+murk-propagator = { path = "../murk-propagator", version = "0.1.0" }
+murk-space = { path = "../murk-space", version = "0.1.0" }
 smallvec = { workspace = true }
 
 [dev-dependencies]
 murk-test-utils = { path = "../murk-test-utils" }
-murk-engine = { path = "../murk-engine" }
+murk-engine = { path = "../murk-engine", version = "0.1.0" }

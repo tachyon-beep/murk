@@ -11,16 +11,17 @@ keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true
 description = "C FFI bindings for the Murk simulation framework"
+readme = "README.md"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-murk-core = { path = "../murk-core" }
-murk-engine = { path = "../murk-engine" }
-murk-obs = { path = "../murk-obs" }
-murk-space = { path = "../murk-space" }
-murk-propagator = { path = "../murk-propagator" }
+murk-core = { path = "../murk-core", version = "0.1.0" }
+murk-engine = { path = "../murk-engine", version = "0.1.0" }
+murk-obs = { path = "../murk-obs", version = "0.1.0" }
+murk-space = { path = "../murk-space", version = "0.1.0" }
+murk-propagator = { path = "../murk-propagator", version = "0.1.0" }
 smallvec = { workspace = true }
 
 [dev-dependencies]

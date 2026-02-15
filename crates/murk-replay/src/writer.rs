@@ -17,6 +17,45 @@ use crate::types::{BuildMetadata, Frame, InitDescriptor};
 ///
 /// Generic over `W: Write` so tests can use `Vec<u8>` and production
 /// code can use `BufWriter<File>`.
+///
+/// # Examples
+///
+/// ```
+/// use murk_replay::{ReplayWriter, ReplayReader, BuildMetadata, InitDescriptor, Frame};
+///
+/// let meta = BuildMetadata {
+///     toolchain: "test".into(),
+///     target_triple: "test".into(),
+///     murk_version: "0.1.0".into(),
+///     compile_flags: "test".into(),
+/// };
+/// let init = InitDescriptor {
+///     seed: 42,
+///     config_hash: 0,
+///     field_count: 1,
+///     cell_count: 10,
+///     space_descriptor: vec![],
+/// };
+///
+/// // Write two frames to an in-memory buffer.
+/// let mut buf = Vec::new();
+/// let mut writer = ReplayWriter::new(&mut buf, &meta, &init).unwrap();
+/// for tick in 1..=2u64 {
+///     let frame = Frame { tick_id: tick, commands: vec![], snapshot_hash: tick };
+///     writer.write_raw_frame(&frame).unwrap();
+/// }
+/// assert_eq!(writer.frames_written(), 2);
+/// drop(writer);
+///
+/// // Read them back.
+/// let mut reader = ReplayReader::open(buf.as_slice()).unwrap();
+/// assert_eq!(reader.metadata(), &meta);
+/// let f1 = reader.next_frame().unwrap().unwrap();
+/// assert_eq!(f1.tick_id, 1);
+/// let f2 = reader.next_frame().unwrap().unwrap();
+/// assert_eq!(f2.tick_id, 2);
+/// assert!(reader.next_frame().unwrap().is_none());
+/// ```
 pub struct ReplayWriter<W: Write> {
     writer: W,
     field_count: u32,

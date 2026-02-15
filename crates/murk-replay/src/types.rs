@@ -4,6 +4,21 @@
 ///
 /// Enables detection of builds compiled with different toolchains or
 /// flags that might affect floating-point determinism.
+///
+/// # Examples
+///
+/// ```
+/// use murk_replay::BuildMetadata;
+///
+/// let meta = BuildMetadata {
+///     toolchain: "1.78.0".into(),
+///     target_triple: "x86_64-unknown-linux-gnu".into(),
+///     murk_version: "0.1.0".into(),
+///     compile_flags: "release".into(),
+/// };
+///
+/// assert_eq!(meta.murk_version, "0.1.0");
+/// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BuildMetadata {
     /// Rust toolchain version (e.g. `"1.78.0"`).
@@ -21,6 +36,23 @@ pub struct BuildMetadata {
 /// Captures everything needed to reconstruct an identical world configuration
 /// for replay: the RNG seed, configuration hash, field/cell counts, and
 /// an opaque space descriptor.
+///
+/// # Examples
+///
+/// ```
+/// use murk_replay::InitDescriptor;
+///
+/// let init = InitDescriptor {
+///     seed: 42,
+///     config_hash: 0xDEAD_BEEF,
+///     field_count: 3,
+///     cell_count: 100,
+///     space_descriptor: vec![],
+/// };
+///
+/// assert_eq!(init.seed, 42);
+/// assert_eq!(init.field_count, 3);
+/// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InitDescriptor {
     /// RNG seed used for deterministic simulation.
@@ -57,6 +89,21 @@ pub struct SerializedCommand {
 ///
 /// Contains the tick identifier, all commands submitted during that tick,
 /// and a hash of the post-tick snapshot for verification.
+///
+/// # Examples
+///
+/// ```
+/// use murk_replay::Frame;
+///
+/// let frame = Frame {
+///     tick_id: 1,
+///     commands: vec![],
+///     snapshot_hash: 0,
+/// };
+///
+/// assert_eq!(frame.tick_id, 1);
+/// assert!(frame.commands.is_empty());
+/// ```
 #[derive(Clone, Debug, PartialEq)]
 pub struct Frame {
     /// The tick number this frame represents.

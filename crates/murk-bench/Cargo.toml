@@ -20,7 +20,7 @@ murk-arena = { path = "../murk-arena" }
 murk-obs = { path = "../murk-obs" }
 murk-replay = { path = "../murk-replay" }
 murk-test-utils = { path = "../murk-test-utils" }
-smallvec = "1"
+smallvec = { workspace = true }
 
 [[bench]]
 name = "reference_profile"

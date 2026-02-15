@@ -1900,7 +1900,7 @@ mod tests {
             .execute_agents(
                 &snap,
                 &space,
-                &[center.clone()],
+                std::slice::from_ref(&center),
                 None,
                 &mut std_output,
                 &mut std_mask,

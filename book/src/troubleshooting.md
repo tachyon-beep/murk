@@ -17,7 +17,7 @@ maturin develop --release
 
 ### cargo build fails with MSRV error
 
-Murk requires Rust 1.75 or later. Update with:
+Murk requires Rust 1.87 or later. Update with:
 
 ```bash
 rustup update stable

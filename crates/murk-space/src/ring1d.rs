@@ -12,6 +12,25 @@ use smallvec::SmallVec;
 /// Equivalent to [`Line1D`](crate::Line1D) with [`EdgeBehavior::Wrap`](crate::EdgeBehavior::Wrap),
 /// but exists as a separate type so that
 /// `downcast_ref::<Ring1D>()` works correctly.
+///
+/// # Examples
+///
+/// ```
+/// use murk_space::{Ring1D, Space};
+///
+/// let ring = Ring1D::new(10).unwrap();
+/// assert_eq!(ring.len(), 10);
+/// assert_eq!(ring.cell_count(), 10);
+///
+/// // Every cell has exactly 2 neighbours (periodic boundary).
+/// let edge: murk_core::Coord = vec![0i32].into();
+/// assert_eq!(ring.neighbours(&edge).len(), 2);
+///
+/// // Wrap-around distance: 0 and 9 are 1 step apart, not 9.
+/// let a: murk_core::Coord = vec![0i32].into();
+/// let b: murk_core::Coord = vec![9i32].into();
+/// assert_eq!(ring.distance(&a, &b), 1.0);
+/// ```
 #[derive(Debug, Clone)]
 pub struct Ring1D {
     len: u32,

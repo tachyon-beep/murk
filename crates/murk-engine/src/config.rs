@@ -427,7 +427,7 @@ mod tests {
         let cfg = AsyncConfig::default();
         let count = cfg.resolved_worker_count();
         assert!(
-            count >= 2 && count <= 16,
+            (2..=16).contains(&count),
             "auto count {count} out of [2,16]"
         );
     }

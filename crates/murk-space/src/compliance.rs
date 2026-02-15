@@ -6,7 +6,7 @@
 
 use crate::region::RegionSpec;
 use crate::space::Space;
-use std::collections::HashSet;
+use indexmap::IndexSet;
 
 /// Assert that `distance(a, a) == 0.0` for all cells.
 pub fn assert_distance_reflexive(space: &dyn Space) {
@@ -82,7 +82,7 @@ pub fn assert_canonical_ordering_complete(space: &dyn Space) {
         ordering.len(),
         space.cell_count()
     );
-    let unique: HashSet<_> = ordering.iter().collect();
+    let unique: IndexSet<_> = ordering.iter().collect();
     assert_eq!(
         unique.len(),
         space.cell_count(),

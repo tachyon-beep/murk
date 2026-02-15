@@ -3,7 +3,7 @@
 ## Development environment
 
 **Requirements:**
-- Rust stable (1.75+) via [rustup](https://rustup.rs/)
+- Rust stable (1.87+) via [rustup](https://rustup.rs/)
 - Rust nightly (for Miri only): `rustup toolchain install nightly --component miri`
 - Python 3.9+
 - [maturin](https://www.maturin.rs/): `pip install maturin`

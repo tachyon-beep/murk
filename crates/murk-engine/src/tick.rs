@@ -871,7 +871,8 @@ mod tests {
         let mut engine = simple_engine();
         let result = engine.execute_tick().unwrap();
 
-        assert!(result.metrics.total_us > 0 || result.metrics.total_us == 0); // fast machine
+        // total_us is u64, so it's always >= 0; just verify the struct is populated.
+        let _ = result.metrics.total_us;
         assert_eq!(result.metrics.propagator_us.len(), 1);
         assert_eq!(result.metrics.propagator_us[0].0, "const");
     }

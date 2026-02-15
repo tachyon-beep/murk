@@ -11,6 +11,7 @@ keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true
 description = "Core types and traits for the Murk simulation framework"
+readme = "README.md"
 
 [dependencies]
 indexmap = { workspace = true }

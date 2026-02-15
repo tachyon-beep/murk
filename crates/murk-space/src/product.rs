@@ -549,14 +549,14 @@ mod tests {
         assert_eq!(order.len(), 250); // 25 * 10
 
         // First 10 entries: hex(0,0) with line 0..9
-        for i in 0..10 {
+        for (i, coord) in order.iter().enumerate().take(10) {
             let expected: Coord = smallvec![0, 0, i as i32];
-            assert_eq!(order[i], expected);
+            assert_eq!(*coord, expected);
         }
         // Next 10: hex(1,0) with line 0..9
-        for i in 0..10 {
-            let expected: Coord = smallvec![1, 0, i as i32];
-            assert_eq!(order[10 + i], expected);
+        for (j, coord) in order[10..20].iter().enumerate() {
+            let expected: Coord = smallvec![1, 0, j as i32];
+            assert_eq!(*coord, expected);
         }
     }
 

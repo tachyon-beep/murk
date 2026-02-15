@@ -380,7 +380,7 @@ fn determinism_sparse_field() {
 
     // SetField commands every 10 ticks
     let commands_for_tick = |tick: u64| -> Vec<Command> {
-        if tick % 10 == 0 {
+        if tick.is_multiple_of(10) {
             let cell = (tick / 10) % 100;
             let row = (cell / 10) as i32;
             let col = (cell % 10) as i32;
@@ -544,7 +544,7 @@ fn determinism_global_parameter() {
     let commands_for_tick = |tick: u64| -> Vec<Command> {
         let mut cmds = Vec::new();
         // SetParameter every 50 ticks
-        if tick % 50 == 0 {
+        if tick.is_multiple_of(50) {
             cmds.push(Command {
                 payload: CommandPayload::SetParameter {
                     key: ParameterKey(0),
@@ -558,7 +558,7 @@ fn determinism_global_parameter() {
             });
         }
         // SetParameterBatch every 100 ticks
-        if tick % 100 == 0 {
+        if tick.is_multiple_of(100) {
             cmds.push(Command {
                 payload: CommandPayload::SetParameterBatch {
                     params: vec![

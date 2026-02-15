@@ -63,7 +63,7 @@ generational allocation for deterministic, zero-GC memory management.
 ## Prerequisites
 
 **Rust** (for building from source or using the Rust API):
-- Rust toolchain (stable, 1.75+): [rustup.rs](https://rustup.rs/)
+- Rust toolchain (stable, 1.87+): [rustup.rs](https://rustup.rs/)
 
 **Python** (for the Gymnasium bindings):
 - Python 3.9+
@@ -183,7 +183,7 @@ Key design decisions:
 
 ## Testing
 
-580+ tests across the workspace, all passing:
+640+ tests across the workspace, all passing:
 
 ```bash
 cargo test --workspace           # Unit and integration tests
