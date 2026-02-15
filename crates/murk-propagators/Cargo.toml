@@ -21,4 +21,4 @@ smallvec = { workspace = true }
 
 [dev-dependencies]
 murk-test-utils = { path = "../murk-test-utils" }
-murk-engine = { path = "../murk-engine", version = "0.1.0" }
+murk-engine = { path = "../murk-engine" }
