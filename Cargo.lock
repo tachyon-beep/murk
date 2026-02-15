@@ -476,6 +476,7 @@ dependencies = [
  "murk-obs",
  "murk-propagator",
  "murk-propagators",
+ "murk-replay",
  "murk-space",
  "murk-test-utils",
  "proptest",

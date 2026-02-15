@@ -27,5 +27,6 @@ smallvec = { workspace = true }
 murk-test-utils = { path = "../murk-test-utils" }
 murk-bench = { path = "../murk-bench" }
 murk-propagators = { path = "../murk-propagators", version = "0.1.0" }
+murk-replay = { path = "../murk-replay", version = "0.1.0" }
 proptest = { workspace = true }
 smallvec = { workspace = true }

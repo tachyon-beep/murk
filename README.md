@@ -152,7 +152,10 @@ for _ in range(1000):
 | [`heat_seeker`](examples/heat_seeker/) | PPO RL on Square4, Python propagator, diffusion |
 | [`hex_pursuit`](examples/hex_pursuit/) | Hex2D, multi-agent, AgentDisk foveation |
 | [`crystal_nav`](examples/crystal_nav/) | FCC12 3D lattice navigation |
+| [`layered_hex`](examples/layered_hex/) | ProductSpace (Hex2D × Line1D), multi-floor navigation |
 | [`quickstart.rs`](crates/murk-engine/examples/quickstart.rs) | Rust API: propagator, commands, snapshots |
+| [`realtime_async.rs`](crates/murk-engine/examples/realtime_async.rs) | RealtimeAsyncWorld: background ticking, observe, shutdown |
+| [`replay.rs`](crates/murk-engine/examples/replay.rs) | Deterministic replay: record, verify, prove determinism |
 
 See [`docs/CONCEPTS.md`](docs/CONCEPTS.md) for a guide to Murk's mental model
 (spaces, fields, propagators, commands, observations).
