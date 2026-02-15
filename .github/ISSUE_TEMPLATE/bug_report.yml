@@ -1,0 +1,68 @@
+name: Bug Report
+description: Report a bug in Murk
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting a bug. Please fill out the sections below.
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear description of what the bug is.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to Reproduce
+      description: Minimal code or steps to reproduce the behavior.
+      placeholder: |
+        1. Create a config with ...
+        2. Call world.step_sync(...)
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What you expected to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What actually happened. Include error messages if applicable.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Murk Version
+      description: Output of `cargo pkgid murk-core` or `pip show murk`
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: api
+    attributes:
+      label: API
+      options:
+        - Rust
+        - Python
+        - C FFI
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Rust version, Python version, etc.
+      placeholder: |
+        - OS: Ubuntu 24.04
+        - Rust: 1.78.0
+        - Python: 3.12.3
