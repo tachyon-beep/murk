@@ -200,10 +200,7 @@ fn stress_mass_plan_invalidation_recovery() {
 
     // --- 3. Compile 200 ObsPlans bound to current generation ---
     let pre_reset_generation = world.snapshot().world_generation_id();
-    eprintln!(
-        "  Pre-reset generation: {}",
-        pre_reset_generation.0
-    );
+    eprintln!("  Pre-reset generation: {}", pre_reset_generation.0);
 
     let specs = build_specs();
     let plans = compile_all_plans(&specs, world.space(), pre_reset_generation);
@@ -341,10 +338,7 @@ fn stress_mass_plan_invalidation_recovery() {
             successes, PLAN_COUNT,
             "all recompiled plans should succeed post-reset"
         );
-        assert_eq!(
-            failures, 0,
-            "no recompiled plans should fail post-reset"
-        );
+        assert_eq!(failures, 0, "no recompiled plans should fail post-reset");
 
         let tput = throughput_obs_per_sec(PLAN_COUNT, elapsed_us);
         recovery_throughputs.push(tput);

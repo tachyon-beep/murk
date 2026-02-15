@@ -24,7 +24,7 @@ repository = "https://github.com/tachyon-beep/murk"
 authors = ["John Morrissey"]
 homepage = "https://github.com/tachyon-beep/murk"
 documentation = "https://tachyon-beep.github.io/murk/"
-keywords = ["simulation", "reinforcement-learning", "arena", "gymnasium", "tick-based"]
+keywords = ["simulation", "reinforcement", "arena", "gymnasium", "gamedev"]
 categories = ["simulation", "science", "game-development"]
 rust-version = "1.87"
 

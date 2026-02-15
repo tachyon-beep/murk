@@ -10,7 +10,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use murk_core::error::StepError;
 use murk_core::id::{FieldId, TickId};
 use murk_core::traits::SnapshotAccess;
-use murk_core::{BoundaryBehavior, FieldDef, FieldMutability, FieldSet, FieldType, PropagatorError};
+use murk_core::{
+    BoundaryBehavior, FieldDef, FieldMutability, FieldSet, FieldType, PropagatorError,
+};
 use murk_engine::config::{BackoffConfig, WorldConfig};
 use murk_engine::lockstep::LockstepWorld;
 use murk_propagator::context::StepContext;
@@ -60,12 +62,12 @@ impl Propagator for NanOnTickPropagator {
         let n = self.call_count.fetch_add(1, Ordering::Relaxed);
 
         // Fill the output buffer with a valid value on success ticks.
-        let out = ctx
-            .writes()
-            .write(self.output)
-            .ok_or_else(|| PropagatorError::ExecutionFailed {
-                reason: format!("field {:?} not writable", self.output),
-            })?;
+        let out =
+            ctx.writes()
+                .write(self.output)
+                .ok_or_else(|| PropagatorError::ExecutionFailed {
+                    reason: format!("field {:?} not writable", self.output),
+                })?;
         out.fill((n + 1) as f32);
 
         if n >= self.succeed_count {
@@ -157,14 +159,10 @@ fn nan_error_contains_propagator_failed_with_nan_detected() {
                     assert_eq!(*field_id, FieldId(0));
                     assert_eq!(*cell_index, Some(0));
                 }
-                other => panic!(
-                    "expected NanDetected reason, got: {other:?}"
-                ),
+                other => panic!("expected NanDetected reason, got: {other:?}"),
             }
         }
-        other => panic!(
-            "expected PropagatorFailed, got: {other:?}"
-        ),
+        other => panic!("expected PropagatorFailed, got: {other:?}"),
     }
 }
 

@@ -2,7 +2,7 @@
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use murk_core::id::{FieldId, ParameterVersion, TickId, WorldGenerationId};
-use murk_replay::codec::{encode_frame, decode_frame};
+use murk_replay::codec::{decode_frame, encode_frame};
 use murk_replay::hash::snapshot_hash;
 use murk_replay::types::{Frame, SerializedCommand};
 use murk_test_utils::MockSnapshot;
@@ -40,7 +40,9 @@ fn make_frame(n: usize) -> Frame {
 fn make_mock_snapshot_10k_5fields() -> MockSnapshot {
     let mut snap = MockSnapshot::new(TickId(1), WorldGenerationId(1), ParameterVersion(0));
     for field_idx in 0..5u32 {
-        let data: Vec<f32> = (0..10_000).map(|i| (i + field_idx * 10_000) as f32).collect();
+        let data: Vec<f32> = (0..10_000)
+            .map(|i| (i + field_idx * 10_000) as f32)
+            .collect();
         snap.set_field(FieldId(field_idx), data);
     }
     snap
