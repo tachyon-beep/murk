@@ -14,10 +14,10 @@ rust-version.workspace = true
 readme = "README.md"
 
 [dependencies]
-murk-core = { path = "../murk-core", version = "0.1.3" }
-murk-space = { path = "../murk-space", version = "0.1.3" }
-murk-propagator = { path = "../murk-propagator", version = "0.1.3" }
-murk-propagators = { path = "../murk-propagators", version = "0.1.3" }
-murk-obs = { path = "../murk-obs", version = "0.1.3" }
-murk-engine = { path = "../murk-engine", version = "0.1.3" }
-murk-replay = { path = "../murk-replay", version = "0.1.3" }
+murk-core = { path = "../murk-core", version = "0.1.5" }
+murk-space = { path = "../murk-space", version = "0.1.5" }
+murk-propagator = { path = "../murk-propagator", version = "0.1.5" }
+murk-propagators = { path = "../murk-propagators", version = "0.1.5" }
+murk-obs = { path = "../murk-obs", version = "0.1.5" }
+murk-engine = { path = "../murk-engine", version = "0.1.5" }
+murk-replay = { path = "../murk-replay", version = "0.1.5" }

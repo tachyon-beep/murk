@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5](https://github.com/tachyon-beep/murk/compare/murk-engine-v0.1.4...murk-engine-v0.1.5) - 2026-02-16
+
+### Fixed
+
+- increase reset_lifecycle test timeout for slow CI runners
+
 ## [0.1.3](https://github.com/tachyon-beep/murk/compare/murk-engine-v0.1.2...murk-engine-v0.1.3) - 2026-02-16
 
 ### Other
