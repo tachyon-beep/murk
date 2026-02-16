@@ -229,4 +229,68 @@ mod tests {
         let desc = FieldDescriptor::from_field_defs(&defs, 100);
         assert!(desc.get(FieldId(99)).is_none());
     }
+
+    #[cfg(not(miri))]
+    mod proptests {
+        use super::*;
+        use murk_core::{BoundaryBehavior, FieldType};
+        use proptest::prelude::*;
+
+        fn arb_field_type() -> impl Strategy<Value = FieldType> {
+            prop_oneof![
+                Just(FieldType::Scalar),
+                (2u32..8).prop_map(|d| FieldType::Vector { dims: d }),
+                (2u32..16).prop_map(|n| FieldType::Categorical { n_values: n }),
+            ]
+        }
+
+        proptest! {
+            #[test]
+            fn total_len_equals_cell_count_times_components(
+                cell_count in 1u32..1000,
+                field_type in arb_field_type(),
+            ) {
+                let components = field_type.components();
+                let defs = vec![(
+                    FieldId(0),
+                    FieldDef {
+                        name: "f".into(),
+                        field_type,
+                        mutability: FieldMutability::PerTick,
+                        units: None,
+                        bounds: None,
+                        boundary_behavior: BoundaryBehavior::Clamp,
+                    },
+                )];
+                let desc = FieldDescriptor::from_field_defs(&defs, cell_count);
+                let entry = desc.get(FieldId(0)).unwrap();
+                prop_assert_eq!(
+                    entry.meta.total_len,
+                    cell_count * components
+                );
+            }
+
+            #[test]
+            fn len_equals_number_of_field_defs(
+                n_fields in 1usize..20,
+            ) {
+                let defs: Vec<_> = (0..n_fields)
+                    .map(|i| (
+                        FieldId(i as u32),
+                        FieldDef {
+                            name: format!("f{i}"),
+                            field_type: FieldType::Scalar,
+                            mutability: FieldMutability::PerTick,
+                            units: None,
+                            bounds: None,
+                            boundary_behavior: BoundaryBehavior::Clamp,
+                        },
+                    ))
+                    .collect();
+                let desc = FieldDescriptor::from_field_defs(&defs, 100);
+                prop_assert_eq!(desc.len(), n_fields);
+                prop_assert_eq!(desc.is_empty(), n_fields == 0);
+            }
+        }
+    }
 }
