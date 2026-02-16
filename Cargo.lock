@@ -426,7 +426,7 @@ dependencies = [
 
 [[package]]
 name = "murk"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "murk-core",
  "murk-engine",
@@ -439,7 +439,7 @@ dependencies = [
 
 [[package]]
 name = "murk-arena"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "indexmap",
  "murk-core",
@@ -448,7 +448,7 @@ dependencies = [
 
 [[package]]
 name = "murk-bench"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "criterion",
  "murk-arena",
@@ -464,7 +464,7 @@ dependencies = [
 
 [[package]]
 name = "murk-core"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "indexmap",
  "proptest",
@@ -473,7 +473,7 @@ dependencies = [
 
 [[package]]
 name = "murk-engine"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "crossbeam-channel",
  "indexmap",
@@ -492,7 +492,7 @@ dependencies = [
 
 [[package]]
 name = "murk-ffi"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "murk-core",
  "murk-engine",
@@ -506,7 +506,7 @@ dependencies = [
 
 [[package]]
 name = "murk-obs"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "indexmap",
  "murk-core",
@@ -518,7 +518,7 @@ dependencies = [
 
 [[package]]
 name = "murk-propagator"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "indexmap",
  "murk-core",
@@ -529,7 +529,7 @@ dependencies = [
 
 [[package]]
 name = "murk-propagators"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "murk-core",
  "murk-engine",
@@ -541,7 +541,7 @@ dependencies = [
 
 [[package]]
 name = "murk-python"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "murk-ffi",
  "numpy",
@@ -550,7 +550,7 @@ dependencies = [
 
 [[package]]
 name = "murk-replay"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "indexmap",
  "murk-bench",
@@ -565,7 +565,7 @@ dependencies = [
 
 [[package]]
 name = "murk-space"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "indexmap",
  "murk-core",
@@ -575,7 +575,7 @@ dependencies = [
 
 [[package]]
 name = "murk-test-utils"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "murk-core",
  "murk-propagator",
