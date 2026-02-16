@@ -90,8 +90,7 @@ flowchart TD
 - Rust toolchain (stable, 1.87+): [rustup.rs](https://rustup.rs/)
 
 **Python** (for the Gymnasium bindings):
-- Python 3.9+
-- [maturin](https://www.maturin.rs/) (`pip install maturin`)
+- Python 3.12+
 - numpy >= 1.24, gymnasium >= 0.29 (installed automatically)
 
 ## Quick start
@@ -104,13 +103,10 @@ flowchart TD
 cargo add murk
 ```
 
-**Python** (build from source — PyPI packages coming soon):
+**Python** (from [PyPI](https://pypi.org/project/murk/)):
 
 ```bash
-git clone https://github.com/tachyon-beep/murk.git
-cd murk/crates/murk-python
-pip install maturin
-maturin develop --release
+pip install murk
 ```
 
 ### Rust
@@ -124,10 +120,11 @@ for a complete working example: space creation, field definitions, a diffusion
 propagator, command injection, snapshot reading, and world reset.
 
 ```rust
-// The essential pattern:
-let config = WorldConfig { space, fields, propagators, dt: 0.1, seed: 42, .. };
+use murk_core::{FieldId, FieldReader, SnapshotAccess};
+use murk_engine::{LockstepWorld, WorldConfig};
+
 let mut world = LockstepWorld::new(config)?;
-let result = world.step_sync(commands)?;
+let result = world.step_sync(vec![])?;
 let heat = result.snapshot.read(FieldId(0)).unwrap();
 ```
 

@@ -197,10 +197,10 @@ let heat = result.snapshot.read(FieldId(0)).unwrap();
 An autonomous tick thread running at a configurable rate (e.g., 60 Hz).
 
 ```rust
-let world = RealtimeAsyncWorld::start(config)?;
+let world = RealtimeAsyncWorld::new(config, async_config)?;
 world.submit_commands(commands)?;
 let snapshot = world.latest_snapshot();
-let report = world.shutdown(Duration::from_secs(5))?;
+let report = world.shutdown();
 ```
 
 - Non-blocking command submission and observation extraction.
@@ -301,12 +301,13 @@ Propagators are stateless operators that update fields each tick.
 They implement the `Propagator` trait:
 
 ```rust
-pub trait Propagator: Send + Sync {
+pub trait Propagator: Send + 'static {
     fn name(&self) -> &str;
     fn reads(&self) -> FieldSet;          // current-tick values (Euler)
     fn reads_previous(&self) -> FieldSet; // frozen tick-start values (Jacobi)
     fn writes(&self) -> Vec<(FieldId, WriteMode)>;
     fn max_dt(&self) -> Option<f64>;      // CFL constraint
+    fn scratch_bytes(&self) -> usize;     // scratch buffer size (default 0)
     fn step(&self, ctx: &mut StepContext<'_>) -> Result<(), PropagatorError>;
 }
 ```
@@ -355,7 +356,7 @@ invalidated and must be recompiled.
 Commands are the way external actions enter the simulation. Each
 command carries:
 
-- **Payload**: `SetField`, `SpawnEntity`, `RemoveEntity`, or custom.
+- **Payload**: `SetField`, `Spawn`, `Despawn`, `Move`, `SetParameter`, `SetParameterBatch`, or `Custom`.
 - **TTL**: `expires_after_tick` — tick-based expiry (never wall clock).
 - **Priority class**: determines application order within a tick.
 - **Ordering provenance**: `source_id`, `source_seq`, and

@@ -4,7 +4,7 @@
 
 ### maturin develop fails with "pyo3 not found"
 
-Ensure you have a compatible Python version (3.9+) and that your virtual
+Ensure you have a compatible Python version (3.12+) and that your virtual
 environment is activated:
 
 ```bash
@@ -47,4 +47,4 @@ maturin develop --release
 
 Determinism tests are sensitive to floating-point ordering. Ensure you're
 running on the same platform and Rust version as CI. See
-[determinism-catalogue.md](determinism.md) for details.
+[Determinism Catalogue](determinism.md) for details.

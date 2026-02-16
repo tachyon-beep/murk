@@ -67,7 +67,7 @@ for the full source. The essential pattern:
 
 ```rust,no_run
 use murk_core::{
-    BoundaryBehavior, FieldDef, FieldId, FieldMutability, FieldType, SnapshotAccess,
+    BoundaryBehavior, FieldDef, FieldId, FieldMutability, FieldReader, FieldType,
 };
 use murk_engine::{BackoffConfig, LockstepWorld, WorldConfig};
 use murk_space::{EdgeBehavior, Square4};
