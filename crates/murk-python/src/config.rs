@@ -354,9 +354,8 @@ impl Config {
         let h = self.require_handle()?;
         let params_addr = params.as_ptr() as usize;
         let params_len = params.len();
-        let status = py.detach(|| {
-            murk_config_set_space(h, space_type, params_addr as *const f64, params_len)
-        });
+        let status = py
+            .detach(|| murk_config_set_space(h, space_type, params_addr as *const f64, params_len));
         check_status(status)
     }
 

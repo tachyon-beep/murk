@@ -162,8 +162,8 @@ impl World {
         let buf_addr = unsafe { output.as_array_mut().as_mut_ptr() } as usize;
         let buf_len = output.len();
         // Release GIL: murk_snapshot_read_field locks WORLDS.
-        let status = py
-            .detach(|| murk_snapshot_read_field(h, field_id, buf_addr as *mut f32, buf_len));
+        let status =
+            py.detach(|| murk_snapshot_read_field(h, field_id, buf_addr as *mut f32, buf_len));
         check_status(status)
     }
 
