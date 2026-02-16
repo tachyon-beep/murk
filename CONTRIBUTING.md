@@ -191,15 +191,22 @@ Use a scope when helpful: `feat(space):`, `fix(python):`, `ci(release):`.
 
 ## Releasing
 
-Releases are managed by [release-plz](https://release-plz.ieni.dev/):
+Releases are manual, triggered by pushing a git tag:
 
-1. **Automatic:** On every push to `main`, release-plz opens (or updates) a
-   release PR that bumps versions and updates CHANGELOG.md based on conventional
-   commits since the last release.
-2. **Merge the release PR** when ready to publish.
-3. **On merge:** release-plz creates git tags, which trigger the release workflow.
-4. **The release workflow** publishes Rust crates to crates.io and Python wheels
-   to PyPI, and creates a GitHub Release.
+1. **Bump the version** in root `Cargo.toml` under `[workspace.package]`.
+   The Python package version is derived automatically (via `dynamic = ["version"]`
+   in `pyproject.toml`), so there's nothing else to update.
+2. **Commit and push** to `main`.
+3. **Tag and push the tag:**
+   ```bash
+   git tag murk-v0.1.5
+   git push origin murk-v0.1.5
+   ```
+4. **The release workflow** runs CI, publishes Rust crates to crates.io, builds
+   Python wheels, and publishes them to PyPI. It also creates a GitHub Release
+   with auto-generated release notes.
+5. **If something fails:** fix the issue, then re-trigger from the GitHub Actions
+   UI using `workflow_dispatch` with the same tag (CI is skipped on re-runs).
 
 **Dry-run a release locally:**
 
@@ -209,5 +216,4 @@ cargo publish --dry-run -p murk-core
 
 **Secrets required** (set in GitHub repo settings > Secrets):
 - `CARGO_REGISTRY_TOKEN` — crates.io API token
-- `PYPI_API_TOKEN` — PyPI API token
 - `CODECOV_TOKEN` — Codecov upload token
