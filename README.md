@@ -1,6 +1,7 @@
 # Murk
 
 [![crates.io](https://img.shields.io/crates/v/murk.svg)](https://crates.io/crates/murk)
+[![PyPI](https://img.shields.io/pypi/v/murk.svg)](https://pypi.org/project/murk/)
 [![CI](https://github.com/tachyon-beep/murk/actions/workflows/ci.yml/badge.svg)](https://github.com/tachyon-beep/murk/actions/workflows/ci.yml)
 [![Docs](https://github.com/tachyon-beep/murk/actions/workflows/docs.yml/badge.svg)](https://tachyon-beep.github.io/murk/)
 [![codecov](https://codecov.io/gh/tachyon-beep/murk/graph/badge.svg)](https://codecov.io/gh/tachyon-beep/murk)
