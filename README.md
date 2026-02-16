@@ -13,6 +13,21 @@ a modular propagator pipeline, ML-native observation extraction, and
 Gymnasium-compatible Python bindings — all backed by arena-based
 generational allocation for deterministic, zero-GC memory management.
 
+## Table of Contents
+
+- [Features](#features)
+- [Architecture](#architecture)
+- [Prerequisites](#prerequisites)
+- [Quick Start](#quick-start)
+- [Workspace Crates](#workspace-crates)
+- [Examples](#examples)
+- [Modeling Concepts](#modeling-concepts)
+- [Documentation](#documentation)
+- [Design](#design)
+- [Testing](#testing)
+- [Next Steps](#next-steps)
+- [License](#license)
+
 ## Features
 
 - **Spatial backends** — Line1D, Ring1D, Square4, Square8, Hex2D, and
@@ -90,14 +105,14 @@ flowchart TD
 ## Prerequisites
 
 **Rust** (for building from source or using the Rust API):
-- Rust toolchain (stable, 1.87+): [rustup.rs](https://rustup.rs/)
+- Install Rust toolchain (stable, 1.87+) via [rustup.rs](https://rustup.rs/)
 
 **Python** (for the Gymnasium bindings):
-- Python 3.9+
-- [maturin](https://www.maturin.rs/) (`pip install maturin`)
-- numpy >= 1.24, gymnasium >= 0.29 (installed automatically)
+- Install Python 3.9+
+- Install [maturin](https://www.maturin.rs/): `pip install maturin`
+- Install numpy >= 1.24 and gymnasium >= 0.29 (or let them install automatically)
 
-## Quick start
+## Quick Start
 
 ### Installation
 
@@ -107,7 +122,7 @@ flowchart TD
 cargo add murk
 ```
 
-**Python** (build from source — PyPI packages coming soon):
+**Python** (PyPI release planned; install from source for now):
 
 ```bash
 git clone https://github.com/tachyon-beep/murk.git
@@ -127,10 +142,24 @@ for a complete working example: space creation, field definitions, a diffusion
 propagator, command injection, snapshot reading, and world reset.
 
 ```rust
-// The essential pattern:
-let config = WorldConfig { space, fields, propagators, dt: 0.1, seed: 42, .. };
+use murk_core::{FieldDef, FieldId, FieldMutability, FieldType, SnapshotAccess};
+use murk_engine::{BackoffConfig, LockstepWorld, WorldConfig};
+use murk_space::{EdgeBehavior, Square4};
+
+let space = Square4::new(8, 8, EdgeBehavior::Absorb)?;
+let fields = vec![FieldDef {
+    name: "heat".into(),
+    field_type: FieldType::Scalar,
+    mutability: FieldMutability::PerTick,
+    ..Default::default()
+}];
+let config = WorldConfig {
+    space: Box::new(space), fields,
+    propagators: vec![Box::new(DiffusionPropagator)],
+    dt: 1.0, seed: 42, ..Default::default()
+};
 let mut world = LockstepWorld::new(config)?;
-let result = world.step_sync(commands)?;
+let result = world.step_sync(vec![])?;
 let heat = result.snapshot.read(FieldId(0)).unwrap();
 ```
 
@@ -138,12 +167,15 @@ let heat = result.snapshot.read(FieldId(0)).unwrap();
 
 ```python
 import murk
-from murk import Config, FieldMutability, EdgeBehavior, WriteMode, ObsEntry, RegionType
+from murk import Config, FieldType, FieldMutability, EdgeBehavior, WriteMode, ObsEntry, RegionType
 
 config = Config()
 config.set_space_square4(16, 16, EdgeBehavior.Absorb)
-config.add_field("heat", mutability=FieldMutability.PerTick)
-# ... add propagators ...
+config.add_field("heat", FieldType.Scalar, FieldMutability.PerTick)
+murk.add_propagator(
+    config, name="diffusion", step_fn=diffusion_step,
+    reads_previous=[0], writes=[(0, WriteMode.Full)],
+)
 
 env = murk.MurkEnv(config, obs_entries=[ObsEntry(0, region_type=RegionType.All)], n_actions=5)
 obs, info = env.reset()
@@ -153,7 +185,10 @@ for _ in range(1000):
     obs, reward, terminated, truncated, info = env.step(action)
 ```
 
-## Workspace crates
+## Workspace Crates
+
+Most users need only the `murk` facade crate, which re-exports everything.
+Sub-crates are listed for contributors and advanced users.
 
 | Crate | Description |
 |---|---|
@@ -191,11 +226,16 @@ See [`docs/CONCEPTS.md`](docs/CONCEPTS.md) for a guide to Murk's mental model
 
 ## Modeling Concepts
 
+This section is a cookbook of 20+ domain-specific simulation patterns built
+on Murk's field-and-propagator model. Each recipe is self-contained: it lists
+the fields, propagator wiring, and read/write modes needed to implement a
+particular mechanic. For a thorough explanation of the underlying primitives
+(spaces, fields, mutability classes, propagators, commands, observations),
+see [`docs/CONCEPTS.md`](docs/CONCEPTS.md).
+
 Murk's field-and-propagator model maps naturally to a wide range of
 simulation mechanics. Each mechanic below shows the fields, propagator
-pattern, and read/write modes you'd use to implement it. See
-[`docs/CONCEPTS.md`](docs/CONCEPTS.md) for an explanation of the
-underlying primitives.
+pattern, and read/write modes you'd use to implement it.
 
 ### Fluid & Environmental Dynamics
 
@@ -522,12 +562,27 @@ Key design decisions:
 
 660+ tests across the workspace, all passing:
 
+- **Unit tests** -- per-module logic for every crate
+- **Integration tests** -- end-to-end world stepping, observation extraction, replay verification
+- **Property tests** -- proptest-based invariant checks (e.g. `FieldSet` bitset laws, space canonical ordering)
+- **Stress tests** -- concurrent ingress/egress, realtime-async shutdown races
+- **Miri** -- memory safety verification for `murk-arena` (the only crate with `unsafe`)
+
+Expected runtime: ~30 seconds for `cargo test --workspace`, ~2 minutes including Miri.
+
 ```bash
-cargo test --workspace           # Unit and integration tests
+cargo test --workspace                   # Unit and integration tests
 cargo +nightly miri test -p murk-arena   # Memory safety verification
 ```
 
 CI runs check, test, clippy, rustfmt, and Miri on every push and PR.
+
+## Next Steps
+
+- **New to Murk?** Start with the [quickstart example](crates/murk-engine/examples/quickstart.rs), the [concepts guide](docs/CONCEPTS.md), and the [heat_seeker demo](examples/heat_seeker/).
+- **Building a simulation?** Read the [Modeling Concepts](#modeling-concepts) section above, then explore the [propagator examples](crates/murk-propagators/) for reference implementations.
+- **Contributing?** See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, code style, and the PR process.
+- **Questions?** Open a [GitHub issue](https://github.com/tachyon-beep/murk/issues) -- we welcome bug reports, feature requests, and design discussions.
 
 ## License
 

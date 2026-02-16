@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `BatchedEngine` for high-throughput parallel world stepping with a single GIL release
+- `BatchedVecEnv` SB3-compatible Python interface for batched training
+- `batched_heat_seeker` example: BatchedVecEnv migration with vectorized state
+- `batched_cookbook` example: low-level BatchedWorld API recipes
+- `batched_benchmark` example: performance comparison of BatchedVecEnv vs MurkVecEnv
+- Modeling concepts section in README with 20+ domain-specific simulation patterns
+- Bug hunt script for automated issue discovery
+
+### Changed
+
+- BatchedEngine documentation added across all guides (CONCEPTS.md, ARCHITECTURE.md, etc.)
+
+### Fixed
+
+- Review issues and documentation corrections across examples and guides
+
 ## [0.1.0] - 2026-02-15
 
 Initial public release of Murk: a tick-based world simulation engine

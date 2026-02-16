@@ -92,7 +92,7 @@ Subclass `BatchedVecEnv` and override the hook methods to customise
 rewards, termination, and action-to-command mapping for your RL task.
 See the [batched_heat_seeker](https://github.com/tachyon-beep/murk/tree/main/examples/batched_heat_seeker)
 example for a complete working project, and the
-[Concepts guide](../docs/CONCEPTS.md) for the full API.
+[Concepts guide](concepts.md) for the full API.
 
 ## Next steps
 

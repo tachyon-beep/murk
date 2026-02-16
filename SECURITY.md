@@ -15,7 +15,7 @@ Instead, use one of these methods:
 1. **GitHub Security Advisories** (preferred): Go to the
    [Security tab](https://github.com/tachyon-beep/murk/security/advisories/new)
    and create a new private advisory.
-2. **Email:** Contact the maintainer directly.
+2. **GitHub profile:** Contact via GitHub: open a [security advisory](https://github.com/tachyon-beep/murk/security/advisories/new) or reach out through the [maintainer's GitHub profile](https://github.com/tachyon-beep).
 
 ### What to include
 
@@ -34,6 +34,6 @@ Instead, use one of these methods:
 ## Security Practices
 
 - `#![forbid(unsafe_code)]` on all crates except `murk-arena` and `murk-ffi`
-- Miri (memory safety verification) runs on every push via CI
+- CI runs Miri (memory safety verification) on every push
 - `cargo-deny` checks for known vulnerabilities in dependencies
 - Dependabot monitors for dependency security updates

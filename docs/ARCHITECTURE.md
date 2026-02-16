@@ -42,16 +42,16 @@ real-time applications. The architecture optimises for:
 
 Three principles guide every subsystem:
 
-1. **Egress Always Returns** — observation extraction never blocks
-   indefinitely, even during tick failures or shutdown. Responses may
-   indicate staleness or degraded coverage via metadata, but always
-   return data.
-2. **Tick-Expressible Time** — all engine-internal time references that
-   affect state transitions are expressed in tick counts, never wall
+1. **Egress Always Returns** — observation extraction always returns,
+   even during tick failures or shutdown. Responses may indicate
+   staleness or degraded coverage via metadata, but the caller always
+   receives data.
+2. **Tick-Expressible Time** — the engine expresses all internal time
+   references that affect state transitions in tick counts, never wall
    clocks. This prevents replay divergence.
-3. **Asymmetric Mode Dampening** — staleness and overload are handled
-   differently in each runtime mode, because Lockstep and RealtimeAsync
-   have fundamentally different dynamics.
+3. **Asymmetric Mode Dampening** — the engine handles staleness and
+   overload differently in each runtime mode, because Lockstep and
+   RealtimeAsync have fundamentally different dynamics.
 
 ---
 
@@ -297,6 +297,8 @@ component at a time (no diagonal cross-component adjacency).
 ---
 
 ## Field Model
+
+The field model defines how per-cell simulation data is typed, allocated, and bounded.
 
 Fields are per-cell data stored in arenas. Each field has:
 

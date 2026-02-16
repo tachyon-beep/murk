@@ -1,6 +1,20 @@
 # Contributing to Murk
 
-## Development environment
+## What to Contribute
+
+There are many ways to help improve Murk:
+
+- **Bug reports** -- found something broken? Open an issue with reproduction steps.
+- **Feature requests** -- have an idea for a new capability? Open an issue to discuss it.
+- **Documentation** -- fix typos, clarify explanations, add examples.
+- **New propagators** -- implement domain-specific propagators (see [Adding a new propagator](#adding-a-new-propagator) below).
+- **New space backends** -- add spatial topologies (see [Adding a new space backend](#adding-a-new-space-backend) below).
+- **Performance improvements** -- benchmark, profile, and optimize hot paths.
+- **Tests** -- increase coverage, add property tests, stress-test edge cases.
+
+Look for issues labeled `good-first-issue` for accessible entry points.
+
+## Development Environment
 
 **Requirements:**
 - Rust stable (1.87+) via [rustup](https://rustup.rs/)
@@ -23,7 +37,7 @@ maturin develop --release
 cd ../..
 ```
 
-## Project structure
+## Project Structure
 
 ```
 murk/
@@ -58,7 +72,7 @@ murk-engine
 murk-ffi → murk-python
 ```
 
-## Running tests
+## Running Tests
 
 ```bash
 # Full workspace test suite (580+ tests)
@@ -81,7 +95,21 @@ cargo clippy --workspace -- -D warnings
 cargo fmt --all -- --check
 ```
 
-## Code style
+## CI Expectations
+
+Every push and PR triggers:
+
+| Job | What it checks |
+|-----|---------------|
+| `cargo check` | Compilation across all crates |
+| `cargo test` | Full test suite |
+| `clippy` | Lint warnings (zero tolerance) |
+| `rustfmt` | Formatting |
+| `miri` | Memory safety for `murk-arena` |
+
+All five must pass before merging.
+
+## Code Style
 
 ### Rust
 
@@ -97,21 +125,7 @@ cargo fmt --all -- --check
 - Docstrings on all public classes and methods.
 - Type stubs (`.pyi`) must be updated when the Python API changes.
 
-## CI expectations
-
-Every push and PR triggers:
-
-| Job | What it checks |
-|-----|---------------|
-| `cargo check` | Compilation across all crates |
-| `cargo test` | Full test suite |
-| `clippy` | Lint warnings (zero tolerance) |
-| `rustfmt` | Formatting |
-| `miri` | Memory safety for `murk-arena` |
-
-All five must pass before merging.
-
-## Adding a new space backend
+## Adding a New Space Backend
 
 Space backends implement the `Space` trait in `murk-space`. Follow the pattern
 of `Square4` or `Hex2D`:
@@ -143,7 +157,7 @@ backend passes compliance tests, it works with the rest of Murk.
 
 5. Add FFI support in `murk-ffi` and Python bindings in `murk-python` if needed.
 
-## Adding a new propagator
+## Adding a New Propagator
 
 Propagators implement the `Propagator` trait in `murk-propagator`:
 
@@ -165,14 +179,14 @@ See `crates/murk-engine/examples/quickstart.rs` for a complete example, or
 - Copy read data to a local buffer before grabbing the write handle
   (split-borrow limitation in `StepContext`).
 
-## Pull request process
+## Pull Request Process
 
 1. Fork the repository and create a branch.
 2. Make your changes with tests.
 3. Ensure all CI checks pass locally (`cargo test --workspace && cargo clippy --workspace -- -D warnings`).
 4. Open a PR with a clear description of what changed and why.
 
-## Commit messages
+## Commit Messages
 
 This project uses [Conventional Commits](https://www.conventionalcommits.org/):
 
