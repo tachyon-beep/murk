@@ -1,6 +1,6 @@
 # Examples
 
-Murk ships with three Python example projects demonstrating different
+Murk ships with four Python example projects demonstrating different
 spatial backends and RL integration patterns.
 
 | Example | Space | Demonstrates |
@@ -8,6 +8,7 @@ spatial backends and RL integration patterns.
 | [heat_seeker](https://github.com/tachyon-beep/murk/tree/main/examples/heat_seeker) | Square4 | PPO RL, diffusion physics, Python propagator |
 | [hex_pursuit](https://github.com/tachyon-beep/murk/tree/main/examples/hex_pursuit) | Hex2D | Multi-agent, AgentDisk foveation |
 | [crystal_nav](https://github.com/tachyon-beep/murk/tree/main/examples/crystal_nav) | Fcc12 | 3D lattice navigation |
+| [batched_heat_seeker](https://github.com/tachyon-beep/murk/tree/main/examples/batched_heat_seeker) | Square4 | `BatchedVecEnv`, high-throughput parallel training |
 
 There is also a Rust example:
 
@@ -16,7 +17,7 @@ There is also a Rust example:
 | [quickstart.rs](https://github.com/tachyon-beep/murk/tree/main/crates/murk-engine/examples/quickstart.rs) | Rust API: config, propagator, commands, snapshots |
 
 The `BatchedVecEnv` adapter is demonstrated in the
-[batched engine tests](https://github.com/tachyon-beep/murk/tree/main/crates/murk-python/tests/test_batched_vec_env.py),
+[batched engine tests](https://github.com/tachyon-beep/murk/blob/main/crates/murk-python/tests/test_batched_vec_env.py),
 which show config factory patterns, observation extraction, auto-reset,
 and override hooks.
 

@@ -95,8 +95,10 @@ scouting matter.
 
 ### Batched Engine (Remaining)
 
-The core `BatchedEngine` shipped in v0.1.7 (N-world
-`step_and_observe()` with single GIL release). What remains for v0.2:
+The core `BatchedEngine` shipped in v0.1.7 and is production-ready
+for training workloads (N-world `step_and_observe()` with single GIL
+release, SB3-compatible `BatchedVecEnv`). What remains for v0.2 are
+advanced features for competitive self-play:
 
 - **Per-world policy assignment** for self-play and league training
 - **Checkpoint/restore any world in the batch** (leverages deterministic

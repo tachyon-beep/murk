@@ -388,15 +388,15 @@ stepping them all in a single Rust call. The GIL is released once,
 covering the entire step + observe operation for all worlds:
 
 ```python
-from murk import BatchedVecEnv, Config, ObsEntry, SpaceType, RegionType
+from murk import BatchedVecEnv, Config, ObsEntry, RegionType
 
 def make_config(i: int) -> Config:
     cfg = Config()
-    cfg.set_space(SpaceType.Square4, rows=16, cols=16)
+    cfg.set_space_square4(rows=16, cols=16)
     cfg.add_field("temperature", initial_value=0.0)
     return cfg
 
-obs_entries = [ObsEntry("temperature", RegionType.Full, region_params=[])]
+obs_entries = [ObsEntry(field_id=0, region_type=RegionType.All)]
 env = BatchedVecEnv(make_config, obs_entries, num_envs=64)
 
 obs, info = env.reset(seed=42)

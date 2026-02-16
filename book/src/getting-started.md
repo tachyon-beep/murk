@@ -72,15 +72,15 @@ all worlds in a single Rust call with one GIL release — eliminating the
 per-environment FFI overhead of `MurkVecEnv`.
 
 ```python
-from murk import BatchedVecEnv, Config, ObsEntry, SpaceType, RegionType
+from murk import BatchedVecEnv, Config, ObsEntry, RegionType
 
 def make_config(i: int) -> Config:
     cfg = Config()
-    cfg.set_space(SpaceType.Square4, rows=16, cols=16)
+    cfg.set_space_square4(rows=16, cols=16)
     cfg.add_field("temperature", initial_value=0.0)
     return cfg
 
-obs_entries = [ObsEntry("temperature", RegionType.Full, region_params=[])]
+obs_entries = [ObsEntry(field_id=0, region_type=RegionType.All)]
 env = BatchedVecEnv(make_config, obs_entries, num_envs=64)
 
 obs, info = env.reset(seed=42)           # (64, obs_len)
@@ -90,7 +90,9 @@ env.close()
 
 Subclass `BatchedVecEnv` and override the hook methods to customise
 rewards, termination, and action-to-command mapping for your RL task.
-See the [Concepts guide](../docs/CONCEPTS.md) for details.
+See the [batched_heat_seeker](https://github.com/tachyon-beep/murk/tree/main/examples/batched_heat_seeker)
+example for a complete working project, and the
+[Concepts guide](../docs/CONCEPTS.md) for the full API.
 
 ## Next steps
 

@@ -44,7 +44,7 @@ generational allocation for deterministic, zero-GC memory management.
 │ (PyO3)     │        (C ABI, handle tables)          │
 ├────────────┴────────────────────────────────────────┤
 │                    murk-engine                       │
-│         LockstepWorld · RealtimeAsyncWorld · BatchedEngine │
+│  LockstepWorld · RealtimeAsyncWorld · BatchedEngine        │
 │        TickEngine · IngressQueue · EgressPool        │
 ├──────────────┬──────────────┬───────────────────────┤
 │ murk-propagator │  murk-obs │   murk-replay         │
