@@ -6,13 +6,22 @@
 - Rust toolchain (stable, 1.87+): [rustup.rs](https://rustup.rs/)
 
 **Python** (for the Gymnasium bindings):
-- Python 3.9+
-- [maturin](https://www.maturin.rs/) (`pip install maturin`)
+- Python 3.12+
 - numpy >= 1.24, gymnasium >= 0.29 (installed automatically)
 
 ## Installation
 
-Murk is not yet on PyPI or crates.io. Install from source:
+### From package registries
+
+```bash
+# Rust
+cargo add murk
+
+# Python
+pip install murk
+```
+
+### From source
 
 ```bash
 git clone https://github.com/tachyon-beep/murk.git
@@ -28,6 +37,23 @@ pip install maturin
 maturin develop --release
 ```
 
+## Architecture overview
+
+```mermaid
+graph LR
+    core[murk-core] --> arena[murk-arena]
+    core --> space[murk-space]
+    core --> propagator[murk-propagator]
+    core --> obs[murk-obs]
+    arena --> engine[murk-engine]
+    space --> engine
+    propagator --> engine
+    obs --> engine
+    engine --> ffi[murk-ffi]
+    engine --> python[murk-python]
+    engine --> replay[murk-replay]
+```
+
 ## First Rust simulation
 
 Run the built-in quickstart example:
@@ -39,11 +65,42 @@ cargo run --example quickstart -p murk-engine
 See [`crates/murk-engine/examples/quickstart.rs`](https://github.com/tachyon-beep/murk/blob/main/crates/murk-engine/examples/quickstart.rs)
 for the full source. The essential pattern:
 
-```rust
-let config = WorldConfig { space, fields, propagators, dt: 0.1, seed: 42, .. };
-let mut world = LockstepWorld::new(config)?;
-let result = world.step_sync(commands)?;
-let heat = result.snapshot.read(FieldId(0)).unwrap();
+```rust,no_run
+use murk_core::{
+    BoundaryBehavior, FieldDef, FieldId, FieldMutability, FieldType, SnapshotAccess,
+};
+use murk_engine::{BackoffConfig, LockstepWorld, WorldConfig};
+use murk_space::{EdgeBehavior, Square4};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let space = Square4::new(8, 8, EdgeBehavior::Absorb)?;
+    let fields = vec![FieldDef {
+        name: "heat".into(),
+        field_type: FieldType::Scalar,
+        mutability: FieldMutability::PerTick,
+        units: Some("kelvin".into()),
+        bounds: None,
+        boundary_behavior: BoundaryBehavior::Clamp,
+    }];
+
+    let config = WorldConfig {
+        space: Box::new(space),
+        fields,
+        propagators: vec![], // add your propagators here
+        dt: 0.1,
+        seed: 42,
+        ring_buffer_size: 8,
+        max_ingress_queue: 1024,
+        tick_rate_hz: None,
+        backoff: BackoffConfig::default(),
+    };
+
+    let mut world = LockstepWorld::new(config)?;
+    let result = world.step_sync(vec![])?;
+    let heat = result.snapshot.read(FieldId(0)).unwrap();
+    println!("mean heat: {:.4}", heat.iter().sum::<f32>() / heat.len() as f32);
+    Ok(())
+}
 ```
 
 ## First Python simulation
