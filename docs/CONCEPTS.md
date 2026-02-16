@@ -26,9 +26,9 @@ Murk ships with seven built-in space backends:
 |-------|------|-----------|------------|-----------------|
 | `Line1D` | 1D | 2 | `length`, `edge` | Manhattan |
 | `Ring1D` | 1D | 2 (periodic) | `length` | min(fwd, bwd) |
-| `Square4` | 2D | 4 (N/S/E/W) | `width`, `height`, `edge` | Manhattan |
-| `Square8` | 2D | 8 (+ diagonals) | `width`, `height`, `edge` | Chebyshev |
-| `Hex2D` | 2D | 6 (pointy-top) | `cols`, `rows` | Cube distance |
+| `Square4` | 2D | 4 (N/S/E/W) | `rows`, `cols`, `edge` | Manhattan |
+| `Square8` | 2D | 8 (+ diagonals) | `rows`, `cols`, `edge` | Chebyshev |
+| `Hex2D` | 2D | 6 (pointy-top) | `rows`, `cols` | Cube distance |
 | `Fcc12` | 3D | 12 (face-centred cubic) | `w`, `h`, `d`, `edge` | FCC metric |
 | `ProductSpace` | N-D | varies | list of component spaces | L1 sum |
 
@@ -238,6 +238,7 @@ user input, network messages) enter the tick loop.
 | `Spawn(coord, field_values)` | Create a new entity |
 | `Despawn(entity_id)` | Remove an entity |
 | `SetParameter(key, value)` | Change a global simulation parameter |
+| `SetParameterBatch(pairs)` | Change multiple parameters at once |
 | `Custom(type_id, data)` | User-defined command type |
 
 In the Python API, the most common command is `SetField`:
@@ -285,7 +286,7 @@ suitable for neural networks.
 # 1. Specify what to observe
 obs_entries = [
     ObsEntry(field_id=0, region_type=RegionType.All),
-    ObsEntry(field_id=1, region_type=RegionType.AgentDisk, radius=3),
+    ObsEntry(field_id=1, region_type=RegionType.AgentDisk, region_params=[3]),
 ]
 
 # 2. MurkEnv compiles the plan internally
@@ -298,8 +299,8 @@ obs, reward, terminated, truncated, info = env.step(action)
 | Region | Description | When to use |
 |--------|-------------|-------------|
 | `All` | Every cell in the space | Full observability, small grids |
-| `AgentDisk(radius)` | Cells within `radius` graph-distance of the agent | Partial observability, foveation |
-| `AgentRect(half_extent)` | Axis-aligned bounding box around agent | Rectangular partial observability |
+| `AgentDisk` | Cells within `region_params=[radius]` graph-distance of the agent | Partial observability, foveation |
+| `AgentRect` | Axis-aligned bounding box around agent (`region_params=[half_w, half_h, ...]`) | Rectangular partial observability |
 
 `All` is the simplest — you get `cell_count` floats per entry. Agent-centered
 regions give partial observability and scale better on large grids.
@@ -316,12 +317,13 @@ Transforms are applied to field values during extraction:
 
 For large observations, pooling reduces dimensionality:
 
+- `PoolKernel.NoPool` — no pooling (default)
 - `PoolKernel.Mean` — average of each window
 - `PoolKernel.Max` — maximum of each window
 - `PoolKernel.Min` — minimum of each window
 - `PoolKernel.Sum` — sum of each window
 
-Pooling is configured per-entry with `kernel_size` and `stride`.
+Pooling is configured per-entry with `pool_kernel_size` and `pool_stride`.
 
 ### Observation layout
 
@@ -365,8 +367,10 @@ For real-time applications (game servers, live visualizations):
 // Commands are submitted without blocking
 world.submit_commands(commands)?;
 
-// Observations can be taken concurrently
-let result = world.observe(&mut plan)?;
+// Observations require pre-allocated output and mask buffers
+let mut output = vec![0.0f32; plan.output_len()];
+let mut mask = vec![0u8; plan.mask_len()];
+let metadata = world.observe(&plan, &mut output, &mut mask)?;
 ```
 
 **Properties:**
@@ -465,7 +469,7 @@ config.set_seed(42)
 # 4. Observations: define what the agent sees
 obs_entries = [
     ObsEntry(0, region_type=RegionType.All),       # Full temperature grid
-    ObsEntry(2, region_type=RegionType.AgentDisk, radius=5),  # Agent's local view
+    ObsEntry(2, region_type=RegionType.AgentDisk, region_params=[5]),  # Agent's local view
 ]
 
 # 5. Environment: wraps everything in the Gymnasium interface
