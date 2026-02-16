@@ -425,7 +425,47 @@ Murk targets **Tier B determinism**: identical results within the same
 build, ISA, and toolchain, given the same initial state, seed, and
 command log.
 
-Key mechanisms:
+### Determinism Contract
+
+Determinism **holds** when all of these match between runs:
+
+- Build profile (debug/release) and optimization level
+- Compiler version (rustc, PyO3/maturin)
+- CPU ISA family (e.g., x86-64, aarch64)
+- Cargo feature flags and dependency versions
+
+Determinism is **not promised** across:
+
+- Different ISAs (x86-64 vs aarch64)
+- Different `libm` implementations (glibc vs musl vs macOS)
+- Builds with fast-math or non-default RUSTFLAGS
+- Different Murk versions (even patch releases may change propagator numerics)
+
+### Authoritative vs Non-Authoritative Paths
+
+The **authoritative path** must be deterministic — any change here requires
+determinism test verification:
+
+- `TickEngine`: propagator execution, command application, generation staging
+- Propagator `step()` implementations and pipeline ordering
+- `IngressQueue`: command sorting and expiry
+- Snapshot publish (generation swap)
+- Arena allocation and recycling patterns
+
+The **non-authoritative path** may vary between runs and must never affect
+world state:
+
+- Rendering, logging, and metrics collection
+- Wall-clock pacing and backpressure in RealtimeAsync mode
+- Egress worker scheduling and observation extraction timing
+- `StepMetrics` timing measurements
+- CLI tooling and debug output
+
+Contributors: if your change touches the authoritative path, run the full
+determinism test suite (`cargo test --test determinism`) and verify
+snapshot hashes are unchanged.
+
+### Key Mechanisms
 
 - **No `HashMap`/`HashSet`** — banned project-wide via clippy. All code
   uses `IndexMap`/`BTreeMap` for deterministic iteration.
@@ -437,6 +477,22 @@ Key mechanisms:
   class and source ordering, not arrival time.
 - **Replay support** — binary replay format records initial state, seed,
   and command log with per-tick snapshot hashes for divergence detection.
+
+### Known Footguns
+
+**Floating-point transcendentals**: Even without fast-math, `sin`, `cos`,
+`exp`, and `log` can vary across platforms and `libm` implementations.
+Propagators using transcendentals in authoritative updates remain Tier B
+(same ISA/toolchain), but this is the most likely source of cross-platform
+divergence. If tighter guarantees are needed in future, a `murk_math`
+shim can provide consistent implementations.
+
+**Parallelism introduction**: The current architecture is safe because
+propagators execute sequentially and the batched engine steps worlds in
+order. When parallel propagators or Rayon-based batched stepping are
+introduced, determinism tests must become thread-count invariant: run
+with 1, 2, and 8 threads, permute world ordering, and require identical
+snapshot hashes.
 
 See [determinism-catalogue.md](determinism-catalogue.md) for the full
 catalogue of non-determinism sources and mitigations.
