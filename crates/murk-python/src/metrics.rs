@@ -81,12 +81,12 @@ impl StepMetrics {
             let rc = murk_step_metrics_propagator(
                 world_handle,
                 i,
-                name_buf.as_mut_ptr() as *mut i8,
+                name_buf.as_mut_ptr() as *mut std::ffi::c_char,
                 name_buf.len(),
                 &mut us,
             );
             if rc == 0 {
-                let name = unsafe { CStr::from_ptr(name_buf.as_ptr() as *const i8) }
+                let name = unsafe { CStr::from_ptr(name_buf.as_ptr() as *const std::ffi::c_char) }
                     .to_string_lossy()
                     .into_owned();
                 propagator_us.push((name, us));
