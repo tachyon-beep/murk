@@ -1,7 +1,7 @@
 # Examples
 
-Murk ships with four Python example projects demonstrating different
-spatial backends and RL integration patterns.
+Murk ships with six Python example projects demonstrating different
+spatial backends, RL integration patterns, and the batched engine.
 
 | Example | Space | Demonstrates |
 |---------|-------|-------------|
@@ -9,6 +9,8 @@ spatial backends and RL integration patterns.
 | [hex_pursuit](https://github.com/tachyon-beep/murk/tree/main/examples/hex_pursuit) | Hex2D | Multi-agent, AgentDisk foveation |
 | [crystal_nav](https://github.com/tachyon-beep/murk/tree/main/examples/crystal_nav) | Fcc12 | 3D lattice navigation |
 | [batched_heat_seeker](https://github.com/tachyon-beep/murk/tree/main/examples/batched_heat_seeker) | Square4 | `BatchedVecEnv`, high-throughput parallel training |
+| [batched_benchmark](https://github.com/tachyon-beep/murk/tree/main/examples/batched_benchmark) | Square4 | `BatchedVecEnv` vs `MurkVecEnv` vs raw `BatchedWorld` throughput comparison |
+| [batched_cookbook](https://github.com/tachyon-beep/murk/tree/main/examples/batched_cookbook) | Square4 | Low-level `BatchedWorld` API: lifecycle, context manager, per-world commands, selective reset |
 
 There is also a Rust example:
 
