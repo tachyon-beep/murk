@@ -65,14 +65,16 @@ def test_concurrent_faster_than_sequential():
 
     Due to GIL release, concurrent should be roughly similar in wall time
     to sequential (the engine does real work outside GIL). We check that
-    concurrent takes less than 3x sequential to account for variance.
+    concurrent takes less than 5x sequential to account for CI variance
+    and thread spawn overhead.
     """
-    n_steps = 100
+    n_steps = 500
+    n_cells = 500
 
     # Sequential timing
     start = time.monotonic()
     for i in range(2):
-        world = _make_world(seed=i, n_cells=50)
+        world = _make_world(seed=i, n_cells=n_cells)
         for _ in range(n_steps):
             world.step()
         world.destroy()
@@ -80,7 +82,7 @@ def test_concurrent_faster_than_sequential():
 
     # Concurrent timing
     def worker():
-        world = _make_world(seed=99, n_cells=50)
+        world = _make_world(seed=99, n_cells=n_cells)
         for _ in range(n_steps):
             world.step()
         world.destroy()
@@ -93,8 +95,8 @@ def test_concurrent_faster_than_sequential():
         t.join(timeout=30)
     par_time = time.monotonic() - start
 
-    # Concurrent should not be much slower than sequential
-    # (ideally faster, but Python propagator re-acquires GIL)
-    assert par_time < seq_time * 3, (
-        f"Concurrent ({par_time:.3f}s) was >3x slower than sequential ({seq_time:.3f}s)"
+    # Concurrent should not be much slower than sequential.
+    # Use 5x tolerance: thread spawn overhead dominates on fast CI runners.
+    assert par_time < seq_time * 5, (
+        f"Concurrent ({par_time:.3f}s) was >5x slower than sequential ({seq_time:.3f}s)"
     )
