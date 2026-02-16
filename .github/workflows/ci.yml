@@ -92,14 +92,22 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
-      - name: Install Python dependencies
-        run: pip install maturin numpy gymnasium
+      - name: Create virtualenv and install dependencies
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          pip install maturin numpy gymnasium pytest pytest-timeout
       - name: Build murk-python
-        run: maturin develop --release --manifest-path crates/murk-python/Cargo.toml
+        run: |
+          source .venv/bin/activate
+          maturin develop --release --manifest-path crates/murk-python/Cargo.toml
       - name: Run pytest suite
-        run: python -m pytest crates/murk-python/tests/ -v --timeout=120 -k "not slow"
+        run: |
+          source .venv/bin/activate
+          python -m pytest crates/murk-python/tests/ -v --timeout=120 -k "not slow"
       - name: Smoke-test Python examples
         run: |
+          source .venv/bin/activate
           for example in examples/*/; do
             name=$(basename "$example")
             if [ -f "$example/${name}.py" ]; then
