@@ -3,8 +3,13 @@ name: Release
 on:
   push:
     tags:
-      # Triggered by release-plz tagging the top-level murk crate.
       - 'murk-v[0-9]+.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing git tag to release (e.g. murk-v0.1.5)'
+        required: true
+        type: string
 
 env:
   CARGO_TERM_COLOR: always
@@ -16,26 +21,34 @@ permissions:
 jobs:
   ci:
     name: CI checks
+    if: ${{ github.event_name != 'workflow_dispatch' }}
     uses: ./.github/workflows/ci.yml
 
   release:
     name: Create GitHub Release
     needs: ci
+    if: ${{ always() && (needs.ci.result == 'success' || needs.ci.result == 'skipped') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag || '' }}
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
           generate_release_notes: true
           draft: false
 
   publish-crates:
     name: Publish to crates.io
     needs: [ci, release]
+    if: ${{ always() && needs.release.result == 'success' && (needs.ci.result == 'success' || needs.ci.result == 'skipped') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag || '' }}
       - uses: dtolnay/rust-toolchain@stable
       - name: Publish crates in dependency order
         env:
@@ -67,10 +80,11 @@ jobs:
           publish murk
 
   # Build cross-platform Python wheels using maturin-action.
-  # The abi3-py39 feature means one wheel per platform (not per Python version).
+  # The abi3-py312 feature means one wheel per platform (not per Python version).
   build-wheels:
     name: Build wheels (${{ matrix.target }})
     needs: ci
+    if: ${{ always() && (needs.ci.result == 'success' || needs.ci.result == 'skipped') }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -88,6 +102,8 @@ jobs:
             target: x86_64-pc-windows-msvc
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag || '' }}
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
@@ -108,9 +124,12 @@ jobs:
   build-sdist:
     name: Build sdist
     needs: ci
+    if: ${{ always() && (needs.ci.result == 'success' || needs.ci.result == 'skipped') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag || '' }}
       - name: Build sdist
         uses: PyO3/maturin-action@v1
         with:
@@ -126,11 +145,16 @@ jobs:
   publish-pypi:
     name: Publish to PyPI
     needs: [release, build-wheels, build-sdist]
+    if: >-
+      always()
+      && needs.release.result == 'success'
+      && needs.build-wheels.result == 'success'
+      && needs.build-sdist.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       id-token: write
     steps:
-      - name: Download all wheel artifacts
+      - name: Download wheel artifacts
         uses: actions/download-artifact@v7
         with:
           pattern: wheel-*
