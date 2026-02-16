@@ -1,6 +1,6 @@
 //! PyWorld: Python wrapper around the lockstep world FFI.
 //!
-//! All FFI calls release the GIL via `py.allow_threads()` so other Python
+//! All FFI calls release the GIL via `py.detach()` so other Python
 //! threads can run while the simulation ticks. This prevents lock-ordering
 //! deadlocks between the GIL and FFI-internal mutexes (WORLDS, CONFIGS).
 
@@ -36,7 +36,7 @@ impl World {
     fn new(py: Python<'_>, config: &mut Config) -> PyResult<Self> {
         let (cfg_handle, trampoline_data) = config.take_handle()?;
         // Release GIL: murk_lockstep_create locks CONFIGS + WORLDS.
-        let (status, world_handle) = py.allow_threads(|| {
+        let (status, world_handle) = py.detach(|| {
             let mut wh: u64 = 0;
             let s = murk_lockstep_create(cfg_handle, &mut wh);
             (s, wh)
@@ -103,7 +103,7 @@ impl World {
         let metrics_addr = &mut metrics as *mut MurkStepMetrics as usize;
 
         // Release GIL: murk_lockstep_step locks WORLDS.
-        let status = py.allow_threads(|| {
+        let status = py.detach(|| {
             let cmds_ptr = if cmds_addr == 0 {
                 std::ptr::null()
             } else {
@@ -134,7 +134,7 @@ impl World {
     fn reset(&self, py: Python<'_>, seed: u64) -> PyResult<()> {
         let h = self.require_handle()?;
         // Release GIL: murk_lockstep_reset locks WORLDS.
-        let status = py.allow_threads(|| murk_lockstep_reset(h, seed));
+        let status = py.detach(|| murk_lockstep_reset(h, seed));
         check_status(status)
     }
 
@@ -163,7 +163,7 @@ impl World {
         let buf_len = output.len();
         // Release GIL: murk_snapshot_read_field locks WORLDS.
         let status = py
-            .allow_threads(|| murk_snapshot_read_field(h, field_id, buf_addr as *mut f32, buf_len));
+            .detach(|| murk_snapshot_read_field(h, field_id, buf_addr as *mut f32, buf_len));
         check_status(status)
     }
 
@@ -172,7 +172,7 @@ impl World {
     fn current_tick(&self, py: Python<'_>) -> PyResult<u64> {
         let h = self.require_handle()?;
         // Release GIL: murk_current_tick locks WORLDS.
-        Ok(py.allow_threads(|| murk_current_tick(h)))
+        Ok(py.detach(|| murk_current_tick(h)))
     }
 
     /// The world's RNG seed.
@@ -180,7 +180,7 @@ impl World {
     fn seed(&self, py: Python<'_>) -> PyResult<u64> {
         let h = self.require_handle()?;
         // Release GIL: murk_seed locks WORLDS.
-        Ok(py.allow_threads(|| murk_seed(h)))
+        Ok(py.detach(|| murk_seed(h)))
     }
 
     /// Whether ticking is disabled (consecutive rollbacks).
@@ -188,7 +188,7 @@ impl World {
     fn is_tick_disabled(&self, py: Python<'_>) -> PyResult<bool> {
         let h = self.require_handle()?;
         // Release GIL: murk_is_tick_disabled locks WORLDS.
-        Ok(py.allow_threads(|| murk_is_tick_disabled(h) != 0))
+        Ok(py.detach(|| murk_is_tick_disabled(h) != 0))
     }
 
     /// Explicitly destroy the world handle.
@@ -228,7 +228,7 @@ impl World {
         self.free_trampolines();
         if let Some(h) = self.handle.take() {
             // Release GIL: murk_lockstep_destroy locks WORLDS.
-            py.allow_threads(|| murk_lockstep_destroy(h));
+            py.detach(|| murk_lockstep_destroy(h));
         }
     }
 
@@ -253,8 +253,8 @@ impl Drop for World {
         if let Some(h) = self.handle.take() {
             // In Drop, use with_gil to get a token then release it.
             // PyO3 Drop for #[pyclass] runs with GIL held.
-            Python::with_gil(|py| {
-                py.allow_threads(|| murk_lockstep_destroy(h));
+            Python::attach(|py| {
+                py.detach(|| murk_lockstep_destroy(h));
             });
         }
     }

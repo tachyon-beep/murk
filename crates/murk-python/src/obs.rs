@@ -13,7 +13,7 @@ use crate::error::check_status;
 use crate::world::World;
 
 /// A single observation entry describing what to observe.
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone)]
 pub(crate) struct ObsEntry {
     pub(crate) inner: MurkObsEntry,
@@ -125,7 +125,7 @@ impl ObsPlan {
         let n_entries = ffi_entries.len();
 
         // Release GIL: murk_obsplan_compile locks OBS_PLANS + WORLDS.
-        let (status, plan_h) = py.allow_threads(|| {
+        let (status, plan_h) = py.detach(|| {
             let mut ph: u64 = 0;
             let ptr = if entries_addr == 0 {
                 std::ptr::null()
@@ -196,7 +196,7 @@ impl ObsPlan {
         let mut result = MurkObsResult::default();
         let result_addr = &mut result as *mut MurkObsResult as usize;
 
-        let status = py.allow_threads(|| {
+        let status = py.detach(|| {
             murk_obsplan_execute(
                 world_h,
                 plan_h,
@@ -274,7 +274,7 @@ impl ObsPlan {
         let mut results = vec![MurkObsResult::default(); n];
         let results_addr = results.as_mut_ptr() as usize;
 
-        let status = py.allow_threads(|| {
+        let status = py.detach(|| {
             murk_obsplan_execute_agents(
                 world_h,
                 plan_h,
@@ -318,7 +318,7 @@ impl ObsPlan {
         _exc_tb: Option<&Bound<'_, PyAny>>,
     ) {
         if let Some(h) = self.handle.take() {
-            py.allow_threads(|| murk_obsplan_destroy(h));
+            py.detach(|| murk_obsplan_destroy(h));
         }
     }
 }
@@ -334,8 +334,8 @@ impl Drop for ObsPlan {
     fn drop(&mut self) {
         if let Some(h) = self.handle.take() {
             // Release GIL: murk_obsplan_destroy locks OBS_PLANS.
-            Python::with_gil(|py| {
-                py.allow_threads(|| murk_obsplan_destroy(h));
+            Python::attach(|py| {
+                py.detach(|| murk_obsplan_destroy(h));
             });
         }
     }

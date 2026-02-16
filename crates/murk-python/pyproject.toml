@@ -6,7 +6,7 @@ build-backend = "maturin"
 name = "murk"
 version = "0.1.4"
 description = "Python bindings for the Murk simulation framework"
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 license = {text = "MIT"}
 authors = [{name = "John Morrissey"}]
 readme = "../../README.md"
@@ -15,9 +15,6 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Rust",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
