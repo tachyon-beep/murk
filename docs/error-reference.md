@@ -16,6 +16,7 @@ Complete reference of all error types in the Murk simulation framework, organize
 - [SpaceError (murk-space)](#spaceerror)
 - [ReplayError (murk-replay)](#replayerror)
 - [SubmitError (murk-engine)](#submiterror)
+- [BatchError (murk-engine)](#batcherror)
 
 ---
 
@@ -186,3 +187,20 @@ Errors from submitting commands to the tick thread in `RealtimeAsyncWorld`.
 |---------|----------|-------|-------------|
 | `Shutdown` | -- | The tick thread has shut down. The command channel is disconnected. | The world has been shut down or dropped. Do not retry. Create a new world or call `reset()` if the world supports it. |
 | `ChannelFull` | -- | The command channel is full (back-pressure). The bounded channel (capacity 64) cannot accept more batches until the tick thread drains it. | Reduce command submission rate. Wait for the tick thread to process pending batches before submitting more. This indicates the submitter is outpacing the tick rate. |
+
+---
+
+## BatchError
+
+**Crate:** `murk-engine` | **File:** `crates/murk-engine/src/batched.rs`
+
+Errors from the batched simulation engine (`BatchedEngine`). Each variant annotates the failure with context about which world failed.
+
+| Variant | Cause | Remediation |
+|---------|-------|-------------|
+| `Step { world_index, error }` | A world's `step_sync()` failed during `step_and_observe()` or `step_all()`. The `world_index` identifies which world and `error` contains the underlying `TickError`. | Inspect the wrapped `TickError`. Check propagator inputs for the failing world. |
+| `Observe(ObsError)` | Observation extraction failed during `observe_all()` or `step_and_observe()`. | Check `ObsSpec` / `ObsEntry` configuration. Ensure field names and region specs are valid. |
+| `Config(ConfigError)` | World creation failed during `BatchedEngine::new()` or `reset_world()`. | Inspect the wrapped `ConfigError`. Check that all configs have matching space topologies and field definitions. |
+| `InvalidIndex { world_index, num_worlds }` | The requested world index is out of bounds. | Use `world_index < num_worlds`. Call `num_worlds()` to check the batch size. |
+| `NoObsPlan` | An observation method was called but no `ObsSpec` was provided at construction. | Pass `obs_entries` when creating `BatchedWorld` / `BatchedEngine`. |
+| `InvalidArgument { reason }` | A method argument failed validation (e.g., wrong number of command lists, buffer size mismatch). | Read the `reason` message for specifics. Common causes: `commands.len() != num_worlds`, output buffer too small. |

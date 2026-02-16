@@ -15,6 +15,11 @@ There is also a Rust example:
 |---------|-------------|
 | [quickstart.rs](https://github.com/tachyon-beep/murk/tree/main/crates/murk-engine/examples/quickstart.rs) | Rust API: config, propagator, commands, snapshots |
 
+The `BatchedVecEnv` adapter is demonstrated in the
+[batched engine tests](https://github.com/tachyon-beep/murk/tree/main/crates/murk-python/tests/test_batched_vec_env.py),
+which show config factory patterns, observation extraction, auto-reset,
+and override hooks.
+
 ## Running the Python examples
 
 ```bash

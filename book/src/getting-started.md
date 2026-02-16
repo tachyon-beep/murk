@@ -65,6 +65,33 @@ for _ in range(1000):
     obs, reward, terminated, truncated, info = env.step(action)
 ```
 
+## Scaling up: BatchedVecEnv
+
+For RL training with many parallel environments, `BatchedVecEnv` steps
+all worlds in a single Rust call with one GIL release — eliminating the
+per-environment FFI overhead of `MurkVecEnv`.
+
+```python
+from murk import BatchedVecEnv, Config, ObsEntry, SpaceType, RegionType
+
+def make_config(i: int) -> Config:
+    cfg = Config()
+    cfg.set_space(SpaceType.Square4, rows=16, cols=16)
+    cfg.add_field("temperature", initial_value=0.0)
+    return cfg
+
+obs_entries = [ObsEntry("temperature", RegionType.Full, region_params=[])]
+env = BatchedVecEnv(make_config, obs_entries, num_envs=64)
+
+obs, info = env.reset(seed=42)           # (64, obs_len)
+obs, rewards, terms, truncs, info = env.step(actions)
+env.close()
+```
+
+Subclass `BatchedVecEnv` and override the hook methods to customise
+rewards, termination, and action-to-command mapping for your RL task.
+See the [Concepts guide](../docs/CONCEPTS.md) for details.
+
 ## Next steps
 
 - [Concepts](concepts.md) — understand spaces, fields, propagators, commands,

@@ -19,6 +19,9 @@ generational allocation for deterministic, zero-GC memory management.
 - **Two runtime modes** — `LockstepWorld` (synchronous, borrow-checker
   enforced) and `RealtimeAsyncWorld` (background tick thread with epoch-based
   reclamation)
+- **Batched engine** — `BatchedEngine` steps N worlds and extracts
+  observations in one call with a single GIL release; `BatchedVecEnv`
+  provides an SB3-compatible Python interface
 - **Deterministic replay** — binary replay format with per-tick snapshot
   hashing and divergence reports
 - **Arena allocation** — double-buffered ping-pong arenas with Static/PerTick/Sparse
@@ -35,13 +38,13 @@ generational allocation for deterministic, zero-GC memory management.
 ```
 ┌─────────────────────────────────────────────────────┐
 │  Python (murk)          │  C consumers              │
-│  MurkEnv / MurkVecEnv   │  murk_lockstep_step()     │
+│  MurkEnv / BatchedVecEnv│  murk_lockstep_step()     │
 ├────────────┬────────────┴───────────────────────────┤
 │ murk-python│           murk-ffi                     │
 │ (PyO3)     │        (C ABI, handle tables)          │
 ├────────────┴────────────────────────────────────────┤
 │                    murk-engine                       │
-│         LockstepWorld · RealtimeAsyncWorld           │
+│         LockstepWorld · RealtimeAsyncWorld · BatchedEngine │
 │        TickEngine · IngressQueue · EgressPool        │
 ├──────────────┬──────────────┬───────────────────────┤
 │ murk-propagator │  murk-obs │   murk-replay         │

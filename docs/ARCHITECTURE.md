@@ -208,6 +208,30 @@ let report = world.shutdown(Duration::from_secs(5))?;
 - Epoch-based memory reclamation.
 - Primary use case: live games, interactive tools, dashboards.
 
+### BatchedEngine
+
+`BatchedEngine` owns a `Vec<LockstepWorld>` and an optional `ObsPlan`.
+Its hot path, `step_and_observe()`, steps all worlds sequentially then
+calls `ObsPlan::execute_batch()` to fill a contiguous output buffer
+across all worlds.
+
+**Error model:** `BatchError` annotates failures with the world index:
+- `Step { world_index, error }` — a world's `step_sync()` failed
+- `Observe(ObsError)` — observation extraction failed
+- `Config(ConfigError)` — world creation or reset failed
+- `InvalidIndex { world_index, num_worlds }` — index out of bounds
+- `NoObsPlan` — observation requested without `ObsSpec`
+- `InvalidArgument { reason }` — argument validation failed
+
+**FFI layer:** `BATCHED: Mutex<HandleTable<BatchedEngine>>` stores
+engine instances. Nine `extern "C"` functions expose create, step,
+observe, reset, destroy, and dimension queries.
+
+**PyO3 layer:** `BatchedWorld` caches dimensions at construction time,
+validates buffer shapes eagerly, and releases the GIL via `py.detach()`
+on all hot paths. The `Ungil` boundary requires casting raw pointers to
+`usize` before entering the detached closure.
+
 ---
 
 ## Threading Model
@@ -436,5 +460,11 @@ PyO3/maturin native extension:
 - `MurkEnv` — single-environment Gymnasium `Env` adapter.
 - `MurkVecEnv` — vectorised environment adapter for parallel RL
   training.
+- `BatchedWorld` — batched PyO3 wrapper: steps N worlds and extracts
+  observations in a single `py.detach()` call. Pointer addresses are
+  cast to `usize` for the `Ungil` closure boundary.
+- `BatchedVecEnv` — pure-Python SB3-compatible vectorized environment
+  with pre-allocated NumPy buffers, auto-reset, and override hooks for
+  reward/termination logic.
 - Direct NumPy array filling via the C FFI path.
 - Python-defined propagators for prototyping.

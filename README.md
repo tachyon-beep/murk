@@ -24,14 +24,17 @@ generational allocation for deterministic, zero-GC memory management.
 - **Two runtime modes** — `LockstepWorld` (synchronous, borrow-checker
   enforced) and `RealtimeAsyncWorld` (background tick thread with epoch-based
   reclamation)
+- **Batched engine** — `BatchedEngine` steps N worlds and extracts
+  observations in one call with a single GIL release; `BatchedVecEnv`
+  provides an SB3-compatible Python interface
 - **Deterministic replay** — binary replay format with per-tick snapshot
   hashing and divergence reports
 - **Arena allocation** — double-buffered ping-pong arenas with Static/PerTick/Sparse
   field mutability classes; no GC pauses, no `Box<dyn>` per cell
 - **C FFI** — stable ABI with handle tables (slot+generation), safe
   double-destroy, versioned
-- **Python bindings** — PyO3/maturin native extension with Gymnasium `Env`
-  and `VecEnv` adapters
+- **Python bindings** — PyO3/maturin native extension with Gymnasium `Env`/`VecEnv`
+  and `BatchedVecEnv` for high-throughput training
 - **Zero `unsafe` in simulation logic** — only `murk-arena` and `murk-ffi`
   are permitted `unsafe`; everything else is `#![forbid(unsafe_code)]`
 
@@ -40,7 +43,7 @@ generational allocation for deterministic, zero-GC memory management.
 ```mermaid
 flowchart TD
     subgraph consumers ["Consumers"]
-        py["<b>Python</b> <i>(murk)</i><br/>MurkEnv · MurkVecEnv"]
+        py["<b>Python</b> <i>(murk)</i><br/>MurkEnv · BatchedVecEnv"]
         cc["<b>C consumers</b><br/>murk_lockstep_step()"]
     end
 
@@ -50,7 +53,7 @@ flowchart TD
     end
 
     subgraph engine ["Engine"]
-        me["<b>murk‑engine</b><br/>LockstepWorld · RealtimeAsyncWorld<br/>TickEngine · IngressQueue · EgressPool"]
+        me["<b>murk‑engine</b><br/>LockstepWorld · RealtimeAsyncWorld · BatchedEngine<br/>TickEngine · IngressQueue · EgressPool"]
     end
 
     subgraph middleware ["Middleware"]

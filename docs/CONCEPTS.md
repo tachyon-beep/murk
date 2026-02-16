@@ -375,7 +375,53 @@ let result = world.observe(&mut plan)?;
 - Epoch-based reclamation ensures snapshots aren't freed while being read
 - Command channel provides back-pressure when the queue is full
 
-The Python bindings currently only expose `LockstepWorld`.
+The Python bindings expose `LockstepWorld` via `MurkEnv`/`MurkVecEnv`, and `BatchedEngine` via `BatchedVecEnv` for high-throughput training.
+
+### BatchedEngine (high-throughput training)
+
+For RL training at scale, stepping worlds one-by-one through Python has
+a bottleneck: each `step()` call acquires and releases the GIL. With
+thousands of environments, this overhead dominates.
+
+`BatchedEngine` solves this by owning N `LockstepWorld` instances and
+stepping them all in a single Rust call. The GIL is released once,
+covering the entire step + observe operation for all worlds:
+
+```python
+from murk import BatchedVecEnv, Config, ObsEntry, SpaceType, RegionType
+
+def make_config(i: int) -> Config:
+    cfg = Config()
+    cfg.set_space(SpaceType.Square4, rows=16, cols=16)
+    cfg.add_field("temperature", initial_value=0.0)
+    return cfg
+
+obs_entries = [ObsEntry("temperature", RegionType.Full, region_params=[])]
+env = BatchedVecEnv(make_config, obs_entries, num_envs=64)
+
+obs, info = env.reset(seed=42)
+obs, rewards, terminateds, truncateds, info = env.step(actions)
+```
+
+**Architecture (three layers):**
+
+| Layer | Class | Role |
+|-------|-------|------|
+| Rust engine | `BatchedEngine` | Owns N `LockstepWorld`s, `step_and_observe()` |
+| PyO3 wrapper | `BatchedWorld` | Handles GIL release, buffer validation |
+| Pure Python | `BatchedVecEnv` | SB3-compatible API, auto-reset, override hooks |
+
+**Override hooks** let you customise the RL interface without touching Rust:
+
+- `_actions_to_commands(actions)` — convert action array to per-world command lists
+- `_compute_rewards(obs, tick_ids)` — compute per-world rewards
+- `_check_terminated(obs, tick_ids)` — per-world termination conditions
+- `_check_truncated(obs, tick_ids)` — per-world truncation conditions
+
+**vs MurkVecEnv:** `MurkVecEnv` wraps N independent `World` objects and
+calls `step()` N times (N GIL releases). `BatchedVecEnv` calls
+`step_and_observe()` once (1 GIL release). For 1024 environments, this
+eliminates ~1023 unnecessary GIL cycles per training step.
 
 ---
 
