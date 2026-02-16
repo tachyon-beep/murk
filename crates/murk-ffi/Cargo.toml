@@ -17,11 +17,11 @@ readme = "README.md"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-murk-core = { path = "../murk-core", version = "0.1.5" }
-murk-engine = { path = "../murk-engine", version = "0.1.5" }
-murk-obs = { path = "../murk-obs", version = "0.1.5" }
-murk-space = { path = "../murk-space", version = "0.1.5" }
-murk-propagator = { path = "../murk-propagator", version = "0.1.5" }
+murk-core = { path = "../murk-core", version = "0.1.6" }
+murk-engine = { path = "../murk-engine", version = "0.1.6" }
+murk-obs = { path = "../murk-obs", version = "0.1.6" }
+murk-space = { path = "../murk-space", version = "0.1.6" }
+murk-propagator = { path = "../murk-propagator", version = "0.1.6" }
 smallvec = { workspace = true }
 
 [dev-dependencies]

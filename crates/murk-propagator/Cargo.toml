@@ -14,8 +14,8 @@ description = "Propagator trait and step context for Murk simulations"
 readme = "README.md"
 
 [dependencies]
-murk-core = { path = "../murk-core", version = "0.1.5" }
-murk-space = { path = "../murk-space", version = "0.1.5" }
+murk-core = { path = "../murk-core", version = "0.1.6" }
+murk-space = { path = "../murk-space", version = "0.1.6" }
 indexmap = { workspace = true }
 
 [dev-dependencies]
