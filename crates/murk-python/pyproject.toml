@@ -43,6 +43,11 @@ Documentation = "https://tachyon-beep.github.io/murk/"
 Repository = "https://github.com/tachyon-beep/murk"
 Issues = "https://github.com/tachyon-beep/murk/issues"
 
+[tool.pytest.ini_options]
+markers = [
+    "slow: marks tests as slow (deselected by default in CI)",
+]
+
 [tool.maturin]
 python-source = "python"
 module-name = "murk._murk"

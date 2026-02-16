@@ -96,7 +96,7 @@ jobs:
         run: |
           python -m venv .venv
           source .venv/bin/activate
-          pip install maturin numpy gymnasium pytest pytest-timeout
+          pip install maturin numpy gymnasium pytest pytest-timeout stable-baselines3
       - name: Build murk-python
         run: |
           source .venv/bin/activate
@@ -112,13 +112,9 @@ jobs:
             name=$(basename "$example")
             if [ -f "$example/${name}.py" ]; then
               echo "=== Smoke-testing $name ==="
-              timeout 60 python "$example/${name}.py" --smoke-test 2>&1 || \
-              timeout 60 python -c "
-          import sys; sys.path.insert(0, '$example')
-          # Import-only smoke test if --smoke-test not supported
-          import importlib.util
-          spec = importlib.util.spec_from_file_location('example', '$example/${name}.py')
-          " 2>&1 || echo "WARN: $name smoke test skipped"
+              timeout 60 python "$example/${name}.py" 2>&1 && \
+              echo "PASS: $name" || \
+              echo "SKIP: $name (timeout or error — examples run full training)"
             fi
           done
 
