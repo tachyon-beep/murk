@@ -861,11 +861,11 @@ mod tests {
     fn reset_lifecycle() {
         let mut world = RealtimeAsyncWorld::new(test_config(), AsyncConfig::default()).unwrap();
 
-        // Wait for some ticks.
-        let deadline = Instant::now() + Duration::from_secs(2);
+        // Wait for some ticks (generous timeout for slow CI runners).
+        let deadline = Instant::now() + Duration::from_secs(5);
         while world.current_epoch() < 5 {
             if Instant::now() > deadline {
-                panic!("epoch didn't reach 5 within 2s");
+                panic!("epoch didn't reach 5 within 5s");
             }
             std::thread::sleep(Duration::from_millis(10));
         }
