@@ -12,7 +12,7 @@ use murk_ffi::{
 use crate::error::check_status;
 
 /// Spatial topology type.
-#[pyclass(eq, eq_int)]
+#[pyclass(eq, eq_int, from_py_object)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SpaceType {
     /// 1D line with configurable edge behavior.
@@ -32,7 +32,7 @@ pub(crate) enum SpaceType {
 }
 
 /// Field data type.
-#[pyclass(eq, eq_int)]
+#[pyclass(eq, eq_int, from_py_object)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FieldType {
     /// Single f32 per cell.
@@ -44,7 +44,7 @@ pub(crate) enum FieldType {
 }
 
 /// Field allocation strategy.
-#[pyclass(eq, eq_int)]
+#[pyclass(eq, eq_int, from_py_object)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FieldMutability {
     /// Generation 0 forever.
@@ -56,7 +56,7 @@ pub(crate) enum FieldMutability {
 }
 
 /// Boundary behavior when field values exceed bounds.
-#[pyclass(eq, eq_int)]
+#[pyclass(eq, eq_int, from_py_object)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum BoundaryBehavior {
     /// Clamp to nearest bound.
@@ -70,7 +70,7 @@ pub(crate) enum BoundaryBehavior {
 }
 
 /// Edge behavior for lattice spaces.
-#[pyclass(eq, eq_int)]
+#[pyclass(eq, eq_int, from_py_object)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum EdgeBehavior {
     /// Absorb: cells at edge have no neighbor beyond.
@@ -82,7 +82,7 @@ pub(crate) enum EdgeBehavior {
 }
 
 /// Observation region type.
-#[pyclass(eq, eq_int)]
+#[pyclass(eq, eq_int, from_py_object)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RegionType {
     /// Full grid — observe every cell.
@@ -103,7 +103,7 @@ impl RegionType {
 }
 
 /// Observation transform applied at extraction time.
-#[pyclass(eq, eq_int)]
+#[pyclass(eq, eq_int, from_py_object)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TransformType {
     /// Raw field values, no transform.
@@ -122,7 +122,7 @@ impl TransformType {
 }
 
 /// Pooling kernel for observation downsampling.
-#[pyclass(eq, eq_int)]
+#[pyclass(eq, eq_int, from_py_object)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PoolKernel {
     /// No pooling.
@@ -147,7 +147,7 @@ impl PoolKernel {
 }
 
 /// Observation data type.
-#[pyclass(eq, eq_int)]
+#[pyclass(eq, eq_int, from_py_object)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum DType {
     /// 32-bit float.
@@ -179,7 +179,7 @@ impl Config {
     #[new]
     fn new(py: Python<'_>) -> PyResult<Self> {
         // Release GIL: murk_config_create locks CONFIGS.
-        let (status, h) = py.allow_threads(|| {
+        let (status, h) = py.detach(|| {
             let mut h: u64 = 0;
             let s = murk_config_create(&mut h);
             (s, h)
@@ -307,7 +307,7 @@ impl Config {
         let bb = boundary as i32;
         // Release GIL: murk_config_add_field locks CONFIGS.
         let status =
-            py.allow_threads(|| murk_config_add_field(h, name_addr as *const i8, ft, mt, dims, bb));
+            py.detach(|| murk_config_add_field(h, name_addr as *const i8, ft, mt, dims, bb));
         check_status(status)
     }
 
@@ -315,7 +315,7 @@ impl Config {
     fn set_dt(&self, py: Python<'_>, dt: f64) -> PyResult<()> {
         let h = self.require_handle()?;
         // Release GIL: murk_config_set_dt locks CONFIGS.
-        let status = py.allow_threads(|| murk_config_set_dt(h, dt));
+        let status = py.detach(|| murk_config_set_dt(h, dt));
         check_status(status)
     }
 
@@ -323,7 +323,7 @@ impl Config {
     fn set_seed(&self, py: Python<'_>, seed: u64) -> PyResult<()> {
         let h = self.require_handle()?;
         // Release GIL: murk_config_set_seed locks CONFIGS.
-        let status = py.allow_threads(|| murk_config_set_seed(h, seed));
+        let status = py.detach(|| murk_config_set_seed(h, seed));
         check_status(status)
     }
 
@@ -354,9 +354,8 @@ impl Config {
         let h = self.require_handle()?;
         let params_addr = params.as_ptr() as usize;
         let params_len = params.len();
-        let status = py.allow_threads(|| {
-            murk_config_set_space(h, space_type, params_addr as *const f64, params_len)
-        });
+        let status = py
+            .detach(|| murk_config_set_space(h, space_type, params_addr as *const f64, params_len));
         check_status(status)
     }
 
@@ -364,7 +363,7 @@ impl Config {
     pub(crate) fn add_propagator_handle(&self, py: Python<'_>, prop_handle: u64) -> PyResult<()> {
         let h = self.require_handle()?;
         // Release GIL: murk_config_add_propagator locks CONFIGS.
-        let status = py.allow_threads(|| murk_config_add_propagator(h, prop_handle));
+        let status = py.detach(|| murk_config_add_propagator(h, prop_handle));
         check_status(status)
     }
 
@@ -397,7 +396,7 @@ impl Config {
         self.free_trampolines();
         if let Some(h) = self.handle.take() {
             // Release GIL: murk_config_destroy locks CONFIGS.
-            py.allow_threads(|| murk_config_destroy(h));
+            py.detach(|| murk_config_destroy(h));
         }
     }
 }
@@ -407,8 +406,8 @@ impl Drop for Config {
         self.free_trampolines();
         if let Some(h) = self.handle.take() {
             // Release GIL: murk_config_destroy locks CONFIGS.
-            Python::with_gil(|py| {
-                py.allow_threads(|| murk_config_destroy(h));
+            Python::attach(|py| {
+                py.detach(|| murk_config_destroy(h));
             });
         }
     }

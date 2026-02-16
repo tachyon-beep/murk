@@ -17,13 +17,13 @@ use crate::error::check_status;
 
 /// Data stored per Python propagator. Boxed and passed as `user_data`.
 pub(crate) struct TrampolineData {
-    callable: PyObject,
+    callable: Py<PyAny>,
     reads: Vec<u32>,
     reads_previous: Vec<u32>,
     writes: Vec<u32>,
 }
 
-// SAFETY: PyObject is only accessed inside Python::with_gil() in the trampoline.
+// SAFETY: Py<PyAny> is only accessed inside Python::attach() in the trampoline.
 // The trampoline is only ever called from the same thread that released the GIL.
 #[allow(unsafe_code)]
 unsafe impl Send for TrampolineData {}
@@ -38,7 +38,7 @@ unsafe impl Sync for TrampolineData {}
 #[pyclass]
 pub(crate) struct PropagatorDef {
     name: String,
-    step_fn: PyObject,
+    step_fn: Py<PyAny>,
     reads: Vec<u32>,
     reads_previous: Vec<u32>,
     writes: Vec<(u32, WriteMode)>, // (field_id, write_mode)
@@ -58,7 +58,7 @@ impl PropagatorDef {
     #[pyo3(signature = (name, step_fn, reads=vec![], reads_previous=vec![], writes=vec![]))]
     fn new(
         name: String,
-        step_fn: PyObject,
+        step_fn: Py<PyAny>,
         reads: Vec<u32>,
         reads_previous: Vec<u32>,
         writes: Vec<(u32, WriteMode)>,
@@ -154,7 +154,7 @@ pub(crate) fn add_propagator(
     py: Python<'_>,
     config: &mut Config,
     name: String,
-    step_fn: PyObject,
+    step_fn: Py<PyAny>,
     reads: Vec<u32>,
     reads_previous: Vec<u32>,
     writes: Vec<(u32, WriteMode)>,
@@ -171,7 +171,7 @@ pub(crate) fn add_propagator(
 
 /// C trampoline: called by the engine for each tick.
 ///
-/// Re-acquires the GIL (safe because the caller released it via `allow_threads`),
+/// Re-acquires the GIL (safe because the caller released it via `detach`),
 /// copies engine buffers to numpy arrays, calls the Python callable, then
 /// copies write results back to engine buffers.
 ///
@@ -188,7 +188,7 @@ unsafe extern "C" fn python_trampoline(user_data: *mut c_void, ctx: *const MurkS
     let data = unsafe { &*(user_data as *const TrampolineData) };
     let ctx = unsafe { &*ctx };
 
-    Python::with_gil(|py| match trampoline_inner(py, data, ctx) {
+    Python::attach(|py| match trampoline_inner(py, data, ctx) {
         Ok(()) => 0,
         Err(e) => {
             e.print(py);
@@ -265,7 +265,7 @@ fn trampoline_inner(py: Python<'_>, data: &TrampolineData, ctx: &MurkStepContext
     // Write back modified data from numpy arrays to engine buffers.
     for (i, &(addr, len)) in write_addrs.iter().enumerate() {
         let item = write_arrays.get_item(i)?;
-        let arr = item.downcast::<numpy::PyArray1<f32>>()?;
+        let arr = item.cast::<numpy::PyArray1<f32>>()?;
         let readonly = unsafe { arr.as_slice()? };
         if readonly.len() != len {
             return Err(pyo3::exceptions::PyValueError::new_err(format!(

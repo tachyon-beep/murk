@@ -5,7 +5,7 @@ use pyo3::prelude::*;
 use murk_ffi::{MurkCommand, MurkCommandType, MurkReceipt};
 
 /// Write mode for propagators.
-#[pyclass(eq, eq_int)]
+#[pyclass(eq, eq_int, from_py_object)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum WriteMode {
     Full = 0,
@@ -13,7 +13,7 @@ pub(crate) enum WriteMode {
 }
 
 /// Command type discriminator.
-#[pyclass(eq, eq_int)]
+#[pyclass(eq, eq_int, from_py_object)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CommandType {
     SetParameter = 0,
@@ -21,7 +21,7 @@ pub(crate) enum CommandType {
 }
 
 /// A command to submit to the simulation.
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone)]
 pub(crate) struct Command {
     pub(crate) inner: MurkCommand,
