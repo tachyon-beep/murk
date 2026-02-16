@@ -14,7 +14,7 @@ description = "Spatial data structures and field storage for Murk simulations"
 readme = "README.md"
 
 [dependencies]
-murk-core = { path = "../murk-core", version = "0.1.2" }
+murk-core = { path = "../murk-core", version = "0.1.3" }
 indexmap = { workspace = true }
 smallvec = { workspace = true }
 
