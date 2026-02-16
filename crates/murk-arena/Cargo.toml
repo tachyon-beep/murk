@@ -14,7 +14,7 @@ description = "Arena-based generational allocation for Murk simulations"
 readme = "README.md"
 
 [dependencies]
-murk-core = { path = "../murk-core", version = "0.1.1" }
+murk-core = { path = "../murk-core", version = "0.1.2" }
 indexmap = { workspace = true }
 
 [dev-dependencies]

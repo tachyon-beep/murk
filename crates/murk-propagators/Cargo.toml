@@ -14,9 +14,9 @@ description = "Reference propagators for the Murk simulation framework"
 readme = "README.md"
 
 [dependencies]
-murk-core = { path = "../murk-core", version = "0.1.1" }
-murk-propagator = { path = "../murk-propagator", version = "0.1.1" }
-murk-space = { path = "../murk-space", version = "0.1.1" }
+murk-core = { path = "../murk-core", version = "0.1.2" }
+murk-propagator = { path = "../murk-propagator", version = "0.1.2" }
+murk-space = { path = "../murk-space", version = "0.1.2" }
 smallvec = { workspace = true }
 
 [dev-dependencies]
