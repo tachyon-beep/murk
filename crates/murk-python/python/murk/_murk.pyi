@@ -241,6 +241,39 @@ class ObsPlan:
     def __exit__(self, _exc_type: Any = ..., _exc_val: Any = ..., _exc_tb: Any = ...) -> None: ...
 
 # ---------------------------------------------------------------------------
+# BatchedWorld
+# ---------------------------------------------------------------------------
+
+class BatchedWorld:
+    def __init__(
+        self,
+        configs: list[Config],
+        obs_entries: list[ObsEntry] | None = ...,
+    ) -> None: ...
+    def step_and_observe(
+        self,
+        commands_per_world: list[list[Command]],
+        obs_output: npt.NDArray[np.float32],
+        obs_mask: npt.NDArray[np.uint8],
+    ) -> list[int]: ...
+    def observe_all(
+        self,
+        obs_output: npt.NDArray[np.float32],
+        obs_mask: npt.NDArray[np.uint8],
+    ) -> None: ...
+    def reset_world(self, index: int, seed: int) -> None: ...
+    def reset_all(self, seeds: list[int]) -> None: ...
+    @property
+    def num_worlds(self) -> int: ...
+    @property
+    def obs_output_len(self) -> int: ...
+    @property
+    def obs_mask_len(self) -> int: ...
+    def destroy(self) -> None: ...
+    def __enter__(self) -> BatchedWorld: ...
+    def __exit__(self, _exc_type: Any = ..., _exc_val: Any = ..., _exc_tb: Any = ...) -> None: ...
+
+# ---------------------------------------------------------------------------
 # StepMetrics
 # ---------------------------------------------------------------------------
 

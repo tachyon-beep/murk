@@ -6,6 +6,7 @@ This package provides:
 """
 
 from murk._murk import (
+    BatchedWorld,
     BoundaryBehavior,
     Command,
     CommandType,
@@ -28,6 +29,7 @@ from murk._murk import (
     add_propagator,
 )
 
+from murk.batched_vec_env import BatchedVecEnv
 from murk.env import MurkEnv
 from murk.vec_env import MurkVecEnv
 
@@ -45,6 +47,7 @@ __all__ = [
     "PoolKernel",
     "DType",
     # Core classes
+    "BatchedWorld",
     "Config",
     "Command",
     "Receipt",
@@ -56,6 +59,7 @@ __all__ = [
     # Functions
     "add_propagator",
     # Gymnasium
+    "BatchedVecEnv",
     "MurkEnv",
     "MurkVecEnv",
 ]

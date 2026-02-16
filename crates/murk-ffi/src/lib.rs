@@ -20,6 +20,7 @@
 // FFI functions inherently dereference raw pointers; safety is documented per-block.
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
 
+pub mod batched;
 pub mod command;
 pub mod config;
 mod handle;
@@ -30,6 +31,11 @@ pub mod status;
 pub mod types;
 pub mod world;
 
+pub use batched::{
+    murk_batched_create, murk_batched_destroy, murk_batched_num_worlds,
+    murk_batched_obs_mask_len, murk_batched_obs_output_len, murk_batched_observe_all,
+    murk_batched_reset_all, murk_batched_reset_world, murk_batched_step_and_observe,
+};
 pub use command::{MurkCommand, MurkCommandType, MurkReceipt};
 pub use config::{
     murk_config_add_field, murk_config_add_propagator, murk_config_create, murk_config_destroy,

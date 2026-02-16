@@ -10,6 +10,7 @@
 
 use pyo3::prelude::*;
 
+mod batched;
 mod command;
 mod config;
 mod error;
@@ -35,6 +36,7 @@ fn _murk(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<config::DType>()?;
 
     // Core classes
+    m.add_class::<batched::BatchedWorld>()?;
     m.add_class::<config::Config>()?;
     m.add_class::<command::Command>()?;
     m.add_class::<command::Receipt>()?;
