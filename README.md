@@ -37,29 +37,51 @@ generational allocation for deterministic, zero-GC memory management.
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────┐
-│  Python (murk)          │  C consumers              │
-│  MurkEnv / MurkVecEnv   │  murk_lockstep_step()     │
-├────────────┬────────────┴───────────────────────────┤
-│ murk-python│           murk-ffi                     │
-│ (PyO3)     │        (C ABI, handle tables)          │
-├────────────┴────────────────────────────────────────┤
-│                    murk-engine                       │
-│         LockstepWorld · RealtimeAsyncWorld           │
-│        TickEngine · IngressQueue · EgressPool        │
-├──────────────┬──────────────┬───────────────────────┤
-│ murk-propagator │  murk-obs │   murk-replay         │
-│ Propagator trait│  ObsSpec  │   ReplayWriter/Reader  │
-│ StepContext     │  ObsPlan  │   determinism verify   │
-├──────────────┴──┴──────────┬┴───────────────────────┤
-│       murk-arena           │      murk-space         │
-│  PingPongArena · Snapshot  │  Space trait · backends │
-│  ScratchRegion · Sparse    │  regions · edges        │
-├────────────────────────────┴────────────────────────┤
-│                     murk-core                        │
-│    FieldDef · Command · SnapshotAccess · IDs         │
-└─────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph consumers ["Consumers"]
+        py["<b>Python</b> <i>(murk)</i><br/>MurkEnv · MurkVecEnv"]
+        cc["<b>C consumers</b><br/>murk_lockstep_step()"]
+    end
+
+    subgraph bindings ["Bindings"]
+        mp["<b>murk‑python</b><br/>PyO3"]
+        mf["<b>murk‑ffi</b><br/>C ABI · handle tables"]
+    end
+
+    subgraph engine ["Engine"]
+        me["<b>murk‑engine</b><br/>LockstepWorld · RealtimeAsyncWorld<br/>TickEngine · IngressQueue · EgressPool"]
+    end
+
+    subgraph middleware ["Middleware"]
+        mprop["<b>murk‑propagator</b><br/>Propagator trait · StepContext"]
+        mobs["<b>murk‑obs</b><br/>ObsSpec · ObsPlan"]
+        mrep["<b>murk‑replay</b><br/>ReplayWriter/Reader<br/>determinism verify"]
+    end
+
+    subgraph foundation ["Foundation"]
+        ma["<b>murk‑arena</b><br/>PingPongArena · Snapshot<br/>ScratchRegion · Sparse"]
+        ms["<b>murk‑space</b><br/>Space trait · backends<br/>regions · edges"]
+    end
+
+    subgraph core ["Core"]
+        mc["<b>murk‑core</b><br/>FieldDef · Command<br/>SnapshotAccess · IDs"]
+    end
+
+    py --> mp
+    cc --> mf
+    mp --> me
+    mf --> me
+    me --> mprop
+    me --> mobs
+    me --> mrep
+    mprop --> ma
+    mprop --> ms
+    mobs --> ma
+    mobs --> ms
+    mrep --> ma
+    ma --> mc
+    ms --> mc
 ```
 
 ## Prerequisites
