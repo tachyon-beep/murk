@@ -54,6 +54,8 @@ pub enum MurkStatus {
     InvalidArgument = -18,
     /// Caller-provided buffer is too small.
     BufferTooSmall = -19,
+    /// Internal error (e.g. poisoned mutex after a prior panic).
+    InternalError = -20,
 }
 
 impl From<&StepError> for MurkStatus {
@@ -134,6 +136,7 @@ mod tests {
         assert_eq!(MurkStatus::ConfigError as i32, -17);
         assert_eq!(MurkStatus::InvalidArgument as i32, -18);
         assert_eq!(MurkStatus::BufferTooSmall as i32, -19);
+        assert_eq!(MurkStatus::InternalError as i32, -20);
     }
 
     #[test]

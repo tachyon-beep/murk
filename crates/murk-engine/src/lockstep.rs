@@ -204,7 +204,7 @@ impl std::fmt::Debug for LockstepWorld {
 mod tests {
     use super::*;
     use murk_core::command::CommandPayload;
-    use murk_core::id::{FieldId, ParameterKey};
+    use murk_core::id::{Coord, FieldId, ParameterKey};
     use murk_core::traits::{FieldReader, SnapshotAccess};
     use murk_core::{BoundaryBehavior, FieldDef, FieldMutability, FieldType};
     use murk_propagator::propagator::WriteMode;
@@ -339,9 +339,10 @@ mod tests {
 
     fn make_cmd(expires: u64) -> Command {
         Command {
-            payload: CommandPayload::SetParameter {
-                key: ParameterKey(0),
-                value: 0.0,
+            payload: CommandPayload::SetField {
+                coord: Coord::from_elem(0, 1),
+                field_id: FieldId(0),
+                value: 1.0,
             },
             expires_after_tick: TickId(expires),
             source_id: None,

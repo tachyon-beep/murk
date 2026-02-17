@@ -214,20 +214,32 @@ impl TickEngine {
                 command_index: dc.command_index,
             });
         }
-        // 3b. Apply SetField commands to the staging writer.
-        for dc in &commands {
-            if let CommandPayload::SetField {
-                ref coord,
-                field_id,
-                value,
-            } = dc.command.payload
-            {
-                if let Some(rank) = self.space.canonical_rank(coord) {
-                    if let Some(buf) = guard.writer.write(field_id) {
-                        if rank < buf.len() {
-                            buf[rank] = value;
+        // 3b. Apply commands to the staging writer.
+        for (i, dc) in commands.iter().enumerate() {
+            let receipt = &mut receipts[accepted_receipt_start + i];
+            match &dc.command.payload {
+                CommandPayload::SetField {
+                    ref coord,
+                    field_id,
+                    value,
+                } => {
+                    if let Some(rank) = self.space.canonical_rank(coord) {
+                        if let Some(buf) = guard.writer.write(*field_id) {
+                            if rank < buf.len() {
+                                buf[rank] = *value;
+                            }
                         }
                     }
+                }
+                CommandPayload::SetParameter { .. }
+                | CommandPayload::SetParameterBatch { .. }
+                | CommandPayload::Move { .. }
+                | CommandPayload::Spawn { .. }
+                | CommandPayload::Despawn { .. }
+                | CommandPayload::Custom { .. } => {
+                    // Command type not yet implemented — reject honestly
+                    // rather than silently reporting success.
+                    receipt.accepted = false;
                 }
             }
         }
@@ -301,9 +313,11 @@ impl TickEngine {
         self.current_tick = next_tick;
         self.consecutive_rollback_count = 0;
 
-        // 8. Finalize receipts with applied_tick_id.
+        // 8. Finalize receipts with applied_tick_id (only for actually executed commands).
         for receipt in &mut receipts[accepted_receipt_start..] {
-            receipt.applied_tick_id = Some(next_tick);
+            if receipt.accepted {
+                receipt.applied_tick_id = Some(next_tick);
+            }
         }
 
         // 9. Build metrics.
@@ -408,7 +422,7 @@ impl TickEngine {
 mod tests {
     use super::*;
     use murk_core::command::CommandPayload;
-    use murk_core::id::ParameterKey;
+    use murk_core::id::{Coord, ParameterKey};
     use murk_core::traits::{FieldReader, SnapshotAccess};
     use murk_core::{BoundaryBehavior, FieldDef, FieldMutability, FieldType};
     use murk_propagator::propagator::WriteMode;
@@ -849,7 +863,35 @@ mod tests {
     fn commands_flow_through_to_receipts() {
         let mut engine = simple_engine();
 
-        let submit_receipts = engine.submit_commands(vec![make_cmd(100), make_cmd(100)]);
+        // Use SetField commands — the only command type currently executed.
+        let coord: Coord = vec![0i32].into();
+        let cmds = vec![
+            Command {
+                payload: CommandPayload::SetField {
+                    coord: coord.clone(),
+                    field_id: FieldId(0),
+                    value: 1.0,
+                },
+                expires_after_tick: TickId(100),
+                source_id: None,
+                source_seq: None,
+                priority_class: 1,
+                arrival_seq: 0,
+            },
+            Command {
+                payload: CommandPayload::SetField {
+                    coord: coord.clone(),
+                    field_id: FieldId(0),
+                    value: 2.0,
+                },
+                expires_after_tick: TickId(100),
+                source_id: None,
+                source_seq: None,
+                priority_class: 1,
+                arrival_seq: 0,
+            },
+        ];
+        let submit_receipts = engine.submit_commands(cmds);
         assert_eq!(submit_receipts.len(), 2);
         assert!(submit_receipts.iter().all(|r| r.accepted));
 
@@ -862,6 +904,28 @@ mod tests {
             .collect();
         assert_eq!(applied.len(), 2);
         assert!(applied.iter().all(|r| r.applied_tick_id == Some(TickId(1))));
+    }
+
+    #[test]
+    fn non_setfield_commands_rejected_honestly() {
+        let mut engine = simple_engine();
+
+        // Submit SetParameter commands — not yet implemented.
+        let submit_receipts = engine.submit_commands(vec![make_cmd(100), make_cmd(100)]);
+        assert_eq!(submit_receipts.len(), 2);
+        assert!(submit_receipts.iter().all(|r| r.accepted));
+
+        let result = engine.execute_tick().unwrap();
+        assert_eq!(result.receipts.len(), 2);
+
+        // Non-SetField commands must NOT report as applied.
+        for receipt in &result.receipts {
+            assert!(!receipt.accepted, "unimplemented command type must be rejected");
+            assert_eq!(
+                receipt.applied_tick_id, None,
+                "unimplemented command must not have applied_tick_id"
+            );
+        }
     }
 
     // ── Metrics tests ────────────────────────────────────────

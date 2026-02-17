@@ -483,17 +483,17 @@ mod tests {
         let world_h = create_test_world();
 
         let cmd = MurkCommand {
-            command_type: MurkCommandType::SetParameter as i32,
+            command_type: MurkCommandType::SetField as i32,
             expires_after_tick: 100,
             source_id: 0,
             source_seq: 0,
             priority_class: 1,
             field_id: 0,
             param_key: 0,
-            float_value: 0.0,
-            double_value: 1.0,
+            float_value: 1.0,
+            double_value: 0.0,
             coord: [0; 4],
-            coord_ndim: 0,
+            coord_ndim: 1,
         };
 
         let mut receipts = [MurkReceipt {

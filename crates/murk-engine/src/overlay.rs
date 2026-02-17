@@ -72,8 +72,11 @@ impl BaseFieldSet {
 ///
 /// Populated once per tick before `begin_tick()` by reading from
 /// [`Snapshot`](murk_arena::Snapshot).
+///
+/// Uses `Option<Vec<f32>>` to distinguish unpopulated/stale fields (`None`)
+/// from populated fields that happen to be empty (`Some(vec![])`).
 pub(crate) struct BaseFieldCache {
-    entries: IndexMap<FieldId, Vec<f32>>,
+    entries: IndexMap<FieldId, Option<Vec<f32>>>,
 }
 
 impl BaseFieldCache {
@@ -86,23 +89,20 @@ impl BaseFieldCache {
 
     /// Populate the cache from a snapshot for the given field set.
     ///
-    /// Reuses existing `Vec` allocations when possible. Any field not
-    /// found in the snapshot is silently skipped (it may be a PerTick
-    /// field that hasn't been written yet on the very first tick).
+    /// Any field not found in the snapshot is silently skipped (it may be
+    /// a PerTick field that hasn't been written yet on the very first tick).
     pub(crate) fn populate(&mut self, snapshot: &dyn FieldReader, fields: &BaseFieldSet) {
-        // Mark all entries stale by truncating (keeps allocation).
+        // Mark all entries stale.
         for v in self.entries.values_mut() {
-            v.clear();
+            *v = None;
         }
 
         for &field in fields.field_ids() {
             if let Some(data) = snapshot.read(field) {
-                let entry = self
-                    .entries
-                    .entry(field)
-                    .or_insert_with(|| Vec::with_capacity(data.len()));
-                entry.clear();
-                entry.extend_from_slice(data);
+                let slot = self.entries.entry(field).or_insert(None);
+                let buf = slot.get_or_insert_with(|| Vec::with_capacity(data.len()));
+                buf.clear();
+                buf.extend_from_slice(data);
             }
         }
     }
@@ -110,10 +110,7 @@ impl BaseFieldCache {
 
 impl FieldReader for BaseFieldCache {
     fn read(&self, field: FieldId) -> Option<&[f32]> {
-        self.entries
-            .get(&field)
-            .filter(|v| !v.is_empty())
-            .map(|v| v.as_slice())
+        self.entries.get(&field).and_then(|v| v.as_deref())
     }
 }
 
@@ -121,10 +118,12 @@ impl FieldReader for BaseFieldCache {
 
 /// Cached copies of staged fields for a single propagator's overlay reads.
 ///
-/// Cleared and refilled between propagators. Reuses `Vec` allocations to
-/// avoid per-tick heap churn.
+/// Cleared and refilled between propagators.
+///
+/// Uses `Option<Vec<f32>>` to distinguish stale/cleared fields (`None`)
+/// from populated fields that happen to be empty (`Some(vec![])`).
 pub(crate) struct StagedFieldCache {
-    entries: IndexMap<FieldId, Vec<f32>>,
+    entries: IndexMap<FieldId, Option<Vec<f32>>>,
 }
 
 impl StagedFieldCache {
@@ -135,30 +134,25 @@ impl StagedFieldCache {
         }
     }
 
-    /// Clear all entries (keeps allocations for reuse).
+    /// Clear all entries (marks as stale; keeps map keys).
     pub(crate) fn clear(&mut self) {
         for v in self.entries.values_mut() {
-            v.clear();
+            *v = None;
         }
     }
 
     /// Insert (or replace) a field's data.
     pub(crate) fn insert(&mut self, field: FieldId, data: &[f32]) {
-        let entry = self
-            .entries
-            .entry(field)
-            .or_insert_with(|| Vec::with_capacity(data.len()));
-        entry.clear();
-        entry.extend_from_slice(data);
+        let slot = self.entries.entry(field).or_insert(None);
+        let buf = slot.get_or_insert_with(|| Vec::with_capacity(data.len()));
+        buf.clear();
+        buf.extend_from_slice(data);
     }
 }
 
 impl FieldReader for StagedFieldCache {
     fn read(&self, field: FieldId) -> Option<&[f32]> {
-        self.entries
-            .get(&field)
-            .filter(|v| !v.is_empty())
-            .map(|v| v.as_slice())
+        self.entries.get(&field).and_then(|v| v.as_deref())
     }
 }
 
@@ -205,7 +199,7 @@ mod tests {
     fn base_cache_with(fields: &[(FieldId, Vec<f32>)]) -> BaseFieldCache {
         let mut cache = BaseFieldCache::new();
         for (id, data) in fields {
-            cache.entries.insert(*id, data.clone());
+            cache.entries.insert(*id, Some(data.clone()));
         }
         cache
     }
@@ -274,5 +268,58 @@ mod tests {
 
         cache.insert(FieldId(0), &[3.0, 4.0]);
         assert_eq!(cache.read(FieldId(0)), Some(&[3.0, 4.0][..]));
+    }
+
+    // ── BUG-008 regression tests ─────────────────────────────────
+
+    #[test]
+    fn base_cache_empty_field_returns_some_empty_slice() {
+        // A zero-component field (e.g., FieldType::Vector { dims: 0 })
+        // must return Some(&[]) not None.
+        let base = base_cache_with(&[(FieldId(5), vec![])]);
+        assert_eq!(base.read(FieldId(5)), Some(&[][..]));
+    }
+
+    #[test]
+    fn staged_cache_empty_field_returns_some_empty_slice() {
+        // A zero-component field inserted into the staged cache
+        // must return Some(&[]) not None.
+        let mut cache = StagedFieldCache::new();
+        cache.insert(FieldId(7), &[]);
+        assert_eq!(cache.read(FieldId(7)), Some(&[][..]));
+    }
+
+    #[test]
+    fn staged_cache_clear_makes_empty_field_stale() {
+        // After clear(), even a previously-populated empty field must
+        // return None (stale), not Some(&[]).
+        let mut cache = StagedFieldCache::new();
+        cache.insert(FieldId(7), &[]);
+        assert_eq!(cache.read(FieldId(7)), Some(&[][..]));
+
+        cache.clear();
+        assert_eq!(cache.read(FieldId(7)), None);
+    }
+
+    #[test]
+    fn overlay_routes_empty_base_field() {
+        let base = base_cache_with(&[(FieldId(0), vec![])]);
+        let staged = StagedFieldCache::new();
+        let mut routes = IndexMap::new();
+        routes.insert(FieldId(0), ReadSource::BaseGen);
+
+        let reader = OverlayReader::new(&routes, &base, &staged);
+        assert_eq!(reader.read(FieldId(0)), Some(&[][..]));
+    }
+
+    #[test]
+    fn overlay_routes_empty_staged_field() {
+        let base = BaseFieldCache::new();
+        let staged = staged_cache_with(&[(FieldId(1), vec![])]);
+        let mut routes = IndexMap::new();
+        routes.insert(FieldId(1), ReadSource::Staged { writer_index: 0 });
+
+        let reader = OverlayReader::new(&routes, &base, &staged);
+        assert_eq!(reader.read(FieldId(1)), Some(&[][..]));
     }
 }

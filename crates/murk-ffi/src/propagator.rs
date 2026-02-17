@@ -153,6 +153,9 @@ unsafe extern "C" fn trampoline_read(
     out_ptr: *mut *const f32,
     out_len: *mut usize,
 ) -> i32 {
+    if opaque.is_null() || out_ptr.is_null() || out_len.is_null() {
+        return MurkStatus::InvalidArgument as i32;
+    }
     // SAFETY: opaque was set to &mut StepContextWrapper in step() above.
     let wrapper = &*(opaque as *const StepContextWrapper<'_, '_>);
     match wrapper.ctx.reads().read(FieldId(field_id)) {
