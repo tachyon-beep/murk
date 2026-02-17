@@ -166,7 +166,7 @@ impl Fcc12 {
                 ),
             });
         }
-        if (x + y + z) % 2 != 0 {
+        if (x ^ y ^ z) & 1 != 0 {
             return Err(SpaceError::CoordOutOfBounds {
                 coord: coord.clone(),
                 bounds: "(x + y + z) must be even (FCC parity constraint)".into(),
@@ -300,9 +300,8 @@ impl Space for Fcc12 {
                 for z in z_lo..=z_hi {
                     for y in y_lo..=y_hi {
                         // First valid x >= x_lo with correct parity.
-                        // (x_lo + y + z) % 2 is always 0 or 1 here because all
-                        // values are non-negative (check_bounds guarantees >= 0).
-                        let x_start = x_lo + ((x_lo + y + z) % 2);
+                        // Use XOR parity (overflow-safe) to find first valid x.
+                        let x_start = x_lo + ((x_lo ^ y ^ z) & 1);
                         let mut x = x_start;
                         while x <= x_hi {
                             coords.push(smallvec![x, y, z]);
@@ -347,7 +346,7 @@ impl Space for Fcc12 {
         let mut out = Vec::with_capacity(self.cell_count);
         for z in 0..self.d as i32 {
             for y in 0..self.h as i32 {
-                let x_start = (y + z) % 2;
+                let x_start = (y ^ z) & 1;
                 let mut x = x_start;
                 while x < self.w as i32 {
                     out.push(smallvec![x, y, z]);
@@ -377,8 +376,8 @@ impl Space for Fcc12 {
             return None;
         }
 
-        // Parity check.
-        if (x + y + z) % 2 != 0 {
+        // Parity check (XOR-based: overflow-safe).
+        if (x ^ y ^ z) & 1 != 0 {
             return None;
         }
 
@@ -978,7 +977,7 @@ mod tests {
         let y = y.rem_euclid(h as i32);
         let mut z = z.rem_euclid(d as i32);
         // Fix parity: if (x+y+z) is odd, bump z by 1 (wrapping).
-        if (x + y + z) % 2 != 0 {
+        if (x ^ y ^ z) & 1 != 0 {
             z = (z + 1) % d as i32;
         }
         (x, y, z)

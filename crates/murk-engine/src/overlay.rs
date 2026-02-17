@@ -55,6 +55,14 @@ impl BaseFieldSet {
             }
         }
 
+        // All WriteMode::Incremental fields (need previous-gen data to seed
+        // write buffers before step()).
+        for i in 0..plan.len() {
+            for field in plan.incremental_fields_for(i) {
+                set.insert(field);
+            }
+        }
+
         Self {
             field_ids: set.into_iter().collect(),
         }
