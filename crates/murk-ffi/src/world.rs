@@ -346,7 +346,7 @@ fn write_receipts(
     if !n_out.is_null() {
         // SAFETY: n_out is valid.
         unsafe {
-            *n_out = receipts.len();
+            *n_out = write_count;
         }
     }
 }
@@ -704,5 +704,51 @@ mod tests {
             std::ptr::null_mut(),
         );
         assert_eq!(status, MurkStatus::InvalidHandle as i32);
+    }
+
+    #[test]
+    fn write_receipts_reports_written_count_not_total() {
+        use murk_core::command::Receipt;
+        use murk_core::id::TickId;
+
+        let receipts = vec![
+            Receipt {
+                accepted: true,
+                applied_tick_id: Some(TickId(1)),
+                reason_code: None,
+                command_index: 0,
+            },
+            Receipt {
+                accepted: true,
+                applied_tick_id: Some(TickId(1)),
+                reason_code: None,
+                command_index: 1,
+            },
+            Receipt {
+                accepted: true,
+                applied_tick_id: Some(TickId(1)),
+                reason_code: None,
+                command_index: 2,
+            },
+        ];
+
+        // Buffer smaller than receipt count: cap=1 but 3 receipts.
+        let mut buf = [MurkReceipt {
+            accepted: 0,
+            applied_tick_id: 0,
+            reason_code: 0,
+            command_index: 0,
+        }; 1];
+        let mut n_out: usize = 0;
+
+        write_receipts(&receipts, buf.as_mut_ptr(), 1, &mut n_out);
+
+        // n_out must report the number WRITTEN (1), not the total (3).
+        assert_eq!(
+            n_out, 1,
+            "write_receipts should report written count (1), not total (3)"
+        );
+        // The one written receipt should be the first one.
+        assert_eq!(buf[0].command_index, 0);
     }
 }
