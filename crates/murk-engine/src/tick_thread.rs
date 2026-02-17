@@ -238,14 +238,13 @@ impl TickThreadState {
         let mut had_rejection = false;
 
         for worker in self.worker_epochs.iter() {
-            if !worker.is_pinned() {
-                continue;
-            }
-
-            // Use pin_start_ns (set when pin() was called) to measure
-            // actual pin hold duration, not time-since-last-unpin which
-            // would include idle time between tasks.
-            let pin_start = worker.pin_start_ns();
+            // Use pin_snapshot() for a consistent (epoch, pin_start_ns) read.
+            // This avoids a TOCTOU race where a concurrent unpin/repin could
+            // produce a mismatched pair and trigger false-positive stall detection.
+            let pin_start = match worker.pin_snapshot() {
+                Some((_epoch, start_ns)) => start_ns,
+                None => continue, // not pinned
+            };
             let hold_ns = now_ns.saturating_sub(pin_start);
 
             if hold_ns > self.max_epoch_hold_ns {

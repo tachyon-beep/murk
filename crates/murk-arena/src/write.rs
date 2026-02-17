@@ -80,7 +80,7 @@ impl<'a> WriteArena<'a> {
             self.descriptor
                 .get(field)
                 .map(|e| e.handle)
-                .filter(|h| h.generation() < self.generation)
+                .filter(|h| h.generation() != self.generation)
         } {
             if let FieldLocation::Sparse {
                 segment_index: old_seg,

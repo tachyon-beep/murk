@@ -169,7 +169,9 @@ impl PingPongArena {
     /// Returns a [`TickGuard`] providing write access to the staging buffer
     /// and scratch space. The guard must be dropped before calling `publish()`.
     pub fn begin_tick(&mut self) -> Result<TickGuard<'_>, ArenaError> {
-        let next_gen = self.generation + 1;
+        let next_gen = self.generation.checked_add(1).ok_or(ArenaError::InvalidConfig {
+            reason: "generation counter overflow (u32::MAX ticks reached)".into(),
+        })?;
 
         // Reset the staging buffer (it was the published buffer last tick).
         if self.b_is_staging {

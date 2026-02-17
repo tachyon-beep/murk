@@ -112,6 +112,10 @@ impl IngressQueue {
                 continue;
             }
 
+            // Normalize: anonymous commands must not carry a source_seq.
+            if cmd.source_id.is_none() {
+                cmd.source_seq = None;
+            }
             cmd.arrival_seq = self.next_arrival_seq;
             self.next_arrival_seq += 1;
             self.queue.push_back(QueueEntry {
@@ -160,11 +164,17 @@ impl IngressQueue {
 
         // Deterministic sort: (priority_class, source_id|MAX, source_seq|MAX, arrival_seq)
         valid.sort_unstable_by_key(|dc| {
+            let c = &dc.command;
             (
-                dc.command.priority_class,
-                dc.command.source_id.unwrap_or(u64::MAX),
-                dc.command.source_seq.unwrap_or(u64::MAX),
-                dc.command.arrival_seq,
+                c.priority_class,
+                c.source_id.unwrap_or(u64::MAX),
+                // source_seq only meaningful when source_id is present
+                if c.source_id.is_some() {
+                    c.source_seq.unwrap_or(u64::MAX)
+                } else {
+                    u64::MAX
+                },
+                c.arrival_seq,
             )
         });
 
@@ -519,13 +529,13 @@ mod tests {
                     let key_a = (
                         a.priority_class,
                         a.source_id.unwrap_or(u64::MAX),
-                        a.source_seq.unwrap_or(u64::MAX),
+                        if a.source_id.is_some() { a.source_seq.unwrap_or(u64::MAX) } else { u64::MAX },
                         a.arrival_seq,
                     );
                     let key_b = (
                         b.priority_class,
                         b.source_id.unwrap_or(u64::MAX),
-                        b.source_seq.unwrap_or(u64::MAX),
+                        if b.source_id.is_some() { b.source_seq.unwrap_or(u64::MAX) } else { u64::MAX },
                         b.arrival_seq,
                     );
                     prop_assert!(key_a <= key_b, "sort violated: {key_a:?} > {key_b:?}");

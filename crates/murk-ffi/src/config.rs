@@ -75,6 +75,24 @@ pub extern "C" fn murk_config_destroy(handle: u64) -> i32 {
     }
 }
 
+/// Safely convert an f64 FFI parameter to u32.
+/// Rejects non-finite, negative, non-integer, and out-of-range values.
+fn f64_to_u32(v: f64) -> Option<u32> {
+    if !v.is_finite() || v < 0.0 || v > u32::MAX as f64 || v != v.trunc() {
+        return None;
+    }
+    Some(v as u32)
+}
+
+/// Safely convert an f64 FFI parameter to usize.
+/// Rejects non-finite, negative, non-integer, and overly large values.
+fn f64_to_usize(v: f64) -> Option<usize> {
+    if !v.is_finite() || v < 0.0 || v > (isize::MAX as f64) || v != v.trunc() {
+        return None;
+    }
+    Some(v as usize)
+}
+
 /// Parse a space from its type tag and parameter slice.
 ///
 /// Returns `None` if the type or parameters are invalid.
@@ -84,7 +102,7 @@ fn parse_space(space_type: i32, p: &[f64]) -> Option<Box<dyn Space>> {
             if p.len() < 2 {
                 return None;
             }
-            let len = p[0] as u32;
+            let len = f64_to_u32(p[0])?;
             let edge = parse_edge_behavior(p[1] as i32)?;
             Line1D::new(len, edge)
                 .ok()
@@ -94,15 +112,15 @@ fn parse_space(space_type: i32, p: &[f64]) -> Option<Box<dyn Space>> {
             if p.is_empty() {
                 return None;
             }
-            let len = p[0] as u32;
+            let len = f64_to_u32(p[0])?;
             Ring1D::new(len).ok().map(|s| Box::new(s) as Box<dyn Space>)
         }
         x if x == MurkSpaceType::Square4 as i32 => {
             if p.len() < 3 {
                 return None;
             }
-            let w = p[0] as u32;
-            let h = p[1] as u32;
+            let w = f64_to_u32(p[0])?;
+            let h = f64_to_u32(p[1])?;
             let edge = parse_edge_behavior(p[2] as i32)?;
             Square4::new(w, h, edge)
                 .ok()
@@ -112,8 +130,8 @@ fn parse_space(space_type: i32, p: &[f64]) -> Option<Box<dyn Space>> {
             if p.len() < 3 {
                 return None;
             }
-            let w = p[0] as u32;
-            let h = p[1] as u32;
+            let w = f64_to_u32(p[0])?;
+            let h = f64_to_u32(p[1])?;
             let edge = parse_edge_behavior(p[2] as i32)?;
             Square8::new(w, h, edge)
                 .ok()
@@ -124,8 +142,8 @@ fn parse_space(space_type: i32, p: &[f64]) -> Option<Box<dyn Space>> {
             if p.len() < 2 {
                 return None;
             }
-            let cols = p[0] as u32;
-            let rows = p[1] as u32;
+            let cols = f64_to_u32(p[0])?;
+            let rows = f64_to_u32(p[1])?;
             Hex2D::new(rows, cols)
                 .ok()
                 .map(|s| Box::new(s) as Box<dyn Space>)
@@ -135,9 +153,9 @@ fn parse_space(space_type: i32, p: &[f64]) -> Option<Box<dyn Space>> {
             if p.len() < 4 {
                 return None;
             }
-            let w = p[0] as u32;
-            let h = p[1] as u32;
-            let d = p[2] as u32;
+            let w = f64_to_u32(p[0])?;
+            let h = f64_to_u32(p[1])?;
+            let d = f64_to_u32(p[2])?;
             let edge = parse_edge_behavior(p[3] as i32)?;
             Fcc12::new(w, h, d, edge)
                 .ok()
@@ -148,8 +166,8 @@ fn parse_space(space_type: i32, p: &[f64]) -> Option<Box<dyn Space>> {
             if p.is_empty() {
                 return None;
             }
-            let n_components = p[0] as usize;
-            if n_components == 0 {
+            let n_components = f64_to_usize(p[0])?;
+            if n_components == 0 || n_components > p.len() {
                 return None;
             }
             let mut components: Vec<Box<dyn Space>> = Vec::with_capacity(n_components);
@@ -159,9 +177,9 @@ fn parse_space(space_type: i32, p: &[f64]) -> Option<Box<dyn Space>> {
                     return None;
                 }
                 let comp_type = p[offset] as i32;
-                let n_comp_params = p[offset + 1] as usize;
+                let n_comp_params = f64_to_usize(p[offset + 1])?;
                 offset += 2;
-                if offset + n_comp_params > p.len() {
+                if offset.checked_add(n_comp_params).is_none_or(|end| end > p.len()) {
                     return None;
                 }
                 let comp_params = &p[offset..offset + n_comp_params];

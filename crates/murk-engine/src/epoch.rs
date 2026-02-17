@@ -156,6 +156,29 @@ impl WorkerEpoch {
     pub fn clear_cancel(&self) {
         self.cancel.store(false, Ordering::Release);
     }
+
+    /// Read a consistent (pinned_epoch, pin_start_ns) snapshot.
+    ///
+    /// Uses a seqlock-like double-check: read pinned, read pin_start_ns,
+    /// re-read pinned. If the pinned value changed between the two reads
+    /// (concurrent unpin/repin), retry. Returns `None` if the worker is
+    /// not pinned, or `Some((epoch, pin_start_ns))` for a consistent pair.
+    pub fn pin_snapshot(&self) -> Option<(u64, u64)> {
+        for _ in 0..4 {
+            let epoch1 = self.pinned.load(Ordering::Acquire);
+            if epoch1 == EPOCH_UNPINNED {
+                return None;
+            }
+            let start_ns = self.pin_start_ns.load(Ordering::Acquire);
+            let epoch2 = self.pinned.load(Ordering::Acquire);
+            if epoch1 == epoch2 {
+                return Some((epoch1, start_ns));
+            }
+            // Pinned value changed mid-read; retry.
+        }
+        // After retries, conservatively treat as unpinned (don't false-positive).
+        None
+    }
 }
 
 /// Compute the minimum pinned epoch across all workers.

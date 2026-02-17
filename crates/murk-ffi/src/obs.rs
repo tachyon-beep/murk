@@ -106,6 +106,9 @@ pub extern "C" fn murk_obsplan_compile(
                 if e.n_region_params < 1 {
                     return MurkStatus::InvalidArgument as i32;
                 }
+                if e.region_params[0] < 0 {
+                    return MurkStatus::InvalidArgument as i32;
+                }
                 ObsRegion::AgentDisk {
                     radius: e.region_params[0] as u32,
                 }
@@ -114,6 +117,9 @@ pub extern "C" fn murk_obsplan_compile(
                 // AgentRect: half-extents in region_params[0..n].
                 let n = e.n_region_params as usize;
                 if n == 0 || n > 8 {
+                    return MurkStatus::InvalidArgument as i32;
+                }
+                if e.region_params[..n].iter().any(|&v| v < 0) {
                     return MurkStatus::InvalidArgument as i32;
                 }
                 let half_extent: SmallVec<[u32; 4]> =
@@ -146,6 +152,9 @@ pub extern "C" fn murk_obsplan_compile(
                     4 => PoolKernel::Sum,
                     _ => unreachable!(),
                 };
+                if e.pool_kernel_size <= 0 || e.pool_stride <= 0 {
+                    return MurkStatus::InvalidArgument as i32;
+                }
                 Some(PoolConfig {
                     kernel,
                     kernel_size: e.pool_kernel_size as usize,

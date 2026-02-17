@@ -326,8 +326,10 @@ impl Propagator for DiffusionPropagator {
     }
 
     fn max_dt(&self) -> Option<f64> {
-        // CFL stability constraint: dt <= 1 / (4 * D)
-        Some(1.0 / (4.0 * self.diffusivity))
+        // CFL stability constraint: dt <= 1 / (max_degree * D)
+        // Use 12 (Fcc12) as worst-case to be safe for all space topologies.
+        // Square4=4, Hex2D=6, Fcc12=12.
+        Some(1.0 / (12.0 * self.diffusivity))
     }
 
     fn step(&self, ctx: &mut StepContext<'_>) -> Result<(), PropagatorError> {
@@ -475,10 +477,14 @@ mod tests {
     #[test]
     fn max_dt_constraint() {
         let prop = DiffusionPropagator::new(0.25);
-        assert_eq!(prop.max_dt(), Some(1.0)); // 1 / (4 * 0.25)
+        // 1 / (12 * 0.25) ≈ 0.333...
+        let dt = prop.max_dt().unwrap();
+        assert!((dt - 1.0 / 3.0).abs() < 1e-10);
 
         let prop2 = DiffusionPropagator::new(1.0);
-        assert_eq!(prop2.max_dt(), Some(0.25)); // 1 / (4 * 1.0)
+        // 1 / (12 * 1.0) ≈ 0.0833...
+        let dt2 = prop2.max_dt().unwrap();
+        assert!((dt2 - 1.0 / 12.0).abs() < 1e-10);
     }
 
     #[test]

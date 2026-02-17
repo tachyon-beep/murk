@@ -967,9 +967,11 @@ fn execute_agent_entry_direct(
                 continue;
             }
             let field_idx = (base_rank + op.stride_offset) as usize;
-            out_slice[op.tensor_idx] = apply_transform(field_data[field_idx], &entry.transform);
-            mask_slice[op.tensor_idx] = 1;
-            valid += 1;
+            if let Some(&val) = field_data.get(field_idx) {
+                out_slice[op.tensor_idx] = apply_transform(val, &entry.transform);
+                mask_slice[op.tensor_idx] = 1;
+                valid += 1;
+            }
         }
         valid
     } else {
@@ -1015,8 +1017,10 @@ fn execute_agent_entry_pooled(
                 continue;
             }
             let field_idx = (base_rank + op.stride_offset) as usize;
-            scratch[op.tensor_idx] = field_data[field_idx];
-            scratch_mask[op.tensor_idx] = 1;
+            if let Some(&val) = field_data.get(field_idx) {
+                scratch[op.tensor_idx] = val;
+                scratch_mask[op.tensor_idx] = 1;
+            }
         }
     } else {
         for op in &entry.template_ops {
