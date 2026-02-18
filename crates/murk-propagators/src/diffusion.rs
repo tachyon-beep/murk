@@ -738,6 +738,105 @@ mod tests {
     }
 
     #[test]
+    fn diffusion_matches_scalar_diffusion() {
+        // Prove that ScalarDiffusion produces bit-identical heat + gradient output
+        // compared to the old DiffusionPropagator on a 5x5 Absorb grid with a
+        // hot center (heat[12] = 100.0).
+        use crate::scalar_diffusion::ScalarDiffusion;
+        use murk_propagator::propagator::Propagator;
+
+        let grid = Square4::new(5, 5, EdgeBehavior::Absorb).unwrap();
+        let n = grid.cell_count();
+        let dt = 0.01;
+
+        // --- Initial field data ---
+        let mut heat = vec![0.0f32; n];
+        heat[12] = 100.0; // hot center
+
+        // --- Run old DiffusionPropagator ---
+        let old_prop = DiffusionPropagator::new(0.1);
+
+        let mut old_reader = MockFieldReader::new();
+        old_reader.set_field(HEAT, heat.clone());
+        old_reader.set_field(VELOCITY, vec![0.0; n * 2]);
+
+        let mut old_writer = MockFieldWriter::new();
+        old_writer.add_field(HEAT, n);
+        old_writer.add_field(VELOCITY, n * 2);
+        old_writer.add_field(HEAT_GRADIENT, n * 2);
+
+        let mut old_scratch = ScratchRegion::new(0);
+        let mut old_ctx = make_ctx(&old_reader, &mut old_writer, &mut old_scratch, &grid, dt);
+
+        old_prop.step(&mut old_ctx).unwrap();
+
+        let old_heat = old_writer.get_field(HEAT).unwrap().to_vec();
+        let old_grad = old_writer.get_field(HEAT_GRADIENT).unwrap().to_vec();
+
+        // --- Run new ScalarDiffusion ---
+        let new_prop = ScalarDiffusion::builder()
+            .input_field(HEAT)
+            .output_field(HEAT)
+            .coefficient(0.1)
+            .gradient_field(HEAT_GRADIENT)
+            .build()
+            .unwrap();
+
+        let mut new_reader = MockFieldReader::new();
+        new_reader.set_field(HEAT, heat);
+
+        let mut new_writer = MockFieldWriter::new();
+        new_writer.add_field(HEAT, n);
+        new_writer.add_field(HEAT_GRADIENT, n * 2);
+
+        let mut new_scratch = ScratchRegion::new(0);
+        let mut new_ctx = StepContext::new(
+            &new_reader,
+            &new_reader,
+            &mut new_writer,
+            &mut new_scratch,
+            &grid,
+            TickId(1),
+            dt,
+        );
+
+        new_prop.step(&mut new_ctx).unwrap();
+
+        let new_heat = new_writer.get_field(HEAT).unwrap();
+        let new_grad = new_writer.get_field(HEAT_GRADIENT).unwrap();
+
+        // --- Compare heat output ---
+        assert_eq!(
+            old_heat.len(),
+            new_heat.len(),
+            "heat buffer length mismatch"
+        );
+        for i in 0..old_heat.len() {
+            assert!(
+                (old_heat[i] - new_heat[i]).abs() < 1e-6,
+                "heat mismatch at cell {i}: old={}, new={}",
+                old_heat[i],
+                new_heat[i]
+            );
+        }
+
+        // --- Compare gradient output ---
+        assert_eq!(
+            old_grad.len(),
+            new_grad.len(),
+            "gradient buffer length mismatch"
+        );
+        for i in 0..old_grad.len() {
+            assert!(
+                (old_grad[i] - new_grad[i]).abs() < 1e-6,
+                "gradient mismatch at component {i}: old={}, new={}",
+                old_grad[i],
+                new_grad[i]
+            );
+        }
+    }
+
+    #[test]
     fn wrap_gradient_at_boundary() {
         // On a 4x4 Wrap grid with linear-x heat, the gradient at (0,0)
         // should wrap around to see heat at (0,3).
