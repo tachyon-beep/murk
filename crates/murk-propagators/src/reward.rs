@@ -3,6 +3,7 @@
 //! Reads heat and agent presence through the in-tick overlay (`reads()`)
 //! to see current-tick diffusion and movement results. Writes reward.
 
+#[allow(deprecated)]
 use crate::fields::{AGENT_PRESENCE, HEAT, REWARD};
 use murk_core::{FieldId, FieldSet, PropagatorError};
 use murk_propagator::context::StepContext;
@@ -85,6 +86,7 @@ impl Propagator for RewardPropagator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[allow(deprecated)]
     use crate::fields::HEAT_GRADIENT;
     use murk_core::TickId;
     use murk_propagator::scratch::ScratchRegion;

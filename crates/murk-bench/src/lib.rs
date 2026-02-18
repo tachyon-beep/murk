@@ -10,6 +10,7 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 
 use murk_engine::{BackoffConfig, WorldConfig};
+#[allow(deprecated)]
 use murk_propagators::fields::{HEAT, HEAT_GRADIENT, VELOCITY};
 use murk_propagators::{
     ActionBuffer, AgentMovementPropagator, GradientCompute, RewardPropagator, ScalarDiffusion,
@@ -21,6 +22,7 @@ use murk_space::{EdgeBehavior, Square4};
 /// Pipeline: ScalarDiffusion(heat, D=0.1) + ScalarDiffusion(velocity, D=0.1)
 ///   + GradientCompute(heat→gradient) → AgentMovement → Reward(bonus=1.0, cost=-0.01).
 /// dt=0.1 (within CFL limit of 1/(4*0.1) = 2.5).
+#[allow(deprecated)] // reference_fields() — will be removed when bench defines its own fields
 pub fn reference_profile(seed: u64, action_buffer: ActionBuffer) -> WorldConfig {
     let cell_count = 100 * 100;
     let initial_positions = init_agent_positions(cell_count, 4, seed);
@@ -70,6 +72,7 @@ pub fn reference_profile(seed: u64, action_buffer: ActionBuffer) -> WorldConfig 
 /// Build a stress benchmark profile: 316x316 grid (~100K cells).
 ///
 /// Same pipeline as [`reference_profile`] but at 10x the cell count.
+#[allow(deprecated)] // reference_fields() — will be removed when bench defines its own fields
 pub fn stress_profile(seed: u64, action_buffer: ActionBuffer) -> WorldConfig {
     let cell_count = 316 * 316;
     let initial_positions = init_agent_positions(cell_count, 4, seed);

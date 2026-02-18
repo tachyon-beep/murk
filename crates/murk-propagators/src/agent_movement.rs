@@ -3,6 +3,7 @@
 //! Reads actions from a shared [`ActionBuffer`] and updates agent presence
 //! using [`WriteMode::Incremental`] (seeded from previous generation).
 
+#[allow(deprecated)]
 use crate::fields::AGENT_PRESENCE;
 use murk_core::{FieldId, FieldSet, PropagatorError};
 use murk_propagator::context::StepContext;

@@ -11,6 +11,7 @@ use murk_engine::{BackoffConfig, LockstepWorld, WorldConfig};
 use murk_propagators::agent_movement::{
     new_action_buffer, ActionBuffer, AgentAction, AgentMovementPropagator, Direction,
 };
+#[allow(deprecated)]
 use murk_propagators::{reference_fields, DiffusionPropagator, RewardPropagator};
 use murk_replay::codec::{deserialize_command, serialize_command};
 use murk_replay::hash::snapshot_hash;

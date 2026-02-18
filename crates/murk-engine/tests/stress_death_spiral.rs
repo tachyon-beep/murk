@@ -29,6 +29,7 @@ use murk_engine::{AsyncConfig, BackoffConfig, RealtimeAsyncWorld, WorldConfig};
 use murk_obs::spec::{ObsDtype, ObsRegion, ObsTransform};
 use murk_obs::{ObsEntry, ObsPlan, ObsSpec};
 use murk_propagators::agent_movement::new_action_buffer;
+#[allow(deprecated)]
 use murk_propagators::{AgentMovementPropagator, DiffusionPropagator, RewardPropagator};
 use murk_space::{EdgeBehavior, RegionSpec, Square4};
 
@@ -84,6 +85,7 @@ fn init_agent_positions_safe(cell_count: usize, n: u16, seed: u64) -> Vec<(u16, 
 }
 
 /// Build a WorldConfig matching the stress test spec: 100x100 grid, 16 agents, 60 Hz.
+#[allow(deprecated)]
 fn death_spiral_config(seed: u64) -> (WorldConfig, murk_propagators::ActionBuffer) {
     let cell_count = 100 * 100;
     let action_buffer = new_action_buffer();

@@ -4,6 +4,7 @@
 //! and writes smoothed values plus the heat gradient. Uses a Square4 fast path
 //! for direct index arithmetic when available.
 
+#[allow(deprecated)]
 use crate::fields::{HEAT, HEAT_GRADIENT, VELOCITY};
 use murk_core::{FieldId, FieldSet, PropagatorError};
 use murk_propagator::context::StepContext;
@@ -348,6 +349,7 @@ impl Propagator for DiffusionPropagator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[allow(deprecated)]
     use crate::fields::{HEAT, HEAT_GRADIENT, VELOCITY};
     use murk_core::TickId;
     use murk_propagator::scratch::ScratchRegion;
