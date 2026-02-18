@@ -86,14 +86,12 @@ impl SnapshotRing {
     /// Returns `None` only if no snapshots have been pushed yet.
     /// On overwrite races (producer wraps the slot between our
     /// `write_pos` read and lock acquisition), retries from the
-    /// fresh `write_pos` to guarantee returning an available
-    /// snapshot whenever the ring is non-empty.
+    /// fresh `write_pos`. If all retries are exhausted (producer
+    /// lapping the consumer), falls back to a full scan of all
+    /// slots, guaranteeing `Some` whenever the ring is non-empty.
     pub fn latest(&self) -> Option<Arc<OwnedSnapshot>> {
-        // Bounded retry: at most `capacity` attempts. A well-behaved
-        // producer can overwrite at most `capacity` slots per lap, so
-        // `capacity` retries guarantees convergence unless the producer
-        // is lapping the consumer faster than the consumer can lock a
-        // single slot — which would indicate a misconfigured system.
+        // Fast path: bounded retry targeting the most recent snapshot.
+        // Succeeds immediately under normal contention.
         for _ in 0..self.capacity {
             let pos = self.write_pos.load(Ordering::Acquire);
             if pos == 0 {
@@ -110,9 +108,24 @@ impl SnapshotRing {
                 _ => continue,
             }
         }
-        // All retries exhausted — producer is lapping us extremely fast.
-        // This should not happen under normal conditions.
-        None
+
+        // Fallback: the producer is lapping us faster than we can lock
+        // the latest slot. Scan all slots and return the snapshot with
+        // the highest position tag. The single producer holds at most
+        // one slot's mutex at a time, so at least (capacity - 1) slots
+        // contain valid snapshots — this scan is guaranteed to find one
+        // whenever the ring is non-empty.
+        let mut best: Option<(u64, Arc<OwnedSnapshot>)> = None;
+        for slot_mutex in &self.slots {
+            let slot = slot_mutex.lock().unwrap();
+            if let Some((tag, arc)) = slot.as_ref() {
+                let dominated = best.as_ref().is_some_and(|(best_tag, _)| *best_tag >= *tag);
+                if !dominated {
+                    best = Some((*tag, Arc::clone(arc)));
+                }
+            }
+        }
+        best.map(|(_, arc)| arc)
     }
 
     /// Get a snapshot by its monotonic write position.
@@ -464,5 +477,68 @@ mod tests {
             assert!(!w.is_pinned());
             assert!(w.last_quiesce_ns() > 0);
         }
+    }
+
+    /// Stress test: with a tiny ring (capacity=2), hammer the producer and
+    /// multiple consumers to maximise the chance of the retry-exhaustion
+    /// race. After the fallback-scan fix, `latest()` must never return
+    /// `None` once the ring is non-empty.
+    #[test]
+    fn test_latest_never_spurious_none_under_contention() {
+        use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+        use std::thread;
+
+        let ring = Arc::new(SnapshotRing::new(2)); // minimum capacity
+        let producer_done = Arc::new(AtomicBool::new(false));
+        let spurious_nones = Arc::new(AtomicU64::new(0));
+
+        // Producer: push 200 snapshots as fast as possible.
+        // (Each snapshot allocates a PingPongArena, so keep count moderate.)
+        let ring_p = Arc::clone(&ring);
+        let done_flag = Arc::clone(&producer_done);
+        let producer = thread::spawn(move || {
+            for i in 1..=200u64 {
+                ring_p.push(make_test_snapshot(i));
+            }
+            done_flag.store(true, Ordering::Release);
+        });
+
+        // 4 consumers: call latest() in a tight loop, counting spurious Nones.
+        let consumers: Vec<_> = (0..4)
+            .map(|_| {
+                let ring_c = Arc::clone(&ring);
+                let done_c = Arc::clone(&producer_done);
+                let nones = Arc::clone(&spurious_nones);
+                thread::spawn(move || {
+                    let mut reads = 0u64;
+                    loop {
+                        // Once at least one push has happened, latest() must
+                        // never return None.
+                        if ring_c.write_pos() > 0 {
+                            if ring_c.latest().is_none() {
+                                nones.fetch_add(1, Ordering::Relaxed);
+                            }
+                        }
+                        reads += 1;
+                        if done_c.load(Ordering::Acquire) {
+                            break;
+                        }
+                        // No yield — keep the loop tight to maximise contention.
+                    }
+                    reads
+                })
+            })
+            .collect();
+
+        producer.join().unwrap();
+        for c in consumers {
+            c.join().unwrap();
+        }
+
+        assert_eq!(
+            spurious_nones.load(Ordering::Relaxed),
+            0,
+            "latest() must never return None when the ring is non-empty"
+        );
     }
 }

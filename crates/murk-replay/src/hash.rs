@@ -42,7 +42,8 @@ fn fnv1a_u64(mut hash: u64, v: u64) -> u64 {
 /// and hashes every `f32::to_bits()` using FNV-1a. The field index
 /// is folded in at field boundaries to ensure field order matters.
 ///
-/// Returns `0` if the snapshot contains no readable fields.
+/// Returns `FNV_OFFSET` (non-zero) when `field_count == 0`, since
+/// the hash state is initialized with FNV-1a's offset basis.
 pub fn snapshot_hash(snapshot: &dyn SnapshotAccess, field_count: u32) -> u64 {
     let mut hash = FNV_OFFSET;
 
@@ -153,5 +154,12 @@ mod tests {
         let h1 = snapshot_hash(&snap, 0);
         let h2 = snapshot_hash(&snap, 0);
         assert_eq!(h1, h2);
+    }
+
+    #[test]
+    fn empty_snapshot_hash_is_fnv_offset() {
+        let snap = MockSnapshot::new(TickId(0), WorldGenerationId(0), ParameterVersion(0));
+        let h = snapshot_hash(&snap, 0);
+        assert_eq!(h, FNV_OFFSET, "empty snapshot hash must equal FNV_OFFSET for replay compatibility");
     }
 }

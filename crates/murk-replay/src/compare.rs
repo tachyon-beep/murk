@@ -12,18 +12,31 @@ use crate::error::ReplayError;
 use crate::hash::snapshot_hash;
 use crate::reader::ReplayReader;
 
+/// What kind of divergence was detected.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DivergenceKind {
+    /// Cell values differ (bit-exact mismatch).
+    ValueMismatch,
+    /// Both sides have the field but with different element counts.
+    LengthMismatch,
+    /// One side has the field, the other does not.
+    FieldMissing,
+}
+
 /// A single field-level divergence between recorded and replayed state.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FieldDivergence {
+    /// What kind of structural or value divergence this represents.
+    pub kind: DivergenceKind,
     /// Which field diverged.
     pub field_id: u32,
     /// Byte offset within the field's f32 array where divergence starts.
     pub byte_offset: usize,
     /// Cell index (byte_offset / 4) within the field.
     pub cell_index: usize,
-    /// The recorded value (from the original run).
+    /// The recorded value (from the original run), if available.
     pub recorded_value: f32,
-    /// The replayed value (from the current run).
+    /// The replayed value (from the current run), if available.
     pub replayed_value: f32,
 }
 
@@ -71,6 +84,7 @@ pub fn compare_snapshot(
                     for (i, (&rv, &pv)) in rec.iter().zip(rep.iter()).enumerate() {
                         if rv.to_bits() != pv.to_bits() {
                             divergences.push(FieldDivergence {
+                                kind: DivergenceKind::ValueMismatch,
                                 field_id: field_idx,
                                 byte_offset: i * 4,
                                 cell_index: i,
@@ -79,24 +93,37 @@ pub fn compare_snapshot(
                             });
                         }
                     }
-                    // Length mismatch
+                    // Length mismatch: report the lengths as values so
+                    // consumers can see the actual size difference.
                     if rec.len() != rep.len() {
                         divergences.push(FieldDivergence {
+                            kind: DivergenceKind::LengthMismatch,
                             field_id: field_idx,
                             byte_offset: rec.len().min(rep.len()) * 4,
                             cell_index: rec.len().min(rep.len()),
-                            recorded_value: 0.0,
-                            replayed_value: 0.0,
+                            recorded_value: rec.len() as f32,
+                            replayed_value: rep.len() as f32,
                         });
                     }
                 }
-                (Some(_), None) | (None, Some(_)) => {
+                (Some(rec), None) => {
                     divergences.push(FieldDivergence {
+                        kind: DivergenceKind::FieldMissing,
                         field_id: field_idx,
                         byte_offset: 0,
                         cell_index: 0,
-                        recorded_value: 0.0,
-                        replayed_value: 0.0,
+                        recorded_value: rec.len() as f32,
+                        replayed_value: f32::NAN,
+                    });
+                }
+                (None, Some(rep)) => {
+                    divergences.push(FieldDivergence {
+                        kind: DivergenceKind::FieldMissing,
+                        field_id: field_idx,
+                        byte_offset: 0,
+                        cell_index: 0,
+                        recorded_value: f32::NAN,
+                        replayed_value: rep.len() as f32,
                     });
                 }
                 (None, None) => {}
@@ -181,9 +208,41 @@ mod tests {
         let report = result.unwrap();
         assert_eq!(report.tick_id, 42);
         assert_eq!(report.divergences.len(), 1);
+        assert_eq!(report.divergences[0].kind, DivergenceKind::ValueMismatch);
         assert_eq!(report.divergences[0].cell_index, 1);
         assert_eq!(report.divergences[0].recorded_value, 2.0);
         assert_eq!(report.divergences[0].replayed_value, 9.0);
+    }
+
+    #[test]
+    fn length_mismatch_reports_actual_lengths() {
+        let recorded = make_snapshot(vec![(0, vec![1.0, 2.0, 3.0])]);
+        let replayed = make_snapshot(vec![(0, vec![1.0, 2.0])]);
+        let recorded_hash = snapshot_hash(&recorded, 1);
+
+        let result = compare_snapshot(&replayed, recorded_hash, 1, 1, Some(&recorded)).unwrap();
+        let report = result.unwrap();
+
+        let length_div = report.divergences.iter()
+            .find(|d| d.kind == DivergenceKind::LengthMismatch)
+            .expect("should have a LengthMismatch divergence");
+        assert_eq!(length_div.field_id, 0);
+        assert_eq!(length_div.recorded_value, 3.0); // recorded had 3 elements
+        assert_eq!(length_div.replayed_value, 2.0); // replayed had 2 elements
+    }
+
+    #[test]
+    fn field_missing_reports_kind_not_sentinel_zeros() {
+        let recorded = make_snapshot(vec![(0, vec![1.0, 2.0])]);
+        let replayed = make_snapshot(vec![]); // field 0 missing
+        let recorded_hash = snapshot_hash(&recorded, 1);
+
+        let result = compare_snapshot(&replayed, recorded_hash, 1, 1, Some(&recorded)).unwrap();
+        let report = result.unwrap();
+        assert_eq!(report.divergences.len(), 1);
+        assert_eq!(report.divergences[0].kind, DivergenceKind::FieldMissing);
+        assert_eq!(report.divergences[0].recorded_value, 2.0); // recorded had 2 elements
+        assert!(report.divergences[0].replayed_value.is_nan()); // absent side is NaN
     }
 
     #[test]

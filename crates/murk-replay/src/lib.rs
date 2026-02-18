@@ -33,7 +33,9 @@ pub mod reader;
 pub mod types;
 pub mod writer;
 
-pub use compare::{compare_snapshot, replay_and_compare, DivergenceReport, FieldDivergence};
+pub use compare::{
+    compare_snapshot, replay_and_compare, DivergenceKind, DivergenceReport, FieldDivergence,
+};
 pub use error::ReplayError;
 pub use hash::{config_hash, snapshot_hash};
 pub use reader::{FrameIter, ReplayReader};

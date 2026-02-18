@@ -415,7 +415,8 @@ impl RealtimeAsyncWorld {
 
     /// Shutdown the world with the 4-state machine.
     ///
-    /// 1. **Running → Draining (≤33ms):** Set shutdown flag, wait for tick stop.
+    /// 1. **Running → Draining (≤33ms):** Set shutdown flag, unpark tick
+    ///    thread (wakes it from budget sleep immediately), wait for tick stop.
     /// 2. **Draining → Quiescing (≤200ms):** Cancel workers, drop obs channel.
     /// 3. **Quiescing → Dropped (≤10ms):** Join all threads.
     pub fn shutdown(&mut self) -> ShutdownReport {
@@ -434,6 +435,13 @@ impl RealtimeAsyncWorld {
         // Phase 1: Running → Draining
         self.state = ShutdownState::Draining;
         self.shutdown_flag.store(true, Ordering::Release);
+
+        // Wake the tick thread if it's parked in a budget sleep.
+        // park_timeout is used instead of thread::sleep, so unpark()
+        // provides immediate wakeup regardless of tick_rate_hz.
+        if let Some(handle) = &self.tick_thread {
+            handle.thread().unpark();
+        }
 
         // Wait for tick thread to acknowledge (≤33ms budget).
         let drain_deadline = Instant::now() + Duration::from_millis(33);
@@ -855,6 +863,46 @@ mod tests {
             "shutdown took too long: {}ms",
             report.total_ms
         );
+    }
+
+    /// Regression test: with a very slow tick rate, shutdown must still
+    /// complete within the documented budget. Before the fix, the tick
+    /// thread used `thread::sleep` which was uninterruptible by the
+    /// shutdown flag, causing shutdown to block for the full tick budget.
+    #[test]
+    fn shutdown_fast_with_slow_tick_rate() {
+        let config = WorldConfig {
+            tick_rate_hz: Some(0.5), // 2-second tick budget
+            ..test_config()
+        };
+        let mut world = RealtimeAsyncWorld::new(config, AsyncConfig::default()).unwrap();
+
+        // Wait for at least one tick to complete so the ring is non-empty
+        // and the tick thread enters its budget sleep.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while world.latest_snapshot().is_none() {
+            if Instant::now() > deadline {
+                panic!("no snapshot produced within 5s");
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        // Give the tick thread time to enter its budget sleep.
+        std::thread::sleep(Duration::from_millis(50));
+
+        let start = Instant::now();
+        let report = world.shutdown();
+        let wall_ms = start.elapsed().as_millis();
+
+        // Shutdown should complete well under the 2-second tick budget.
+        // Allow 500ms for CI overhead; the point is it shouldn't take 2s.
+        assert!(
+            wall_ms < 500,
+            "shutdown took {wall_ms}ms with 0.5Hz tick rate \
+             (report: total={}ms, drain={}ms, quiesce={}ms)",
+            report.total_ms, report.drain_ms, report.quiesce_ms
+        );
+        assert!(report.tick_joined);
     }
 
     #[test]

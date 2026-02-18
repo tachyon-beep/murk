@@ -216,10 +216,12 @@ impl TickThreadState {
                 }
             }
 
-            // 6. Sleep for remaining budget.
+            // 6. Sleep for remaining budget, interruptible by shutdown.
+            // Uses park_timeout instead of thread::sleep so the shutdown
+            // path can wake us immediately via thread::unpark().
             let elapsed = tick_start.elapsed();
             if let Some(remaining) = self.tick_budget.checked_sub(elapsed) {
-                std::thread::sleep(remaining);
+                std::thread::park_timeout(remaining);
             }
         }
 
