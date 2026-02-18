@@ -18,8 +18,10 @@ pub mod agent_movement;
 pub mod diffusion;
 pub mod fields;
 pub mod reward;
+pub mod scalar_diffusion;
 
 pub use agent_movement::{ActionBuffer, AgentAction, AgentMovementPropagator, Direction};
 pub use diffusion::DiffusionPropagator;
 pub use fields::{reference_fields, AGENT_PRESENCE, HEAT, HEAT_GRADIENT, REWARD, VELOCITY};
 pub use reward::RewardPropagator;
+pub use scalar_diffusion::ScalarDiffusion;
