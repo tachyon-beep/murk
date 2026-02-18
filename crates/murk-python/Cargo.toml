@@ -14,5 +14,8 @@ crate-type = ["cdylib"]
 
 [dependencies]
 murk-ffi = { path = "../murk-ffi" }
+murk-core = { path = "../murk-core" }
+murk-propagator = { path = "../murk-propagator" }
+murk-propagators = { path = "../murk-propagators" }
 pyo3 = { version = "0.28", features = ["extension-module", "abi3-py312"] }
 numpy = "0.28"

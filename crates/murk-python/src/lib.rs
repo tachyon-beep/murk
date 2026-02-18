@@ -14,6 +14,7 @@ mod batched;
 mod command;
 mod config;
 mod error;
+mod library_propagators;
 mod metrics;
 mod obs;
 pub(crate) mod propagator;
@@ -45,6 +46,11 @@ fn _murk(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<obs::ObsPlan>()?;
     m.add_class::<metrics::StepMetrics>()?;
     m.add_class::<propagator::PropagatorDef>()?;
+
+    // Library propagators (native Rust, no GIL overhead)
+    m.add_class::<library_propagators::PyScalarDiffusion>()?;
+    m.add_class::<library_propagators::PyGradientCompute>()?;
+    m.add_class::<library_propagators::PyIdentityCopy>()?;
 
     // Functions
     m.add_function(wrap_pyfunction!(propagator::add_propagator, m)?)?;
