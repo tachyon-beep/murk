@@ -10,14 +10,16 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 
 use murk_engine::{BackoffConfig, WorldConfig};
+use murk_propagators::fields::{HEAT, HEAT_GRADIENT, VELOCITY};
 use murk_propagators::{
-    ActionBuffer, AgentMovementPropagator, DiffusionPropagator, RewardPropagator,
+    ActionBuffer, AgentMovementPropagator, GradientCompute, RewardPropagator, ScalarDiffusion,
 };
 use murk_space::{EdgeBehavior, Square4};
 
 /// Build a reference benchmark profile: 100x100 grid (10K cells).
 ///
-/// Pipeline: Diffusion(D=0.1) → AgentMovement → Reward(bonus=1.0, cost=-0.01).
+/// Pipeline: ScalarDiffusion(heat, D=0.1) + ScalarDiffusion(velocity, D=0.1)
+///   + GradientCompute(heat→gradient) → AgentMovement → Reward(bonus=1.0, cost=-0.01).
 /// dt=0.1 (within CFL limit of 1/(4*0.1) = 2.5).
 pub fn reference_profile(seed: u64, action_buffer: ActionBuffer) -> WorldConfig {
     let cell_count = 100 * 100;
@@ -27,7 +29,29 @@ pub fn reference_profile(seed: u64, action_buffer: ActionBuffer) -> WorldConfig 
         space: Box::new(Square4::new(100, 100, EdgeBehavior::Absorb).unwrap()),
         fields: murk_propagators::reference_fields(),
         propagators: vec![
-            Box::new(DiffusionPropagator::new(0.1)),
+            Box::new(
+                ScalarDiffusion::builder()
+                    .input_field(HEAT)
+                    .output_field(HEAT)
+                    .coefficient(0.1)
+                    .build()
+                    .unwrap(),
+            ),
+            Box::new(
+                ScalarDiffusion::builder()
+                    .input_field(VELOCITY)
+                    .output_field(VELOCITY)
+                    .coefficient(0.1)
+                    .build()
+                    .unwrap(),
+            ),
+            Box::new(
+                GradientCompute::builder()
+                    .input_field(HEAT)
+                    .output_field(HEAT_GRADIENT)
+                    .build()
+                    .unwrap(),
+            ),
             Box::new(AgentMovementPropagator::new(
                 action_buffer,
                 initial_positions,
@@ -54,7 +78,29 @@ pub fn stress_profile(seed: u64, action_buffer: ActionBuffer) -> WorldConfig {
         space: Box::new(Square4::new(316, 316, EdgeBehavior::Absorb).unwrap()),
         fields: murk_propagators::reference_fields(),
         propagators: vec![
-            Box::new(DiffusionPropagator::new(0.1)),
+            Box::new(
+                ScalarDiffusion::builder()
+                    .input_field(HEAT)
+                    .output_field(HEAT)
+                    .coefficient(0.1)
+                    .build()
+                    .unwrap(),
+            ),
+            Box::new(
+                ScalarDiffusion::builder()
+                    .input_field(VELOCITY)
+                    .output_field(VELOCITY)
+                    .coefficient(0.1)
+                    .build()
+                    .unwrap(),
+            ),
+            Box::new(
+                GradientCompute::builder()
+                    .input_field(HEAT)
+                    .output_field(HEAT_GRADIENT)
+                    .build()
+                    .unwrap(),
+            ),
             Box::new(AgentMovementPropagator::new(
                 action_buffer,
                 initial_positions,
