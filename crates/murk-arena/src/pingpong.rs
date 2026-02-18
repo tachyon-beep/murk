@@ -102,6 +102,17 @@ impl PingPongArena {
         field_defs: Vec<(FieldId, FieldDef)>,
         static_arena: SharedStaticArena,
     ) -> Result<Self, ArenaError> {
+        // Validate segment_size: must be a power of two and at least 1024,
+        // as documented on ArenaConfig::segment_size.
+        if !config.segment_size.is_power_of_two() || config.segment_size < 1024 {
+            return Err(ArenaError::InvalidConfig {
+                reason: format!(
+                    "segment_size must be a power of two and >= 1024 (got {})",
+                    config.segment_size,
+                ),
+            });
+        }
+
         // Three pools (buffer_a, buffer_b, sparse) each preallocate one
         // segment, so we need at least 3 to satisfy the budget invariant.
         if config.max_segments < 3 {
@@ -767,10 +778,10 @@ mod tests {
 
     #[test]
     fn new_fails_when_sparse_field_exceeds_segment_size() {
-        let cell_count = 100u32;
-        // Tiny segment that can't fit the sparse field.
+        let cell_count = 2000u32;
+        // Minimum valid segment (1024) that can't fit the sparse field (2000).
         let config = ArenaConfig {
-            segment_size: 10,
+            segment_size: 1024,
             max_segments: 16,
             max_generation_age: 1,
             cell_count,
@@ -935,5 +946,51 @@ mod tests {
         let max_allowed = 6 * 1024 * std::mem::size_of::<f32>();
         // memory_bytes includes static + scratch; just verify it's bounded.
         assert!(total_bytes <= max_allowed + arena.static_arena().memory_bytes() + 1024 * 4);
+    }
+
+    // ── segment_size validation ──────────────────────────────
+
+    #[test]
+    fn new_rejects_non_power_of_two_segment_size() {
+        let config = ArenaConfig {
+            segment_size: 1000, // not a power of two
+            max_segments: 16,
+            max_generation_age: 1,
+            cell_count: 10,
+        };
+        let static_arena = StaticArena::new(&[]).into_shared();
+        let result = PingPongArena::new(config, vec![], static_arena);
+        assert!(
+            matches!(result, Err(ArenaError::InvalidConfig { .. })),
+            "segment_size=1000 (not power of two) should be rejected"
+        );
+    }
+
+    #[test]
+    fn new_rejects_segment_size_below_1024() {
+        let config = ArenaConfig {
+            segment_size: 512, // power of two but below 1024
+            max_segments: 16,
+            max_generation_age: 1,
+            cell_count: 10,
+        };
+        let static_arena = StaticArena::new(&[]).into_shared();
+        let result = PingPongArena::new(config, vec![], static_arena);
+        assert!(
+            matches!(result, Err(ArenaError::InvalidConfig { .. })),
+            "segment_size=512 (below 1024) should be rejected"
+        );
+    }
+
+    #[test]
+    fn new_accepts_segment_size_of_1024() {
+        let config = ArenaConfig {
+            segment_size: 1024,
+            max_segments: 16,
+            max_generation_age: 1,
+            cell_count: 10,
+        };
+        let static_arena = StaticArena::new(&[]).into_shared();
+        assert!(PingPongArena::new(config, vec![], static_arena).is_ok());
     }
 }

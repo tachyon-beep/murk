@@ -3,19 +3,16 @@
 Generated 2026-02-17 from static analysis triage of 110 source reports.
 53 confirmed bugs from 64 actionable reports (83% confirmation rate).
 
-**Status (updated 2026-02-18):** 20 fixed, 0 partially fixed, 33 still open.
+**Status (updated 2026-02-19):** 23 fixed, 0 partially fixed, 30 still open.
 
 ## Open Bugs
 
-### High (7 open)
+### High (4 open)
 
 | # | Ticket | Crate | Summary | Status |
 |---|--------|-------|---------|--------|
-| 4 | [engine-adaptive-backoff-output-unused](engine-adaptive-backoff-output-unused.md) | murk-engine | Adaptive backoff computes output but result is discarded; dead code in practice | Open |
 | 6 | [engine-ring-latest-spurious-none](engine-ring-latest-spurious-none.md) | murk-engine | `SnapshotRing::latest()` returns None when snapshots exist under overwrite races | Open |
 | 7 | [engine-realtime-shutdown-blocks-on-slow-tick](engine-realtime-shutdown-blocks-on-slow-tick.md) | murk-engine | Shutdown blocks indefinitely with low `tick_rate_hz` due to uninterruptible sleep | Open |
-| 9 | [engine-backoff-config-not-validated](engine-backoff-config-not-validated.md) | murk-engine | `BackoffConfig` invariants not checked; `initial_max_skew > max_skew_cap` allowed | Open |
-| 12 | [arena-missing-segment-size-validation](arena-missing-segment-size-validation.md) | murk-arena | `segment_size` power-of-two/minimum constraints documented but never enforced | Open |
 | 20 | [ffi-mutex-poisoning-panic-in-extern-c](ffi-mutex-poisoning-panic-in-extern-c.md) | murk-ffi | 43+ `lock().unwrap()` calls in extern "C" functions; poisoned mutex = UB | Open |
 | 23 | [python-propagator-trampoline-leak-on-cstring-error](python-propagator-trampoline-leak-on-cstring-error.md) | murk-python | TrampolineData leaks on CString/add_propagator_handle error paths | Open |
 
@@ -55,7 +52,7 @@ Generated 2026-02-17 from static analysis triage of 110 source reports.
 | 51 | [bench-space-ops-degenerate-q-distribution](bench-space-ops-degenerate-q-distribution.md) | murk-bench | LCG multiplier not coprime to modulus; only 4/20 q values exercised | Open |
 | 52 | [script-organize-by-priority-basename-collision](script-organize-by-priority-basename-collision.md) | scripts | --organize-by-priority flattens paths; duplicate basenames overwrite | Open |
 
-## Closed Bugs (20 fixed)
+## Closed Bugs (23 fixed)
 
 Fixed in commits `02c12f3`, `dd52604`, `c0f5d55`. Tickets moved to [closed/](closed/).
 
@@ -81,12 +78,15 @@ Fixed in commits `02c12f3`, `dd52604`, `c0f5d55`. Tickets moved to [closed/](clo
 | 28 | [arena-segment-slice-beyond-cursor](closed/arena-segment-slice-beyond-cursor.md) | murk-arena | Segment::slice checks capacity not cursor; reads stale data | (this session) |
 | 24 | [space-product-weighted-metric-truncation](closed/space-product-weighted-metric-truncation.md) | murk-space | Weighted metric silently drops trailing component distances via zip truncation | (this session) |
 | 14 | [arena-static-arena-duplicate-field-ids](closed/arena-static-arena-duplicate-field-ids.md) | murk-arena | Duplicate FieldIds silently accepted; earlier allocations orphaned | (this session) |
+| 12 | [arena-missing-segment-size-validation](closed/arena-missing-segment-size-validation.md) | murk-arena | `segment_size` power-of-two/minimum constraints documented but never enforced | (this session) |
+| 9 | [engine-backoff-config-not-validated](closed/engine-backoff-config-not-validated.md) | murk-engine | `BackoffConfig` invariants not checked; `initial_max_skew > max_skew_cap` allowed | (this session) |
+| 4 | [engine-adaptive-backoff-output-unused](closed/engine-adaptive-backoff-output-unused.md) | murk-engine | Adaptive backoff computes output but result is discarded; dead code in practice | (this session) |
 
 ## By Crate (open only)
 
 | Crate | High | Medium | Low | Total Open |
 |-------|------|--------|-----|------------|
-| murk-engine | 3 | 3 | 0 | 6 |
+| murk-engine | 1 | 3 | 0 | 4 |
 | murk-arena | 0 | 1 | 1 | 2 |
 | murk-ffi | 1 | 2 | 0 | 3 |
 | murk-python | 1 | 4 | 0 | 5 |
@@ -99,7 +99,7 @@ Fixed in commits `02c12f3`, `dd52604`, `c0f5d55`. Tickets moved to [closed/](clo
 | murk-bench | 0 | 0 | 1 | 1 |
 | examples | 0 | 1 | 0 | 1 |
 | scripts | 0 | 0 | 1 | 1 |
-| **Total** | **6** | **16** | **6** | **33** |
+| **Total** | **3** | **16** | **6** | **30** |
 
 ## Triage Summaries
 

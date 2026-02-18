@@ -118,6 +118,11 @@ pub enum ConfigError {
         /// The invalid value.
         value: f64,
     },
+    /// BackoffConfig invariant violated.
+    InvalidBackoff {
+        /// Description of which invariant was violated.
+        reason: String,
+    },
 }
 
 impl fmt::Display for ConfigError {
@@ -133,6 +138,9 @@ impl fmt::Display for ConfigError {
             Self::IngressQueueZero => write!(f, "max_ingress_queue must be at least 1"),
             Self::InvalidTickRate { value } => {
                 write!(f, "tick_rate_hz must be finite and positive, got {value}")
+            }
+            Self::InvalidBackoff { reason } => {
+                write!(f, "invalid backoff config: {reason}")
             }
         }
     }
@@ -218,7 +226,42 @@ impl WorldConfig {
                 return Err(ConfigError::InvalidTickRate { value: hz });
             }
         }
-        // 6. Pipeline validation (delegates to murk-propagator).
+        // 6. BackoffConfig invariants.
+        let b = &self.backoff;
+        if b.initial_max_skew > b.max_skew_cap {
+            return Err(ConfigError::InvalidBackoff {
+                reason: format!(
+                    "initial_max_skew ({}) exceeds max_skew_cap ({})",
+                    b.initial_max_skew, b.max_skew_cap,
+                ),
+            });
+        }
+        if !b.backoff_factor.is_finite() || b.backoff_factor < 1.0 {
+            return Err(ConfigError::InvalidBackoff {
+                reason: format!(
+                    "backoff_factor must be finite and >= 1.0, got {}",
+                    b.backoff_factor,
+                ),
+            });
+        }
+        if !b.rejection_rate_threshold.is_finite()
+            || b.rejection_rate_threshold < 0.0
+            || b.rejection_rate_threshold > 1.0
+        {
+            return Err(ConfigError::InvalidBackoff {
+                reason: format!(
+                    "rejection_rate_threshold must be in [0.0, 1.0], got {}",
+                    b.rejection_rate_threshold,
+                ),
+            });
+        }
+        if b.decay_rate == 0 {
+            return Err(ConfigError::InvalidBackoff {
+                reason: "decay_rate must be at least 1".to_string(),
+            });
+        }
+
+        // 7. Pipeline validation (delegates to murk-propagator).
         let defined = self.defined_field_set();
         validate_pipeline(&self.propagators, &defined, self.dt)?;
 
@@ -430,5 +473,71 @@ mod tests {
             (2..=16).contains(&count),
             "auto count {count} out of [2,16]"
         );
+    }
+
+    // ── BackoffConfig validation ─────────────────────────────
+
+    #[test]
+    fn validate_backoff_initial_exceeds_cap_fails() {
+        let mut cfg = valid_config();
+        cfg.backoff.initial_max_skew = 100;
+        cfg.backoff.max_skew_cap = 5;
+        match cfg.validate() {
+            Err(ConfigError::InvalidBackoff { .. }) => {}
+            other => panic!("expected InvalidBackoff, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_backoff_nan_factor_fails() {
+        let mut cfg = valid_config();
+        cfg.backoff.backoff_factor = f64::NAN;
+        match cfg.validate() {
+            Err(ConfigError::InvalidBackoff { .. }) => {}
+            other => panic!("expected InvalidBackoff, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_backoff_factor_below_one_fails() {
+        let mut cfg = valid_config();
+        cfg.backoff.backoff_factor = 0.5;
+        match cfg.validate() {
+            Err(ConfigError::InvalidBackoff { .. }) => {}
+            other => panic!("expected InvalidBackoff, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_backoff_threshold_out_of_range_fails() {
+        let mut cfg = valid_config();
+        cfg.backoff.rejection_rate_threshold = 1.5;
+        match cfg.validate() {
+            Err(ConfigError::InvalidBackoff { .. }) => {}
+            other => panic!("expected InvalidBackoff, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_backoff_zero_decay_rate_fails() {
+        let mut cfg = valid_config();
+        cfg.backoff.decay_rate = 0;
+        match cfg.validate() {
+            Err(ConfigError::InvalidBackoff { .. }) => {}
+            other => panic!("expected InvalidBackoff, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_valid_backoff_succeeds() {
+        let mut cfg = valid_config();
+        cfg.backoff = BackoffConfig {
+            initial_max_skew: 5,
+            max_skew_cap: 10,
+            backoff_factor: 1.5,
+            decay_rate: 60,
+            rejection_rate_threshold: 0.20,
+        };
+        assert!(cfg.validate().is_ok());
     }
 }
