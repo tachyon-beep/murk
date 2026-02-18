@@ -1,3 +1,4 @@
+#![allow(deprecated)] // Uses the old reference pipeline intentionally.
 //! Stress test #15: Death Spiral Resistance
 //!
 //! Verifies that the RealtimeAsync engine sheds load under overload rather

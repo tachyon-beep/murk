@@ -3,6 +3,8 @@
 //! These tests exercise the full pipeline through LockstepWorld, not
 //! just individual propagators in isolation.
 
+#![allow(deprecated)] // Tests use the old hardcoded field constants intentionally.
+
 use murk_core::FieldReader;
 use murk_engine::{BackoffConfig, LockstepWorld, WorldConfig};
 use murk_propagators::agent_movement::{new_action_buffer, AgentAction, Direction};

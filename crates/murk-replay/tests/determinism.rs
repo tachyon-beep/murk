@@ -4,6 +4,8 @@
 //! rebuild config → replay via ReplayReader<&[u8]> through fresh LockstepWorld →
 //! compare hashes per tick.
 
+#![allow(deprecated)] // Tests use the old reference pipeline constants intentionally.
+
 use murk_core::command::{Command, CommandPayload};
 use murk_core::id::{Coord, FieldId, ParameterKey, TickId};
 use murk_core::{BoundaryBehavior, FieldDef, FieldMutability, FieldType};

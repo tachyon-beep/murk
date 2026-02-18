@@ -1,3 +1,4 @@
+#![allow(deprecated)] // Uses the old reference pipeline field constants.
 //! End-to-end lockstep RL loop example.
 //!
 //! Demonstrates: build config → LockstepWorld → inject actions → step → read
