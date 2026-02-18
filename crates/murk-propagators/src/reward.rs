@@ -3,7 +3,7 @@
 //! Reads heat and agent presence through the in-tick overlay (`reads()`)
 //! to see current-tick diffusion and movement results. Writes reward.
 
-use crate::fields::{AGENT_PRESENCE, HEAT, HEAT_GRADIENT, REWARD};
+use crate::fields::{AGENT_PRESENCE, HEAT, REWARD};
 use murk_core::{FieldId, FieldSet, PropagatorError};
 use murk_propagator::context::StepContext;
 use murk_propagator::propagator::{Propagator, WriteMode};
@@ -37,7 +37,7 @@ impl Propagator for RewardPropagator {
     }
 
     fn reads(&self) -> FieldSet {
-        [HEAT, AGENT_PRESENCE, HEAT_GRADIENT].into_iter().collect()
+        [HEAT, AGENT_PRESENCE].into_iter().collect()
     }
 
     fn writes(&self) -> Vec<(FieldId, WriteMode)> {
@@ -85,10 +85,23 @@ impl Propagator for RewardPropagator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fields::HEAT_GRADIENT;
     use murk_core::TickId;
     use murk_propagator::scratch::ScratchRegion;
     use murk_space::{EdgeBehavior, Space, Square4};
     use murk_test_utils::{MockFieldReader, MockFieldWriter};
+
+    #[test]
+    fn reads_only_heat_and_presence() {
+        let prop = RewardPropagator::new(1.0, -0.1);
+        let reads = prop.reads();
+        assert!(reads.contains(HEAT));
+        assert!(reads.contains(AGENT_PRESENCE));
+        assert!(
+            !reads.contains(HEAT_GRADIENT),
+            "reads() should not declare HEAT_GRADIENT — step() never reads it"
+        );
+    }
 
     #[test]
     fn reward_computed_for_agent_cells() {
@@ -104,8 +117,6 @@ mod tests {
         let mut presence = vec![0.0f32; n];
         presence[4] = 1.0; // agent at center
         reader.set_field(AGENT_PRESENCE, presence);
-
-        reader.set_field(HEAT_GRADIENT, vec![0.0f32; n * 2]);
 
         let mut writer = MockFieldWriter::new();
         writer.add_field(REWARD, n);
@@ -141,7 +152,6 @@ mod tests {
         let mut reader = MockFieldReader::new();
         reader.set_field(HEAT, vec![5.0; n]);
         reader.set_field(AGENT_PRESENCE, vec![0.0; n]); // no agents
-        reader.set_field(HEAT_GRADIENT, vec![0.0; n * 2]);
 
         let mut writer = MockFieldWriter::new();
         writer.add_field(REWARD, n);

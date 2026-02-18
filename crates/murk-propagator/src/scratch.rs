@@ -22,9 +22,10 @@ impl ScratchRegion {
         }
     }
 
-    /// Create from a byte capacity (rounded down to whole f32 slots).
+    /// Create from a byte capacity (rounded up to whole f32 slots).
     pub fn with_byte_capacity(bytes: usize) -> Self {
-        Self::new(bytes / std::mem::size_of::<f32>())
+        let slot_size = std::mem::size_of::<f32>();
+        Self::new((bytes + slot_size - 1) / slot_size)
     }
 
     /// Allocate `count` contiguous f32 slots, zero-initialized.
@@ -93,6 +94,22 @@ mod tests {
     fn from_byte_capacity() {
         let s = ScratchRegion::with_byte_capacity(16);
         assert_eq!(s.capacity(), 4); // 16 bytes / 4 bytes per f32
+    }
+
+    #[test]
+    fn from_byte_capacity_rounds_up() {
+        // 5 bytes should yield 2 f32 slots (8 bytes), not 1 (4 bytes).
+        let s = ScratchRegion::with_byte_capacity(5);
+        assert_eq!(s.capacity(), 2);
+        // 1 byte should still get 1 slot.
+        let s = ScratchRegion::with_byte_capacity(1);
+        assert_eq!(s.capacity(), 1);
+        // 0 bytes is fine — 0 slots.
+        let s = ScratchRegion::with_byte_capacity(0);
+        assert_eq!(s.capacity(), 0);
+        // Exact multiple is unchanged.
+        let s = ScratchRegion::with_byte_capacity(8);
+        assert_eq!(s.capacity(), 2);
     }
 
     #[test]
