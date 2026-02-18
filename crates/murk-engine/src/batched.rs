@@ -15,6 +15,8 @@
 //! Parallelism (rayon) is deferred to v2. The GIL elimination alone is
 //! the dominant win; adding `par_iter_mut` later is a 3-line change.
 
+use std::any::Any;
+
 use murk_core::command::Command;
 use murk_core::error::ObsError;
 use murk_core::id::TickId;
@@ -140,14 +142,37 @@ impl BatchedEngine {
             worlds.push(world);
         }
 
-        // Validate all worlds share the same cell_count.
-        let cell_count = worlds[0].space().cell_count();
+        // Validate all worlds share the same space topology.
+        // TypeId ensures the same concrete Space backend; ndim and cell_count
+        // catch dimension/size mismatches within the same backend family.
+        let ref_space = worlds[0].space();
+        let ref_type_id = (ref_space as &dyn Any).type_id();
+        let ref_ndim = ref_space.ndim();
+        let ref_cell_count = ref_space.cell_count();
         for (i, world) in worlds.iter().enumerate().skip(1) {
-            let wc = world.space().cell_count();
-            if wc != cell_count {
+            let s = world.space();
+            let tid = (s as &dyn Any).type_id();
+            if tid != ref_type_id {
                 return Err(BatchError::InvalidArgument {
                     reason: format!(
-                        "world 0 has cell_count={cell_count}, world {i} has cell_count={wc}"
+                        "world 0 and world {i} have different space types; \
+                         all worlds in a batch must use the same topology"
+                    ),
+                });
+            }
+            let nd = s.ndim();
+            if nd != ref_ndim {
+                return Err(BatchError::InvalidArgument {
+                    reason: format!(
+                        "world 0 has ndim={ref_ndim}, world {i} has ndim={nd}"
+                    ),
+                });
+            }
+            let wc = s.cell_count();
+            if wc != ref_cell_count {
+                return Err(BatchError::InvalidArgument {
+                    reason: format!(
+                        "world 0 has cell_count={ref_cell_count}, world {i} has cell_count={wc}"
                     ),
                 });
             }
@@ -525,5 +550,45 @@ mod tests {
         assert_eq!(meta.len(), 2);
         assert_eq!(meta[0].tick_id, TickId(0));
         assert_eq!(meta[1].tick_id, TickId(0));
+    }
+
+    // ── Topology validation ──────────────────────────────────
+
+    #[test]
+    fn mixed_space_types_rejected() {
+        use murk_space::Ring1D;
+
+        // Line1D(10) and Ring1D(10): same ndim, same cell_count, different type.
+        let line_config = WorldConfig {
+            space: Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()),
+            fields: vec![scalar_field("energy")],
+            propagators: vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))],
+            dt: 0.1,
+            seed: 1,
+            ring_buffer_size: 8,
+            max_ingress_queue: 1024,
+            tick_rate_hz: None,
+            backoff: BackoffConfig::default(),
+        };
+        let ring_config = WorldConfig {
+            space: Box::new(Ring1D::new(10).unwrap()),
+            fields: vec![scalar_field("energy")],
+            propagators: vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))],
+            dt: 0.1,
+            seed: 2,
+            ring_buffer_size: 8,
+            max_ingress_queue: 1024,
+            tick_rate_hz: None,
+            backoff: BackoffConfig::default(),
+        };
+
+        let result = BatchedEngine::new(vec![line_config, ring_config], None);
+        match result {
+            Err(e) => {
+                let msg = format!("{e}");
+                assert!(msg.contains("different space types"), "got: {msg}");
+            }
+            Ok(_) => panic!("expected error for mixed space types"),
+        }
     }
 }

@@ -139,6 +139,14 @@ impl ProductSpace {
             ProductMetric::L1 => per_comp.iter().sum(),
             ProductMetric::LInfinity => per_comp.iter().copied().fold(0.0f64, f64::max),
             ProductMetric::Weighted(weights) => {
+                assert_eq!(
+                    weights.len(),
+                    self.components.len(),
+                    "Weighted metric requires exactly one weight per component \
+                     (got {} weights for {} components)",
+                    weights.len(),
+                    self.components.len(),
+                );
                 per_comp.iter().zip(weights).map(|(d, w)| d * w).sum()
             }
         }
@@ -723,6 +731,38 @@ mod tests {
             radius: 1,
         });
         assert!(result.is_err());
+    }
+
+    // ── BUG-024: weighted metric must reject arity mismatch ────
+
+    #[test]
+    #[should_panic(expected = "Weighted metric requires exactly one weight per component")]
+    fn weighted_metric_too_few_weights_panics() {
+        let s = hex_line(); // 2 components
+        let a: Coord = smallvec![2, 1, 5];
+        let b: Coord = smallvec![4, 0, 8];
+        // Only 1 weight for 2 components — must panic
+        let _ = s.metric_distance(&a, &b, &ProductMetric::Weighted(vec![1.0]));
+    }
+
+    #[test]
+    #[should_panic(expected = "Weighted metric requires exactly one weight per component")]
+    fn weighted_metric_too_many_weights_panics() {
+        let s = hex_line(); // 2 components
+        let a: Coord = smallvec![2, 1, 5];
+        let b: Coord = smallvec![4, 0, 8];
+        // 3 weights for 2 components — must panic
+        let _ = s.metric_distance(&a, &b, &ProductMetric::Weighted(vec![1.0, 2.0, 3.0]));
+    }
+
+    #[test]
+    fn weighted_metric_exact_match_succeeds() {
+        let s = hex_line(); // 2 components
+        let a: Coord = smallvec![2, 1, 5];
+        let b: Coord = smallvec![4, 0, 8];
+        // Exactly 2 weights for 2 components — correct
+        let d = s.metric_distance(&a, &b, &ProductMetric::Weighted(vec![1.0, 1.0]));
+        assert_eq!(d, 5.0); // hex_dist(2) + line_dist(3) = 5
     }
 
     // ── Property tests ──────────────────────────────────────────

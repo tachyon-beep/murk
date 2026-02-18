@@ -52,11 +52,19 @@ impl BatchedWorld {
             ));
         }
 
-        // Take handles from all configs (consuming them).
+        // Validate all configs are unconsumed before taking any handles.
+        // This prevents partial consumption: if config N is already consumed,
+        // we detect it before consuming configs 0..N-1 (which would leak
+        // their handles and trampoline allocations on early return).
+        for cfg in &configs {
+            cfg.require_handle()?;
+        }
+
+        // All handles are present — consume them (infallible after validation).
         let mut config_handles = Vec::with_capacity(configs.len());
         let mut all_trampoline_data = Vec::new();
         for mut cfg in configs {
-            let (ch, td) = cfg.take_handle()?;
+            let (ch, td) = cfg.take_handle().expect("validated above");
             config_handles.push(ch);
             all_trampoline_data.extend(td);
         }

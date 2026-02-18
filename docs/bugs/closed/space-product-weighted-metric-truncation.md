@@ -1,8 +1,9 @@
-# Bug Report
+# Bug Report — FIXED
 
 **Date:** 2026-02-17
 **Reporter:** static-analysis-triage
 **Severity:** [ ] Critical | [x] High | [ ] Medium | [ ] Low
+**Fixed:** 2026-02-18
 
 ## Affected Crate(s)
 
@@ -115,3 +116,9 @@ assert_eq!(d, 15.0); // FAILS
 **Suggested fix:** Add `assert_eq!(weights.len(), self.components.len(), "Weighted metric requires exactly one weight per component")` before the zip, or make the method return `Result<f64, SpaceError>`.
 
 This falls under CR-1 (ProductSpace semantics) from the architectural design review.
+
+## Resolution
+
+Added `assert_eq!(weights.len(), self.components.len())` before the zip in `metric_distance`. Wrong weight count is a programming error, so `assert!` (panic) is appropriate — consistent with Rust convention and the existing codebase validation patterns.
+
+Tests added: `weighted_metric_too_few_weights_panics`, `weighted_metric_too_many_weights_panics`, `weighted_metric_exact_match_succeeds`.

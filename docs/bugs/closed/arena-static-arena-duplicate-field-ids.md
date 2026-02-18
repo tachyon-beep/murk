@@ -1,8 +1,9 @@
-# Bug Report
+# Bug Report — FIXED
 
 **Date:** 2026-02-17
 **Reporter:** static-analysis-triage
 **Severity:** [ ] Critical | [x] High | [ ] Medium | [ ] Low
+**Fixed:** 2026-02-18
 
 ## Affected Crate(s)
 
@@ -99,3 +100,9 @@ assert_eq!(data.len(), 50); // first 100 elements are orphaned
 **Verified lines:** static_arena.rs:39 (total sums all entries), static_arena.rs:45 (IndexMap insert overwrites), static_arena.rs:46 (cursor always advances), static_arena.rs:56-67 (read/write use final mapping), static_arena.rs:90 (field_count reflects unique keys)
 **Root cause:** The constructor takes a slice of tuples (not a map) and does not validate FieldId uniqueness. `IndexMap::insert` replacement semantics plus unconditional cursor advancement create a silent inconsistency.
 **Suggested fix:** Validate uniqueness at construction: either return `Result<Self, ArenaError>` and reject duplicates, or panic with a clear message. Only advance `cursor` when inserting a truly new key.
+
+## Resolution
+
+Added O(n^2) duplicate FieldId check at the start of `StaticArena::new()`, before allocation. Panics with a clear message identifying the duplicate FieldId. Duplicate FieldIds are a programming error, so `assert!` (panic) is appropriate — consistent with Rust convention and the existing codebase validation patterns.
+
+Tests added: `new_rejects_duplicate_field_ids`, `new_rejects_non_adjacent_duplicate_field_ids`, `new_accepts_distinct_field_ids`.

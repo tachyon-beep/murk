@@ -136,6 +136,14 @@ pub enum PipelineError {
         /// The invalid dt value.
         value: f64,
     },
+
+    /// A propagator's `max_dt()` returned a non-finite or non-positive value.
+    InvalidMaxDt {
+        /// Which propagator.
+        propagator: String,
+        /// The invalid max_dt value.
+        value: f64,
+    },
 }
 
 impl fmt::Display for PipelineError {
@@ -178,6 +186,13 @@ impl fmt::Display for PipelineError {
             }
             Self::InvalidDt { value } => {
                 write!(f, "dt must be finite and positive, got {value}")
+            }
+            Self::InvalidMaxDt { propagator, value } => {
+                write!(
+                    f,
+                    "propagator '{propagator}' returned invalid max_dt: {value} \
+                     (must be finite and positive)"
+                )
             }
         }
     }
@@ -268,6 +283,12 @@ pub fn validate_pipeline(
         let mut constraining = String::new();
         for prop in propagators {
             if let Some(max) = prop.max_dt() {
+                if !max.is_finite() || max <= 0.0 {
+                    return Err(PipelineError::InvalidMaxDt {
+                        propagator: prop.name().to_string(),
+                        value: max,
+                    });
+                }
                 if max < min_max_dt {
                     min_max_dt = max;
                     constraining = prop.name().to_string();
@@ -820,5 +841,72 @@ mod tests {
         let props: Vec<Box<dyn Propagator>> = vec![Box::new(PropAB)];
         let result = validate_pipeline(&props, &fields_0_1_2(), -0.1);
         assert!(matches!(result, Err(PipelineError::InvalidDt { .. })));
+    }
+
+    // ── Invalid max_dt from propagator ────────────────────────
+
+    #[test]
+    fn nan_max_dt_rejected() {
+        let props: Vec<Box<dyn Propagator>> =
+            vec![Box::new(PropDtConstrained { max: f64::NAN })];
+        let fields = [FieldId(0)].into_iter().collect();
+        let result = validate_pipeline(&props, &fields, 0.1);
+        match result {
+            Err(PipelineError::InvalidMaxDt { propagator, value }) => {
+                assert_eq!(propagator, "PropDtConstrained");
+                assert!(value.is_nan());
+            }
+            other => panic!("expected InvalidMaxDt, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn inf_max_dt_rejected() {
+        let props: Vec<Box<dyn Propagator>> =
+            vec![Box::new(PropDtConstrained { max: f64::INFINITY })];
+        let fields = [FieldId(0)].into_iter().collect();
+        let result = validate_pipeline(&props, &fields, 0.1);
+        match result {
+            Err(PipelineError::InvalidMaxDt { propagator, .. }) => {
+                assert_eq!(propagator, "PropDtConstrained");
+            }
+            other => panic!("expected InvalidMaxDt, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn neg_inf_max_dt_rejected() {
+        let props: Vec<Box<dyn Propagator>> =
+            vec![Box::new(PropDtConstrained { max: f64::NEG_INFINITY })];
+        let fields = [FieldId(0)].into_iter().collect();
+        let result = validate_pipeline(&props, &fields, 0.1);
+        assert!(matches!(
+            result,
+            Err(PipelineError::InvalidMaxDt { .. })
+        ));
+    }
+
+    #[test]
+    fn zero_max_dt_rejected() {
+        let props: Vec<Box<dyn Propagator>> =
+            vec![Box::new(PropDtConstrained { max: 0.0 })];
+        let fields = [FieldId(0)].into_iter().collect();
+        let result = validate_pipeline(&props, &fields, 0.1);
+        assert!(matches!(
+            result,
+            Err(PipelineError::InvalidMaxDt { .. })
+        ));
+    }
+
+    #[test]
+    fn negative_max_dt_rejected() {
+        let props: Vec<Box<dyn Propagator>> =
+            vec![Box::new(PropDtConstrained { max: -1.0 })];
+        let fields = [FieldId(0)].into_iter().collect();
+        let result = validate_pipeline(&props, &fields, 0.1);
+        assert!(matches!(
+            result,
+            Err(PipelineError::InvalidMaxDt { .. })
+        ));
     }
 }

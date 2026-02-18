@@ -144,11 +144,44 @@ impl PingPongArena {
             }
         }
 
+        // Pre-allocate PerTick fields in both buffers so that reads from
+        // the published buffer at generation 0 (before any begin_tick/publish
+        // cycle) return valid zero-filled data instead of hitting unallocated
+        // memory. This fixes BUG-028 (segment slice beyond cursor) and
+        // BUG-013 (placeholder PerTick handles in snapshot).
+        let mut buffer_a = SegmentList::new(config.segment_size, per_tick_max);
+        let mut buffer_b = SegmentList::new(config.segment_size, per_tick_max);
+
+        let per_tick_fields: Vec<(FieldId, u32)> = staging_descriptor
+            .iter()
+            .filter(|(_, e)| e.meta.mutability == FieldMutability::PerTick)
+            .map(|(&id, e)| (id, e.meta.total_len))
+            .collect();
+
+        for (field_id, total_len) in &per_tick_fields {
+            // Allocate in buffer_b (initial published buffer when b_is_staging=false).
+            let (seg_idx, offset) = buffer_b.alloc(*total_len)?;
+            let handle = FieldHandle::new(
+                0,
+                offset,
+                *total_len,
+                FieldLocation::PerTick {
+                    segment_index: seg_idx,
+                },
+            );
+            staging_descriptor.update_handle(*field_id, handle);
+
+            // Also allocate in buffer_a (will become staging on first begin_tick,
+            // where it will be reset and re-allocated — but this makes both
+            // buffers consistent from the start).
+            let _ = buffer_a.alloc(*total_len)?;
+        }
+
         let published_descriptor = staging_descriptor.clone();
 
         Ok(Self {
-            buffer_a: SegmentList::new(config.segment_size, per_tick_max),
-            buffer_b: SegmentList::new(config.segment_size, per_tick_max),
+            buffer_a,
+            buffer_b,
             sparse_segments,
             sparse_slab,
             static_arena,
@@ -371,6 +404,30 @@ impl PingPongArena {
                 self.staging_descriptor.update_handle(*field_id, handle);
                 self.published_descriptor.update_handle(*field_id, handle);
             }
+        }
+
+        // Pre-allocate PerTick fields in both buffers (same as new()) so
+        // the published buffer is valid at generation 0.
+        let per_tick_fields: Vec<(FieldId, u32)> = self
+            .staging_descriptor
+            .iter()
+            .filter(|(_, e)| e.meta.mutability == FieldMutability::PerTick)
+            .map(|(&id, e)| (id, e.meta.total_len))
+            .collect();
+
+        for (field_id, total_len) in &per_tick_fields {
+            let (seg_idx, offset) = self.buffer_b.alloc(*total_len)?;
+            let handle = FieldHandle::new(
+                0,
+                offset,
+                *total_len,
+                FieldLocation::PerTick {
+                    segment_index: seg_idx,
+                },
+            );
+            self.staging_descriptor.update_handle(*field_id, handle);
+            self.published_descriptor.update_handle(*field_id, handle);
+            let _ = self.buffer_a.alloc(*total_len)?;
         }
 
         self.generation = 0;

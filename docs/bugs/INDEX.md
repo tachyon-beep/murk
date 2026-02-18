@@ -3,11 +3,11 @@
 Generated 2026-02-17 from static analysis triage of 110 source reports.
 53 confirmed bugs from 64 actionable reports (83% confirmation rate).
 
-**Status (updated 2026-02-18):** 15 fixed, 0 partially fixed, 38 still open.
+**Status (updated 2026-02-18):** 20 fixed, 0 partially fixed, 33 still open.
 
 ## Open Bugs
 
-### High (11 open, 1 partially fixed)
+### High (7 open)
 
 | # | Ticket | Crate | Summary | Status |
 |---|--------|-------|---------|--------|
@@ -16,24 +16,19 @@ Generated 2026-02-17 from static analysis triage of 110 source reports.
 | 7 | [engine-realtime-shutdown-blocks-on-slow-tick](engine-realtime-shutdown-blocks-on-slow-tick.md) | murk-engine | Shutdown blocks indefinitely with low `tick_rate_hz` due to uninterruptible sleep | Open |
 | 9 | [engine-backoff-config-not-validated](engine-backoff-config-not-validated.md) | murk-engine | `BackoffConfig` invariants not checked; `initial_max_skew > max_skew_cap` allowed | Open |
 | 12 | [arena-missing-segment-size-validation](arena-missing-segment-size-validation.md) | murk-arena | `segment_size` power-of-two/minimum constraints documented but never enforced | Open |
-| 13 | [arena-placeholder-pertick-handles-in-snapshot](arena-placeholder-pertick-handles-in-snapshot.md) | murk-arena | Placeholder handles readable via snapshot before any begin_tick/publish cycle | Open |
-| 14 | [arena-static-arena-duplicate-field-ids](arena-static-arena-duplicate-field-ids.md) | murk-arena | Duplicate FieldIds silently accepted; earlier allocations orphaned | Open |
 | 20 | [ffi-mutex-poisoning-panic-in-extern-c](ffi-mutex-poisoning-panic-in-extern-c.md) | murk-ffi | 43+ `lock().unwrap()` calls in extern "C" functions; poisoned mutex = UB | Open |
 | 23 | [python-propagator-trampoline-leak-on-cstring-error](python-propagator-trampoline-leak-on-cstring-error.md) | murk-python | TrampolineData leaks on CString/add_propagator_handle error paths | Open |
-| 24 | [space-product-weighted-metric-truncation](space-product-weighted-metric-truncation.md) | murk-space | Weighted metric silently drops trailing component distances via zip truncation | Open |
 
 
-### Medium (18 open)
+### Medium (16 open)
 
 | # | Ticket | Crate | Summary | Status |
 |---|--------|-------|---------|--------|
 | 25 | [engine-egress-double-epoch-read](engine-egress-double-epoch-read.md) | murk-engine | Double epoch read allows age_ticks overstated by 1+ | Open |
 | 26 | [engine-stepresult-receipts-doc-mismatch](engine-stepresult-receipts-doc-mismatch.md) | murk-engine | StepResult.receipts doc says no rejections but code includes them | Open |
 | 27 | [engine-quickstart-setfield-noop](engine-quickstart-setfield-noop.md) | murk-engine | Quickstart example's SetField injection overwritten by diffusion propagator | Open |
-| 28 | [arena-segment-slice-beyond-cursor](arena-segment-slice-beyond-cursor.md) | murk-arena | Segment::slice checks capacity not cursor; reads stale data | Open |
 | 29 | [arena-sparse-segment-memory-leak](arena-sparse-segment-memory-leak.md) | murk-arena | Sparse CoW bump-allocates but never reclaims dead segment memory | Open |
 | 30 | [propagator-agent-movement-tick0-actions](propagator-agent-movement-tick0-actions.md) | murk-propagators | Actions processed on tick 0 alongside initialization | Open |
-| 31 | [propagator-pipeline-nan-maxdt-bypass](propagator-pipeline-nan-maxdt-bypass.md) | murk-propagator | NaN from max_dt() bypasses all stability constraints | Open |
 | 32 | [propagator-reward-stale-heat-gradient-dependency](propagator-reward-stale-heat-gradient-dependency.md) | murk-propagators | reads() declares HEAT_GRADIENT but step() never reads it | Open |
 | 33 | [obs-flatbuf-silent-u16-truncation](obs-flatbuf-silent-u16-truncation.md) | murk-obs | serialize truncates entry count to u16 but writes all entries | Open |
 | 34 | [obs-geometry-is-interior-missing-dim-check](obs-geometry-is-interior-missing-dim-check.md) | murk-obs | is_interior missing dimension validation; empty center returns true | Open |
@@ -60,7 +55,7 @@ Generated 2026-02-17 from static analysis triage of 110 source reports.
 | 51 | [bench-space-ops-degenerate-q-distribution](bench-space-ops-degenerate-q-distribution.md) | murk-bench | LCG multiplier not coprime to modulus; only 4/20 q values exercised | Open |
 | 52 | [script-organize-by-priority-basename-collision](script-organize-by-priority-basename-collision.md) | scripts | --organize-by-priority flattens paths; duplicate basenames overwrite | Open |
 
-## Closed Bugs (12 fixed)
+## Closed Bugs (20 fixed)
 
 Fixed in commits `02c12f3`, `dd52604`, `c0f5d55`. Tickets moved to [closed/](closed/).
 
@@ -81,16 +76,21 @@ Fixed in commits `02c12f3`, `dd52604`, `c0f5d55`. Tickets moved to [closed/](clo
 | 19 | [ffi-trampoline-null-pointer-dereference](closed/ffi-trampoline-null-pointer-dereference.md) | murk-ffi | Null pointer guards added to all three trampoline functions | (this session) |
 | 44 | [space-fcc12-parity-overflow](closed/space-fcc12-parity-overflow.md) | murk-space | XOR-based parity replaces arithmetic overflow in all 5 sites | (this session) |
 | 22 | [ffi-obs-negative-to-unsigned-cast](closed/ffi-obs-negative-to-unsigned-cast.md) | murk-ffi | Negative i32 params cast to u32/usize; -1 becomes u32::MAX | c0f5d55 |
+| 31 | [propagator-pipeline-nan-maxdt-bypass](closed/propagator-pipeline-nan-maxdt-bypass.md) | murk-propagator | NaN from max_dt() bypasses all stability constraints | (this session) |
+| 13 | [arena-placeholder-pertick-handles-in-snapshot](closed/arena-placeholder-pertick-handles-in-snapshot.md) | murk-arena | Placeholder handles readable via snapshot before any begin_tick/publish cycle | (this session) |
+| 28 | [arena-segment-slice-beyond-cursor](closed/arena-segment-slice-beyond-cursor.md) | murk-arena | Segment::slice checks capacity not cursor; reads stale data | (this session) |
+| 24 | [space-product-weighted-metric-truncation](closed/space-product-weighted-metric-truncation.md) | murk-space | Weighted metric silently drops trailing component distances via zip truncation | (this session) |
+| 14 | [arena-static-arena-duplicate-field-ids](closed/arena-static-arena-duplicate-field-ids.md) | murk-arena | Duplicate FieldIds silently accepted; earlier allocations orphaned | (this session) |
 
 ## By Crate (open only)
 
 | Crate | High | Medium | Low | Total Open |
 |-------|------|--------|-----|------------|
 | murk-engine | 3 | 3 | 0 | 6 |
-| murk-arena | 3 | 2 | 1 | 6 |
+| murk-arena | 0 | 1 | 1 | 2 |
 | murk-ffi | 1 | 2 | 0 | 3 |
 | murk-python | 1 | 4 | 0 | 5 |
-| murk-propagator | 0 | 1 | 0 | 1 |
+| murk-propagator | 0 | 0 | 0 | 0 |
 | murk-propagators | 0 | 2 | 0 | 2 |
 | murk-obs | 0 | 2 | 1 | 3 |
 | murk-replay | 0 | 2 | 1 | 3 |
@@ -99,7 +99,7 @@ Fixed in commits `02c12f3`, `dd52604`, `c0f5d55`. Tickets moved to [closed/](clo
 | murk-bench | 0 | 0 | 1 | 1 |
 | examples | 0 | 1 | 0 | 1 |
 | scripts | 0 | 0 | 1 | 1 |
-| **Total** | **8** | **18** | **6** | **38** |
+| **Total** | **6** | **16** | **6** | **33** |
 
 ## Triage Summaries
 

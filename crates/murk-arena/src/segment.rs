@@ -57,6 +57,11 @@ impl Segment {
     pub fn slice(&self, offset: u32, len: u32) -> &[f32] {
         let start = offset as usize;
         let end = start + len as usize;
+        assert!(
+            end <= self.cursor,
+            "slice end ({end}) exceeds allocated region ({cursor})",
+            cursor = self.cursor,
+        );
         &self.data[start..end]
     }
 
@@ -68,6 +73,11 @@ impl Segment {
     pub fn slice_mut(&mut self, offset: u32, len: u32) -> &mut [f32] {
         let start = offset as usize;
         let end = start + len as usize;
+        assert!(
+            end <= self.cursor,
+            "slice end ({end}) exceeds allocated region ({cursor})",
+            cursor = self.cursor,
+        );
         &mut self.data[start..end]
     }
 
@@ -400,5 +410,55 @@ mod tests {
         list.slice_mut(seg, off, 10)[0] = 0.0;
         // Clone is unaffected.
         assert_eq!(cloned.slice(seg, off, 10)[0], 42.0);
+    }
+
+    // ── BUG-028: slice must respect cursor, not capacity ──────
+
+    #[test]
+    #[should_panic(expected = "exceeds allocated region")]
+    fn segment_slice_panics_after_reset() {
+        let mut seg = Segment::new(1024);
+        let (_, data) = seg.alloc(100).unwrap();
+        data[0] = 42.0;
+        seg.reset();
+        // cursor is now 0 — no allocated region
+        let _ = seg.slice(0, 100); // must panic
+    }
+
+    #[test]
+    #[should_panic(expected = "exceeds allocated region")]
+    fn segment_slice_mut_panics_after_reset() {
+        let mut seg = Segment::new(1024);
+        seg.alloc(100).unwrap();
+        seg.reset();
+        let _ = seg.slice_mut(0, 100); // must panic
+    }
+
+    #[test]
+    #[should_panic(expected = "exceeds allocated region")]
+    fn segment_slice_panics_beyond_cursor() {
+        let mut seg = Segment::new(1024);
+        seg.alloc(50).unwrap();
+        // cursor is 50, but capacity is 1024
+        let _ = seg.slice(0, 100); // must panic
+    }
+
+    #[test]
+    fn segment_slice_within_cursor_succeeds() {
+        let mut seg = Segment::new(1024);
+        seg.alloc(100).unwrap();
+        // Should succeed — 100 <= cursor (100)
+        let data = seg.slice(0, 100);
+        assert_eq!(data.len(), 100);
+    }
+
+    #[test]
+    #[should_panic(expected = "exceeds allocated region")]
+    fn segment_list_slice_panics_after_reset() {
+        let mut list = SegmentList::new(1024, 4);
+        let (seg, off) = list.alloc(100).unwrap();
+        list.slice_mut(seg, off, 100)[0] = 42.0;
+        list.reset();
+        let _ = list.slice(seg, off, 100); // must panic
     }
 }

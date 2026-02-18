@@ -1,8 +1,9 @@
-# Bug Report
+# Bug Report — FIXED
 
 **Date:** 2026-02-17
 **Reporter:** static-analysis-triage
 **Severity:** [ ] Critical | [x] High | [ ] Medium | [ ] Low
+**Fixed:** 2026-02-18 (resolved as part of BUG-028 fix)
 
 ## Affected Crate(s)
 
@@ -106,3 +107,7 @@ let data = snap.read(FieldId(0));
 **Verified lines:** descriptor.rs:69 (placeholder handle init), pingpong.rs:147 (published_descriptor = staging clone with placeholders), read.rs:74 (unchecked slice in Snapshot), read.rs:173 (unchecked slice in OwnedSnapshot), segment.rs:57-60 (slice checks capacity not cursor)
 **Root cause:** The descriptor lacks an "unallocated" handle state. Placeholder PerTick handles are valid-looking but point at regions that were never bump-allocated. The read path trusts handles as authoritative without verifying allocation.
 **Suggested fix:** Either (a) introduce `FieldLocation::Unallocated` or `Option<FieldHandle>` so unallocated fields return `None` on read, or (b) gate `snapshot()` to only be callable after at least one `publish()`, or (c) add a checked slice API (`SegmentList::try_slice`) that validates offset+len against cursor bounds.
+
+## Resolution
+
+Fixed by pre-allocating PerTick fields in both per-tick buffers at `PingPongArena::new()` and `PingPongArena::reset()`, so placeholder handles are replaced by real allocations pointing at valid zero-filled data. Combined with the `Segment::slice()` cursor bounds check from BUG-028, any stale/unallocated access is now caught at the source.
