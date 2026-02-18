@@ -57,28 +57,44 @@ const POOL_MIN: u8 = 3;
 const POOL_SUM: u8 = 4;
 
 /// Serialize an [`ObsSpec`] to binary bytes.
-pub fn serialize(spec: &ObsSpec) -> Vec<u8> {
+///
+/// Returns `Err` if any value exceeds its wire-format range
+/// (e.g. more than `u16::MAX` entries).
+pub fn serialize(spec: &ObsSpec) -> Result<Vec<u8>, ObsError> {
     let mut buf = Vec::with_capacity(128);
 
     // Header
     buf.extend_from_slice(MAGIC);
     buf.extend_from_slice(&VERSION.to_le_bytes());
-    buf.extend_from_slice(&(spec.entries.len() as u16).to_le_bytes());
+    let n_entries = u16::try_from(spec.entries.len()).map_err(|_| ObsError::InvalidObsSpec {
+        reason: format!(
+            "too many entries: {} exceeds u16::MAX ({})",
+            spec.entries.len(),
+            u16::MAX
+        ),
+    })?;
+    buf.extend_from_slice(&n_entries.to_le_bytes());
 
     for entry in &spec.entries {
-        write_entry(&mut buf, entry);
+        write_entry(&mut buf, entry)?;
     }
 
-    buf
+    Ok(buf)
 }
 
-fn write_entry(buf: &mut Vec<u8>, entry: &ObsEntry) {
+fn write_entry(buf: &mut Vec<u8>, entry: &ObsEntry) -> Result<(), ObsError> {
     buf.extend_from_slice(&entry.field_id.0.to_le_bytes());
 
     // Region
     let (region_tag, region_params) = encode_region(&entry.region);
     buf.push(region_tag);
-    buf.extend_from_slice(&(region_params.len() as u16).to_le_bytes());
+    let n_params = u16::try_from(region_params.len()).map_err(|_| ObsError::InvalidObsSpec {
+        reason: format!(
+            "too many region params: {} exceeds u16::MAX",
+            region_params.len()
+        ),
+    })?;
+    buf.extend_from_slice(&n_params.to_le_bytes());
     for &p in &region_params {
         buf.extend_from_slice(&p.to_le_bytes());
     }
@@ -111,10 +127,18 @@ fn write_entry(buf: &mut Vec<u8>, entry: &ObsEntry) {
                 PoolKernel::Sum => POOL_SUM,
             };
             buf.push(tag);
-            buf.extend_from_slice(&(cfg.kernel_size as u32).to_le_bytes());
-            buf.extend_from_slice(&(cfg.stride as u32).to_le_bytes());
+            let ks = u32::try_from(cfg.kernel_size).map_err(|_| ObsError::InvalidObsSpec {
+                reason: format!("kernel_size {} exceeds u32::MAX", cfg.kernel_size),
+            })?;
+            let st = u32::try_from(cfg.stride).map_err(|_| ObsError::InvalidObsSpec {
+                reason: format!("stride {} exceeds u32::MAX", cfg.stride),
+            })?;
+            buf.extend_from_slice(&ks.to_le_bytes());
+            buf.extend_from_slice(&st.to_le_bytes());
         }
     }
+
+    Ok(())
 }
 
 fn encode_region(region: &ObsRegion) -> (u8, Vec<i32>) {
@@ -180,6 +204,16 @@ pub fn deserialize(bytes: &[u8]) -> Result<ObsSpec, ObsError> {
     let mut entries = Vec::with_capacity(n_entries);
     for i in 0..n_entries {
         entries.push(read_entry(&mut r, i)?);
+    }
+
+    if r.pos != bytes.len() {
+        return Err(ObsError::InvalidObsSpec {
+            reason: format!(
+                "trailing bytes: {} unconsumed after {} entries",
+                bytes.len() - r.pos,
+                n_entries
+            ),
+        });
     }
 
     Ok(ObsSpec { entries })
@@ -409,7 +443,7 @@ mod tests {
     use smallvec::smallvec;
 
     fn round_trip(spec: &ObsSpec) -> ObsSpec {
-        let bytes = serialize(spec);
+        let bytes = serialize(spec).unwrap();
         deserialize(&bytes).unwrap()
     }
 
@@ -630,7 +664,7 @@ mod tests {
                 dtype: ObsDtype::F32,
             }],
         };
-        let mut bytes = serialize(&spec);
+        let mut bytes = serialize(&spec).unwrap();
         // Set version to 99
         bytes[4] = 99;
         bytes[5] = 0;
@@ -643,6 +677,42 @@ mod tests {
         assert!(deserialize(&[]).is_err());
         assert!(deserialize(&[0, 0]).is_err());
         assert!(deserialize(b"MOBS").is_err());
+    }
+
+    #[test]
+    fn serialize_rejects_overflow_entry_count() {
+        // 65536 entries exceeds u16::MAX (65535), serialize must return Err.
+        let entries: Vec<ObsEntry> = (0..=u16::MAX as u32)
+            .map(|i| ObsEntry {
+                field_id: FieldId(i),
+                region: ObsRegion::Fixed(RegionSpec::All),
+                pool: None,
+                transform: ObsTransform::Identity,
+                dtype: ObsDtype::F32,
+            })
+            .collect();
+        let spec = ObsSpec { entries };
+        // After fix, serialize returns Result and this must be Err.
+        // Currently this silently truncates — the bug we're fixing.
+        assert!(serialize(&spec).is_err());
+    }
+
+    #[test]
+    fn deserialize_rejects_trailing_bytes() {
+        let spec = ObsSpec {
+            entries: vec![ObsEntry {
+                field_id: FieldId(0),
+                region: ObsRegion::Fixed(RegionSpec::All),
+                pool: None,
+                transform: ObsTransform::Identity,
+                dtype: ObsDtype::F32,
+            }],
+        };
+        let mut bytes = serialize(&spec).unwrap();
+        // Append garbage trailing byte.
+        bytes.push(0xFF);
+        let err = deserialize(&bytes).unwrap_err();
+        assert!(format!("{err:?}").contains("trailing"));
     }
 
     #[test]

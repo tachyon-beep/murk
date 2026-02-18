@@ -122,10 +122,16 @@ impl GridGeometry {
     ///
     /// For wrapped spaces (`all_wrap == true`), every position is interior.
     pub fn is_interior(&self, center: &[i32], radius: u32) -> bool {
+        if center.len() != self.ndim {
+            return false;
+        }
         if self.all_wrap {
             return true;
         }
-        let r = radius as i32;
+        let r = match i32::try_from(radius) {
+            Ok(r) => r,
+            Err(_) => return false, // radius exceeds any i32-indexed grid
+        };
         for (c, &dim) in center.iter().zip(&self.coord_dims) {
             if *c < r || *c + r >= dim as i32 {
                 return false;
@@ -320,6 +326,27 @@ mod tests {
         assert_eq!(geo.graph_distance(&[1, 1]), 2); // max(1,1,2)=2
         assert_eq!(geo.graph_distance(&[-2, -2]), 4); // max(2,2,4)=4
         assert_eq!(geo.graph_distance(&[2, -1]), 2); // max(2,1,1)=2
+    }
+
+    #[test]
+    fn is_interior_wrong_dim_returns_false() {
+        let s = Square4::new(20, 20, EdgeBehavior::Absorb).unwrap();
+        let geo = GridGeometry::from_space(&s).unwrap();
+        // Empty center on a 2D grid must return false, not true.
+        assert!(!geo.is_interior(&[], 3));
+        // Too few dimensions.
+        assert!(!geo.is_interior(&[10], 3));
+        // Too many dimensions.
+        assert!(!geo.is_interior(&[10, 10, 10], 3));
+    }
+
+    #[test]
+    fn is_interior_huge_radius_returns_false() {
+        let s = Square4::new(20, 20, EdgeBehavior::Absorb).unwrap();
+        let geo = GridGeometry::from_space(&s).unwrap();
+        // radius > i32::MAX should never be interior on a finite grid.
+        assert!(!geo.is_interior(&[10, 10], u32::MAX));
+        assert!(!geo.is_interior(&[10, 10], i32::MAX as u32 + 1));
     }
 
     #[test]
