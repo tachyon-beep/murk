@@ -25,6 +25,7 @@ pub mod gradient_compute;
 pub mod identity_copy;
 #[allow(deprecated)]
 pub mod reward;
+pub mod resource_field;
 pub mod scalar_diffusion;
 
 pub use agent_emission::{AgentEmission, EmissionMode};
@@ -35,5 +36,6 @@ pub use fields::{reference_fields, AGENT_PRESENCE, HEAT, HEAT_GRADIENT, REWARD, 
 pub use flow_field::FlowField;
 pub use gradient_compute::GradientCompute;
 pub use identity_copy::IdentityCopy;
+pub use resource_field::{RegrowthModel, ResourceField};
 pub use reward::RewardPropagator;
 pub use scalar_diffusion::ScalarDiffusion;
