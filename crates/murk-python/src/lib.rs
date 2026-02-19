@@ -51,6 +51,12 @@ fn _murk(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<library_propagators::PyScalarDiffusion>()?;
     m.add_class::<library_propagators::PyGradientCompute>()?;
     m.add_class::<library_propagators::PyIdentityCopy>()?;
+    m.add_class::<library_propagators::PyFlowField>()?;
+    m.add_class::<library_propagators::PyAgentEmission>()?;
+    m.add_class::<library_propagators::PyResourceField>()?;
+    m.add_class::<library_propagators::PyMorphologicalOp>()?;
+    m.add_class::<library_propagators::PyWavePropagation>()?;
+    m.add_class::<library_propagators::PyNoiseInjection>()?;
 
     // Functions
     m.add_function(wrap_pyfunction!(propagator::add_propagator, m)?)?;
