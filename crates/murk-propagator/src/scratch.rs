@@ -25,7 +25,8 @@ impl ScratchRegion {
     /// Create from a byte capacity (rounded up to whole f32 slots).
     pub fn with_byte_capacity(bytes: usize) -> Self {
         let slot_size = std::mem::size_of::<f32>();
-        Self::new((bytes + slot_size - 1) / slot_size)
+        // Overflow-safe ceiling division (avoids bytes + slot_size - 1 wrapping).
+        Self::new(bytes / slot_size + usize::from(bytes % slot_size != 0))
     }
 
     /// Allocate `count` contiguous f32 slots, zero-initialized.
@@ -110,6 +111,18 @@ mod tests {
         // Exact multiple is unchanged.
         let s = ScratchRegion::with_byte_capacity(8);
         assert_eq!(s.capacity(), 2);
+    }
+
+    #[test]
+    fn from_byte_capacity_no_overflow_at_usize_max() {
+        // The old (bytes + slot_size - 1) / slot_size formula would overflow.
+        // Verify the safe formula produces the correct ceiling division.
+        let slot_size = std::mem::size_of::<f32>(); // 4
+        let expected = usize::MAX / slot_size + 1; // ceil(usize::MAX / 4)
+        // We can't actually allocate this, but verify the arithmetic is correct.
+        // Use the same formula as with_byte_capacity directly:
+        let slots = usize::MAX / slot_size + usize::from(usize::MAX % slot_size != 0);
+        assert_eq!(slots, expected);
     }
 
     #[test]

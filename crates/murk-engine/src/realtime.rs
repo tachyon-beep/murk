@@ -657,7 +657,13 @@ impl murk_space::Space for ArcSpaceWrapper {
     }
 
     fn topology_eq(&self, other: &dyn murk_space::Space) -> bool {
-        self.0.topology_eq(other)
+        // Unwrap ArcSpaceWrapper so the inner space's downcast-based
+        // comparison sees the concrete type, not this wrapper.
+        if let Some(w) = (other as &dyn std::any::Any).downcast_ref::<ArcSpaceWrapper>() {
+            self.0.topology_eq(&*w.0)
+        } else {
+            self.0.topology_eq(other)
+        }
     }
 }
 
@@ -941,5 +947,38 @@ mod tests {
         assert!(world.current_epoch() > 0, "should be ticking after reset");
 
         world.shutdown();
+    }
+
+    #[test]
+    fn arc_space_wrapper_topology_eq() {
+        // Two ArcSpaceWrappers around identical Line1D spaces must compare
+        // as topologically equal. Before the fix, the inner downcast saw
+        // ArcSpaceWrapper instead of Line1D and returned false.
+        let a = ArcSpaceWrapper(Arc::new(
+            Line1D::new(10, EdgeBehavior::Absorb).unwrap(),
+        ));
+        let b = ArcSpaceWrapper(Arc::new(
+            Line1D::new(10, EdgeBehavior::Absorb).unwrap(),
+        ));
+        assert!(
+            a.topology_eq(&b),
+            "identical Line1D through ArcSpaceWrapper should be topology-equal"
+        );
+
+        // Different sizes must not match.
+        let c = ArcSpaceWrapper(Arc::new(
+            Line1D::new(20, EdgeBehavior::Absorb).unwrap(),
+        ));
+        assert!(
+            !a.topology_eq(&c),
+            "different Line1D sizes should not be topology-equal"
+        );
+
+        // Comparing ArcSpaceWrapper with a bare Line1D should also work.
+        let bare = Line1D::new(10, EdgeBehavior::Absorb).unwrap();
+        assert!(
+            a.topology_eq(&bare),
+            "ArcSpaceWrapper(Line1D) vs bare Line1D should be topology-equal"
+        );
     }
 }
