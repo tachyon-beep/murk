@@ -28,6 +28,7 @@ pub mod morphological_op;
 pub mod reward;
 pub mod resource_field;
 pub mod scalar_diffusion;
+pub mod wave_propagation;
 
 pub use agent_emission::{AgentEmission, EmissionMode};
 pub use agent_movement::{ActionBuffer, AgentAction, AgentMovementPropagator, Direction};
@@ -41,3 +42,4 @@ pub use morphological_op::{MorphOp, MorphologicalOp};
 pub use resource_field::{RegrowthModel, ResourceField};
 pub use reward::RewardPropagator;
 pub use scalar_diffusion::ScalarDiffusion;
+pub use wave_propagation::WavePropagation;
