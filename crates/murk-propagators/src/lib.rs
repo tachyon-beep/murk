@@ -23,6 +23,7 @@ pub mod fields;
 pub mod flow_field;
 pub mod gradient_compute;
 pub mod identity_copy;
+pub mod morphological_op;
 #[allow(deprecated)]
 pub mod reward;
 pub mod resource_field;
@@ -36,6 +37,7 @@ pub use fields::{reference_fields, AGENT_PRESENCE, HEAT, HEAT_GRADIENT, REWARD, 
 pub use flow_field::FlowField;
 pub use gradient_compute::GradientCompute;
 pub use identity_copy::IdentityCopy;
+pub use morphological_op::{MorphOp, MorphologicalOp};
 pub use resource_field::{RegrowthModel, ResourceField};
 pub use reward::RewardPropagator;
 pub use scalar_diffusion::ScalarDiffusion;
