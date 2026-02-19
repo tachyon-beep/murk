@@ -6,6 +6,7 @@ This package provides:
 """
 
 from murk._murk import (
+    AgentEmission,
     BatchedWorld,
     BoundaryBehavior,
     Command,
@@ -15,15 +16,23 @@ from murk._murk import (
     EdgeBehavior,
     FieldMutability,
     FieldType,
+    FlowField,
+    GradientCompute,
+    IdentityCopy,
+    MorphologicalOp,
+    NoiseInjection,
     ObsEntry,
     ObsPlan,
     PoolKernel,
     PropagatorDef,
     Receipt,
     RegionType,
+    ResourceField,
+    ScalarDiffusion,
     SpaceType,
     StepMetrics,
     TransformType,
+    WavePropagation,
     World,
     WriteMode,
     add_propagator,
@@ -56,6 +65,16 @@ __all__ = [
     "ObsPlan",
     "StepMetrics",
     "PropagatorDef",
+    # Library propagators
+    "AgentEmission",
+    "FlowField",
+    "GradientCompute",
+    "IdentityCopy",
+    "MorphologicalOp",
+    "NoiseInjection",
+    "ResourceField",
+    "ScalarDiffusion",
+    "WavePropagation",
     # Functions
     "add_propagator",
     # Gymnasium

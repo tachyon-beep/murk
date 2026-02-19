@@ -364,11 +364,14 @@ impl TickEngine {
             self.tick_disabled = true;
         }
 
-        // Mark accepted command receipts as rolled back.
+        // Mark accepted command receipts as rolled back, but preserve
+        // receipts that were already rejected (e.g. unsupported command
+        // types) so callers see the original rejection reason.
         for receipt in &mut receipts[accepted_start..] {
-            receipt.accepted = true;
-            receipt.applied_tick_id = None;
-            receipt.reason_code = Some(IngressError::TickRollback);
+            if receipt.accepted {
+                receipt.applied_tick_id = None;
+                receipt.reason_code = Some(IngressError::TickRollback);
+            }
         }
 
         Err(TickError {
@@ -764,7 +767,45 @@ mod tests {
     fn rollback_receipts_generated() {
         let mut engine = failing_engine(0);
 
-        // Submit commands before the failing tick.
+        // Submit an accepted command (SetField) before the failing tick.
+        let cmd = Command {
+            payload: CommandPayload::SetField {
+                coord: smallvec::smallvec![0],
+                field_id: FieldId(0),
+                value: 1.0,
+            },
+            expires_after_tick: TickId(100),
+            source_id: None,
+            source_seq: None,
+            priority_class: 1,
+            arrival_seq: 0,
+        };
+        engine.submit_commands(vec![cmd]);
+
+        let result = engine.execute_tick();
+        match result {
+            Err(TickError {
+                kind: StepError::PropagatorFailed { .. },
+                receipts,
+            }) => {
+                // Accepted receipts must be surfaced with TickRollback.
+                assert_eq!(receipts.len(), 1);
+                assert!(receipts[0].accepted);
+                assert_eq!(receipts[0].reason_code, Some(IngressError::TickRollback));
+            }
+            other => panic!("expected PropagatorFailed with receipts, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rollback_preserves_rejected_receipts() {
+        // Submit an unsupported command (SetParameter → rejected) alongside
+        // the tick. When the propagator fails and triggers rollback, the
+        // rejected receipt must stay accepted=false, not be overwritten
+        // with TickRollback.
+        let mut engine = failing_engine(0);
+
+        // SetParameter is unsupported → should be rejected (accepted=false).
         engine.submit_commands(vec![make_cmd(100)]);
 
         let result = engine.execute_tick();
@@ -773,9 +814,17 @@ mod tests {
                 kind: StepError::PropagatorFailed { .. },
                 receipts,
             }) => {
-                // Receipts must be surfaced, not silently dropped.
                 assert_eq!(receipts.len(), 1);
-                assert_eq!(receipts[0].reason_code, Some(IngressError::TickRollback));
+                // The receipt must remain rejected, NOT overwritten with
+                // accepted=true + TickRollback.
+                assert!(
+                    !receipts[0].accepted,
+                    "rejected receipt should stay rejected after rollback"
+                );
+                assert!(
+                    receipts[0].reason_code != Some(IngressError::TickRollback),
+                    "rejected receipt should not carry TickRollback reason"
+                );
             }
             other => panic!("expected PropagatorFailed with receipts, got {other:?}"),
         }
