@@ -655,6 +655,10 @@ impl murk_space::Space for ArcSpaceWrapper {
     fn instance_id(&self) -> murk_core::SpaceInstanceId {
         self.0.instance_id()
     }
+
+    fn topology_eq(&self, other: &dyn murk_space::Space) -> bool {
+        self.0.topology_eq(other)
+    }
 }
 
 // Delegate optional Space methods if they exist.

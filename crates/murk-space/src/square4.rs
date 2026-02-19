@@ -163,6 +163,14 @@ impl Space for Square4 {
     fn instance_id(&self) -> SpaceInstanceId {
         self.instance_id
     }
+
+    fn topology_eq(&self, other: &dyn Space) -> bool {
+        (other as &dyn std::any::Any)
+            .downcast_ref::<Self>()
+            .map_or(false, |o| {
+                self.rows == o.rows && self.cols == o.cols && self.edge == o.edge
+            })
+    }
 }
 
 #[cfg(test)]

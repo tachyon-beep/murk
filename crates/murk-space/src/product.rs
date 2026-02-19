@@ -421,6 +421,18 @@ impl Space for ProductSpace {
     fn instance_id(&self) -> SpaceInstanceId {
         self.instance_id
     }
+
+    fn topology_eq(&self, other: &dyn Space) -> bool {
+        let Some(o) = (other as &dyn std::any::Any).downcast_ref::<Self>() else {
+            return false;
+        };
+        self.components.len() == o.components.len()
+            && self
+                .components
+                .iter()
+                .zip(o.components.iter())
+                .all(|(a, b)| a.topology_eq(b.as_ref()))
+    }
 }
 
 impl ProductSpace {

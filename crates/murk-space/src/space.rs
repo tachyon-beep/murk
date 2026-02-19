@@ -82,6 +82,17 @@ pub trait Space: Any + Send + Sync + 'static {
     /// observation plan caching to detect when a different space instance
     /// is passed, avoiding stale plan reuse.
     fn instance_id(&self) -> SpaceInstanceId;
+
+    /// Returns `true` if `self` and `other` are topologically equivalent:
+    /// same concrete type and identical behavioral parameters.
+    ///
+    /// Used by [`BatchedEngine`] to verify all worlds share the same
+    /// topology before compiling a shared observation plan.
+    ///
+    /// Implementors should downcast `other` to `Self` and compare all
+    /// behavior-relevant fields (dimensions, edge behavior, etc.).
+    /// Return `false` if the downcast fails (different concrete type).
+    fn topology_eq(&self, other: &dyn Space) -> bool;
 }
 
 impl dyn Space {

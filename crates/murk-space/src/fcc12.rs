@@ -424,6 +424,14 @@ impl Space for Fcc12 {
     fn instance_id(&self) -> SpaceInstanceId {
         self.instance_id
     }
+
+    fn topology_eq(&self, other: &dyn Space) -> bool {
+        (other as &dyn std::any::Any)
+            .downcast_ref::<Self>()
+            .map_or(false, |o| {
+                self.w == o.w && self.h == o.h && self.d == o.d && self.edge == o.edge
+            })
+    }
 }
 
 // ── Private helpers ──────────────────────────────────────────────

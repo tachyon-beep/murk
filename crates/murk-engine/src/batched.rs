@@ -15,8 +15,6 @@
 //! Parallelism (rayon) is deferred to v2. The GIL elimination alone is
 //! the dominant win; adding `par_iter_mut` later is a 3-line change.
 
-use std::any::Any;
-
 use murk_core::command::Command;
 use murk_core::error::ObsError;
 use murk_core::id::TickId;
@@ -143,36 +141,16 @@ impl BatchedEngine {
         }
 
         // Validate all worlds share the same space topology.
-        // TypeId ensures the same concrete Space backend; ndim and cell_count
-        // catch dimension/size mismatches within the same backend family.
+        // topology_eq checks TypeId, dimensions, and behavioral parameters
+        // (e.g. EdgeBehavior) so that spaces like Line1D(10, Absorb) and
+        // Line1D(10, Wrap) are correctly rejected.
         let ref_space = worlds[0].space();
-        let ref_type_id = (ref_space as &dyn Any).type_id();
-        let ref_ndim = ref_space.ndim();
-        let ref_cell_count = ref_space.cell_count();
         for (i, world) in worlds.iter().enumerate().skip(1) {
-            let s = world.space();
-            let tid = (s as &dyn Any).type_id();
-            if tid != ref_type_id {
+            if !ref_space.topology_eq(world.space()) {
                 return Err(BatchError::InvalidArgument {
                     reason: format!(
-                        "world 0 and world {i} have different space types; \
+                        "world 0 and world {i} have incompatible space topologies; \
                          all worlds in a batch must use the same topology"
-                    ),
-                });
-            }
-            let nd = s.ndim();
-            if nd != ref_ndim {
-                return Err(BatchError::InvalidArgument {
-                    reason: format!(
-                        "world 0 has ndim={ref_ndim}, world {i} has ndim={nd}"
-                    ),
-                });
-            }
-            let wc = s.cell_count();
-            if wc != ref_cell_count {
-                return Err(BatchError::InvalidArgument {
-                    reason: format!(
-                        "world 0 has cell_count={ref_cell_count}, world {i} has cell_count={wc}"
                     ),
                 });
             }
@@ -209,6 +187,12 @@ impl BatchedEngine {
         output: &mut [f32],
         mask: &mut [u8],
     ) -> Result<BatchResult, BatchError> {
+        // Pre-flight: validate observation preconditions before mutating
+        // world state. Without this, a late observe failure (no obs plan,
+        // buffer too small) would leave worlds stepped but observations
+        // unextracted — making the error non-atomic.
+        self.validate_observe_buffers(output, mask)?;
+
         let result = self.step_all(commands)?;
 
         // Observe phase: borrow worlds immutably for snapshot collection.
@@ -271,6 +255,35 @@ impl BatchedEngine {
 
         plan.execute_batch(&snap_refs, None, output, mask)
             .map_err(BatchError::Observe)
+    }
+
+    /// Validate that observation preconditions are met (plan exists, buffers
+    /// large enough) without performing any mutation. Called by
+    /// `step_and_observe` before `step_all` to guarantee atomicity.
+    fn validate_observe_buffers(&self, output: &[f32], mask: &[u8]) -> Result<(), BatchError> {
+        if self.obs_plan.is_none() {
+            return Err(BatchError::NoObsPlan);
+        }
+        let n = self.worlds.len();
+        let expected_out = n * self.obs_output_len;
+        let expected_mask = n * self.obs_mask_len;
+        if output.len() < expected_out {
+            return Err(BatchError::InvalidArgument {
+                reason: format!(
+                    "output buffer too small: {} < {expected_out}",
+                    output.len()
+                ),
+            });
+        }
+        if mask.len() < expected_mask {
+            return Err(BatchError::InvalidArgument {
+                reason: format!(
+                    "mask buffer too small: {} < {expected_mask}",
+                    mask.len()
+                ),
+            });
+        }
+        Ok(())
     }
 
     /// Reset a single world by index.
@@ -586,9 +599,78 @@ mod tests {
         match result {
             Err(e) => {
                 let msg = format!("{e}");
-                assert!(msg.contains("different space types"), "got: {msg}");
+                assert!(msg.contains("incompatible space topologies"), "got: {msg}");
             }
             Ok(_) => panic!("expected error for mixed space types"),
         }
+    }
+
+    #[test]
+    fn mixed_edge_behaviors_rejected() {
+        // Line1D(10, Absorb) and Line1D(10, Wrap): same TypeId, ndim, cell_count,
+        // but different edge behavior — must be rejected.
+        let absorb_config = WorldConfig {
+            space: Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()),
+            fields: vec![scalar_field("energy")],
+            propagators: vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))],
+            dt: 0.1,
+            seed: 1,
+            ring_buffer_size: 8,
+            max_ingress_queue: 1024,
+            tick_rate_hz: None,
+            backoff: BackoffConfig::default(),
+        };
+        let wrap_config = WorldConfig {
+            space: Box::new(Line1D::new(10, EdgeBehavior::Wrap).unwrap()),
+            fields: vec![scalar_field("energy")],
+            propagators: vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))],
+            dt: 0.1,
+            seed: 2,
+            ring_buffer_size: 8,
+            max_ingress_queue: 1024,
+            tick_rate_hz: None,
+            backoff: BackoffConfig::default(),
+        };
+
+        let result = BatchedEngine::new(vec![absorb_config, wrap_config], None);
+        assert!(result.is_err(), "expected error for mixed edge behaviors");
+    }
+
+    // ── Atomic step_and_observe ──────────────────────────────
+
+    #[test]
+    fn step_and_observe_no_plan_does_not_step() {
+        // Without an obs plan, step_and_observe should fail *before*
+        // advancing any world state.
+        let configs = vec![make_config(0, 1.0), make_config(1, 1.0)];
+        let mut engine = BatchedEngine::new(configs, None).unwrap();
+
+        let commands = vec![vec![], vec![]];
+        let mut output = vec![0.0f32; 20];
+        let mut mask = vec![0u8; 20];
+        let result = engine.step_and_observe(&commands, &mut output, &mut mask);
+        assert!(matches!(result, Err(BatchError::NoObsPlan)));
+
+        // Worlds must still be at tick 0 — no mutation occurred.
+        assert_eq!(engine.world_tick(0), Some(TickId(0)));
+        assert_eq!(engine.world_tick(1), Some(TickId(0)));
+    }
+
+    #[test]
+    fn step_and_observe_small_buffer_does_not_step() {
+        // Buffer too small should fail before advancing world state.
+        let spec = obs_spec_all_field0();
+        let configs = vec![make_config(0, 1.0), make_config(1, 1.0)];
+        let mut engine = BatchedEngine::new(configs, Some(&spec)).unwrap();
+
+        let commands = vec![vec![], vec![]];
+        let mut output = vec![0.0f32; 5]; // need 20, only 5
+        let mut mask = vec![0u8; 20];
+        let result = engine.step_and_observe(&commands, &mut output, &mut mask);
+        assert!(result.is_err());
+
+        // Worlds must still be at tick 0.
+        assert_eq!(engine.world_tick(0), Some(TickId(0)));
+        assert_eq!(engine.world_tick(1), Some(TickId(0)));
     }
 }

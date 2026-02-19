@@ -427,6 +427,11 @@ mod tests {
             fn instance_id(&self) -> murk_core::SpaceInstanceId {
                 self.0
             }
+            fn topology_eq(&self, other: &dyn Space) -> bool {
+                (other as &dyn std::any::Any)
+                    .downcast_ref::<Self>()
+                    .is_some()
+            }
         }
 
         let mut cfg = valid_config();
