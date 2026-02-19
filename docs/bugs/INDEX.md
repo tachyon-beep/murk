@@ -3,7 +3,7 @@
 Generated 2026-02-17 from static analysis triage of 110 source reports.
 53 confirmed bugs from 64 actionable reports (83% confirmation rate).
 
-**Status (updated 2026-02-19):** 23 fixed, 0 partially fixed, 30 still open.
+**Status (updated 2026-02-20):** 23 fixed, 0 partially fixed, 31 still open.
 
 ## Open Bugs
 
@@ -41,7 +41,7 @@ Generated 2026-02-17 from static analysis triage of 110 source reports.
 | 45 | [space-hex2d-disk-overflow](space-hex2d-disk-overflow.md) | murk-space | compile_hex_disk i64 overflow when radius near i32::MAX | Open |
 | 46 | [space-compliance-ordering-membership](space-compliance-ordering-membership.md) | murk-space | Compliance test checks cardinality/uniqueness but not cell membership | Open |
 
-### Low (6 open)
+### Low (7 open)
 
 | # | Ticket | Crate | Summary | Status |
 |---|--------|-------|---------|--------|
@@ -51,6 +51,7 @@ Generated 2026-02-17 from static analysis triage of 110 source reports.
 | 50 | [core-command-ordering-doc-missing-source-seq](core-command-ordering-doc-missing-source-seq.md) | murk-core | Command ordering doc omits source_seq from sort key description | Open |
 | 51 | [bench-space-ops-degenerate-q-distribution](bench-space-ops-degenerate-q-distribution.md) | murk-bench | LCG multiplier not coprime to modulus; only 4/20 q values exercised | Open |
 | 52 | [script-organize-by-priority-basename-collision](script-organize-by-priority-basename-collision.md) | scripts | --organize-by-priority flattens paths; duplicate basenames overwrite | Open |
+| 53 | [ffi-cbindgen-missing-c-header](ffi-cbindgen-missing-c-header.md) | murk-ffi | No generated C header; C consumers must hand-write 28+ extern declarations | Open |
 
 ## Closed Bugs (23 fixed)
 
@@ -88,7 +89,7 @@ Fixed in commits `02c12f3`, `dd52604`, `c0f5d55`. Tickets moved to [closed/](clo
 |-------|------|--------|-----|------------|
 | murk-engine | 1 | 3 | 0 | 4 |
 | murk-arena | 0 | 1 | 1 | 2 |
-| murk-ffi | 1 | 2 | 0 | 3 |
+| murk-ffi | 1 | 2 | 1 | 4 |
 | murk-python | 1 | 4 | 0 | 5 |
 | murk-propagator | 0 | 0 | 0 | 0 |
 | murk-propagators | 0 | 2 | 0 | 2 |
@@ -99,7 +100,7 @@ Fixed in commits `02c12f3`, `dd52604`, `c0f5d55`. Tickets moved to [closed/](clo
 | murk-bench | 0 | 0 | 1 | 1 |
 | examples | 0 | 1 | 0 | 1 |
 | scripts | 0 | 0 | 1 | 1 |
-| **Total** | **3** | **16** | **6** | **30** |
+| **Total** | **3** | **16** | **7** | **31** |
 
 ## Triage Summaries
 
