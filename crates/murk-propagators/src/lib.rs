@@ -24,6 +24,7 @@ pub mod flow_field;
 pub mod gradient_compute;
 pub mod identity_copy;
 pub mod morphological_op;
+pub mod noise_injection;
 #[allow(deprecated)]
 pub mod reward;
 pub mod resource_field;
@@ -39,6 +40,7 @@ pub use flow_field::FlowField;
 pub use gradient_compute::GradientCompute;
 pub use identity_copy::IdentityCopy;
 pub use morphological_op::{MorphOp, MorphologicalOp};
+pub use noise_injection::{NoiseInjection, NoiseType};
 pub use resource_field::{RegrowthModel, ResourceField};
 pub use reward::RewardPropagator;
 pub use scalar_diffusion::ScalarDiffusion;
