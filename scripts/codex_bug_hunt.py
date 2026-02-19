@@ -635,7 +635,8 @@ def main() -> int:
             if "by-priority" in report.parts or "by-severity" in report.parts:
                 continue
             priority = report_priority(report)
-            dest = output_dir / "by-priority" / priority / report.name
+            rel = report.relative_to(output_dir)
+            dest = output_dir / "by-priority" / priority / rel
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(report, dest)
 
@@ -644,7 +645,8 @@ def main() -> int:
             if "by-priority" in report.parts or "by-severity" in report.parts:
                 continue
             severity = report_severity(report)
-            dest = output_dir / "by-severity" / severity / report.name
+            rel = report.relative_to(output_dir)
+            dest = output_dir / "by-severity" / severity / rel
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(report, dest)
 

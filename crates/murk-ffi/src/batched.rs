@@ -126,19 +126,24 @@ pub extern "C" fn murk_batched_create(
     // SAFETY: config_handles points to n_worlds valid u64 values.
     let handles = unsafe { std::slice::from_raw_parts(config_handles, n_worlds) };
 
-    // Consume all config handles (even on error, configs are consumed).
-    let mut configs_table = configs().lock().unwrap();
+    // Consume ALL config handles unconditionally (even on error).
+    // Remove every handle first, then check for missing ones.
+    let mut configs_table = match configs().lock() {
+        Ok(g) => g,
+        Err(_) => return MurkStatus::InternalError as i32,
+    };
     let mut builders = Vec::with_capacity(n_worlds);
+    let mut any_missing = false;
     for &ch in handles {
         match configs_table.remove(ch) {
             Some(b) => builders.push(b),
-            None => {
-                // Remaining configs are NOT consumed — only already-removed ones.
-                return MurkStatus::InvalidHandle as i32;
-            }
+            None => any_missing = true,
         }
     }
     drop(configs_table);
+    if any_missing {
+        return MurkStatus::InvalidHandle as i32;
+    }
 
     // Build WorldConfigs from builders.
     let mut world_configs = Vec::with_capacity(n_worlds);
@@ -195,7 +200,10 @@ pub extern "C" fn murk_batched_create(
         }
     };
 
-    let handle = BATCHED.lock().unwrap().insert(engine);
+    let handle = match BATCHED.lock() {
+        Ok(mut g) => g.insert(engine),
+        Err(_) => return MurkStatus::InternalError as i32,
+    };
     unsafe { *handle_out = handle };
     MurkStatus::Ok as i32
 }
@@ -219,7 +227,10 @@ pub extern "C" fn murk_batched_step_and_observe(
     obs_mask_len: usize,
     tick_ids_out: *mut u64,
 ) -> i32 {
-    let mut table = BATCHED.lock().unwrap();
+    let mut table = match BATCHED.lock() {
+        Ok(g) => g,
+        Err(_) => return MurkStatus::InternalError as i32,
+    };
     let engine = match table.get_mut(handle) {
         Some(e) => e,
         None => return MurkStatus::InvalidHandle as i32,
@@ -268,7 +279,10 @@ pub extern "C" fn murk_batched_observe_all(
     obs_mask: *mut u8,
     obs_mask_len: usize,
 ) -> i32 {
-    let table = BATCHED.lock().unwrap();
+    let table = match BATCHED.lock() {
+        Ok(g) => g,
+        Err(_) => return MurkStatus::InternalError as i32,
+    };
     let engine = match table.get(handle) {
         Some(e) => e,
         None => return MurkStatus::InvalidHandle as i32,
@@ -291,7 +305,10 @@ pub extern "C" fn murk_batched_observe_all(
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_batched_reset_world(handle: u64, world_index: usize, seed: u64) -> i32 {
-    let mut table = BATCHED.lock().unwrap();
+    let mut table = match BATCHED.lock() {
+        Ok(g) => g,
+        Err(_) => return MurkStatus::InternalError as i32,
+    };
     let engine = match table.get_mut(handle) {
         Some(e) => e,
         None => return MurkStatus::InvalidHandle as i32,
@@ -311,7 +328,10 @@ pub extern "C" fn murk_batched_reset_all(
     seeds: *const u64,
     n_seeds: usize,
 ) -> i32 {
-    let mut table = BATCHED.lock().unwrap();
+    let mut table = match BATCHED.lock() {
+        Ok(g) => g,
+        Err(_) => return MurkStatus::InternalError as i32,
+    };
     let engine = match table.get_mut(handle) {
         Some(e) => e,
         None => return MurkStatus::InvalidHandle as i32,
@@ -337,7 +357,11 @@ pub extern "C" fn murk_batched_reset_all(
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_batched_destroy(handle: u64) -> i32 {
-    match BATCHED.lock().unwrap().remove(handle) {
+    let mut table = match BATCHED.lock() {
+        Ok(g) => g,
+        Err(_) => return MurkStatus::InternalError as i32,
+    };
+    match table.remove(handle) {
         Some(_) => MurkStatus::Ok as i32,
         None => MurkStatus::InvalidHandle as i32,
     }
@@ -349,7 +373,10 @@ pub extern "C" fn murk_batched_destroy(handle: u64) -> i32 {
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_batched_num_worlds(handle: u64) -> usize {
-    let table = BATCHED.lock().unwrap();
+    let table = match BATCHED.lock() {
+        Ok(g) => g,
+        Err(_) => return 0,
+    };
     table.get(handle).map_or(0, |e| e.num_worlds())
 }
 
@@ -359,7 +386,10 @@ pub extern "C" fn murk_batched_num_worlds(handle: u64) -> usize {
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_batched_obs_output_len(handle: u64) -> usize {
-    let table = BATCHED.lock().unwrap();
+    let table = match BATCHED.lock() {
+        Ok(g) => g,
+        Err(_) => return 0,
+    };
     table.get(handle).map_or(0, |e| e.obs_output_len())
 }
 
@@ -369,7 +399,10 @@ pub extern "C" fn murk_batched_obs_output_len(handle: u64) -> usize {
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_batched_obs_mask_len(handle: u64) -> usize {
-    let table = BATCHED.lock().unwrap();
+    let table = match BATCHED.lock() {
+        Ok(g) => g,
+        Err(_) => return 0,
+    };
     table.get(handle).map_or(0, |e| e.obs_mask_len())
 }
 
