@@ -1,23 +1,38 @@
 # Bug Index
 
 Generated 2026-02-17 from static analysis triage of 110 source reports.
-53 confirmed bugs from 64 actionable reports (83% confirmation rate).
+Updated 2026-02-20 with wave-4 deep audit findings (#54-#94).
 
-**Status (updated 2026-02-20):** 23 fixed, 0 partially fixed, 31 still open.
+**Status (updated 2026-02-20):** 31 fixed, 0 partially fixed, 64 open.
 
 ## Open Bugs
 
-### High (4 open)
+### Critical (2 open)
 
 | # | Ticket | Crate | Summary | Status |
 |---|--------|-------|---------|--------|
-| 6 | [engine-ring-latest-spurious-none](engine-ring-latest-spurious-none.md) | murk-engine | `SnapshotRing::latest()` returns None when snapshots exist under overwrite races | Open |
-| 7 | [engine-realtime-shutdown-blocks-on-slow-tick](engine-realtime-shutdown-blocks-on-slow-tick.md) | murk-engine | Shutdown blocks indefinitely with low `tick_rate_hz` due to uninterruptible sleep | Open |
+| 54 | [arena-publish-no-state-guard](arena-publish-no-state-guard.md) | murk-arena | `publish()` callable without `begin_tick()`; generation `+=1` not `checked_add` | Open |
+| 55 | [propagators-diffusion-alpha-unbounded](propagators-diffusion-alpha-unbounded.md) | murk-propagators | Alpha > 1.0 causes sign inversion; zero/negative diffusivity yields max_dt=Infinity | Open |
+
+### High (13 open)
+
+| # | Ticket | Crate | Summary | Status |
+|---|--------|-------|---------|--------|
 | 20 | [ffi-mutex-poisoning-panic-in-extern-c](ffi-mutex-poisoning-panic-in-extern-c.md) | murk-ffi | 43+ `lock().unwrap()` calls in extern "C" functions; poisoned mutex = UB | Open |
 | 23 | [python-propagator-trampoline-leak-on-cstring-error](python-propagator-trampoline-leak-on-cstring-error.md) | murk-python | TrampolineData leaks on CString/add_propagator_handle error paths | Open |
+| 56 | [arena-segment-panics-in-library-code](arena-segment-panics-in-library-code.md) | murk-arena | `Segment::slice` uses `assert!`; `SegmentList` unchecked index; reachable from public API | Open |
+| 57 | [obs-flatbuf-signed-unsigned-cast-corruption](obs-flatbuf-signed-unsigned-cast-corruption.md) | murk-obs | Negative i32 → u32 via `as u32` in flatbuf deserialization silently corrupts data | Open |
+| 58 | [propagators-agent-presence-issues](propagators-agent-presence-issues.md) | murk-propagators | Field bounds (0,1) vs actual markers (1.0,2.0,...); missing `reads_previous` declaration | Open |
+| 59 | [propagators-nan-infinity-validation-gaps](propagators-nan-infinity-validation-gaps.md) | murk-propagators | Coefficient/decay validation uses `< 0.0` which doesn't catch NaN/Infinity | Open |
+| 60 | [propagators-resolve-axis-duplicated](propagators-resolve-axis-duplicated.md) | murk-propagators | `resolve_axis`/`neighbours_flat` copy-pasted across 5 files | Open |
+| 61 | [space-is-multiple-of-msrv-compat](space-is-multiple-of-msrv-compat.md) | murk-space, murk-obs | `u32::is_multiple_of(2)` not stable at MSRV 1.87 (stabilized 1.88) | Open |
+| 62 | [python-trampoline-panic-across-ffi](python-trampoline-panic-across-ffi.md) | murk-python | `python_trampoline` has no `catch_unwind`; panic = UB across extern "C" | Open |
+| 63 | [python-missing-type-stubs-library-propagators](python-missing-type-stubs-library-propagators.md) | murk-python | `.pyi` stubs missing all 9 library propagator classes | Open |
+| 64 | [bench-missing-black-box](bench-missing-black-box.md) | murk-bench | Missing `black_box` + arena benchmark TickId/generation divergence | Open |
+| 65 | [umbrella-snapshot-not-importable](umbrella-snapshot-not-importable.md) | murk | `Snapshot` in return types but not importable through facade crate | Open |
+| 66 | [ffi-callback-propagator-missing-sync](ffi-callback-propagator-missing-sync.md) | murk-ffi | `CallbackPropagator` has `Send` but not `Sync`; unsound if design changes | Open |
 
-
-### Medium (16 open)
+### Medium (38 open)
 
 | # | Ticket | Crate | Summary | Status |
 |---|--------|-------|---------|--------|
@@ -26,11 +41,7 @@ Generated 2026-02-17 from static analysis triage of 110 source reports.
 | 27 | [engine-quickstart-setfield-noop](engine-quickstart-setfield-noop.md) | murk-engine | Quickstart example's SetField injection overwritten by diffusion propagator | Open |
 | 29 | [arena-sparse-segment-memory-leak](arena-sparse-segment-memory-leak.md) | murk-arena | Sparse CoW bump-allocates but never reclaims dead segment memory | Open |
 | 30 | [propagator-agent-movement-tick0-actions](propagator-agent-movement-tick0-actions.md) | murk-propagators | Actions processed on tick 0 alongside initialization | Open |
-| 32 | [propagator-reward-stale-heat-gradient-dependency](propagator-reward-stale-heat-gradient-dependency.md) | murk-propagators | reads() declares HEAT_GRADIENT but step() never reads it | Open |
-| 33 | [obs-flatbuf-silent-u16-truncation](obs-flatbuf-silent-u16-truncation.md) | murk-obs | serialize truncates entry count to u16 but writes all entries | Open |
-| 34 | [obs-geometry-is-interior-missing-dim-check](obs-geometry-is-interior-missing-dim-check.md) | murk-obs | is_interior missing dimension validation; empty center returns true | Open |
 | 35 | [replay-codec-unbounded-alloc-from-wire](replay-codec-unbounded-alloc-from-wire.md) | murk-replay | decode_frame allocates from untrusted u32 lengths; DoS vector | Open |
-| 36 | [replay-hash-empty-snapshot-returns-nonzero](replay-hash-empty-snapshot-returns-nonzero.md) | murk-replay | Doc says returns 0 for no fields but returns FNV_OFFSET | Open |
 | 37 | [ffi-accessor-ambiguous-zero-return](ffi-accessor-ambiguous-zero-return.md) | murk-ffi | World accessors return 0 for invalid handles, indistinguishable from valid state | Open |
 | 38 | [ffi-handle-generation-wraparound](ffi-handle-generation-wraparound.md) | murk-ffi | u32 generation wraps after 4B cycles; ABA handle resurrection | Open |
 | 39 | [python-metrics-race-between-step-and-propagator-query](python-metrics-race-between-step-and-propagator-query.md) | murk-python | Per-propagator timings fetched via separate FFI call; race with concurrent step | Open |
@@ -40,22 +51,49 @@ Generated 2026-02-17 from static analysis triage of 110 source reports.
 | 43 | [example-warmup-ticks-shorten-episode-length](example-warmup-ticks-shorten-episode-length.md) | examples | Warmup ticks consume global tick budget; episodes 27-31% shorter than MAX_STEPS | Open |
 | 45 | [space-hex2d-disk-overflow](space-hex2d-disk-overflow.md) | murk-space | compile_hex_disk i64 overflow when radius near i32::MAX | Open |
 | 46 | [space-compliance-ordering-membership](space-compliance-ordering-membership.md) | murk-space | Compliance test checks cardinality/uniqueness but not cell membership | Open |
+| 67 | [engine-cell-count-u32-truncation](engine-cell-count-u32-truncation.md) | murk-engine | `cell_count as u32` silent truncation; 65536x65536 grid overflows to 0 | Open |
+| 68 | [engine-egress-epoch-tick-mismatch](engine-egress-epoch-tick-mismatch.md) | murk-engine | Egress uses `epoch_counter.current()` not `snapshot.tick_id()` for metadata | Open |
+| 69 | [engine-observe-buffer-bounds](engine-observe-buffer-bounds.md) | murk-engine | `observe()` panics on oversized return; `observe_agents()` silently truncates | Open |
+| 70 | [engine-reset-wrong-error-variant](engine-reset-wrong-error-variant.md) | murk-engine | Reset returns `InvalidTickRate { value: 0.0 }` when engine recovery fails | Open |
+| 71 | [obs-normalize-inverted-range](obs-normalize-inverted-range.md) | murk-obs | `Normalize { min > max }` silently collapses all data to {0.0, 1.0} | Open |
+| 72 | [replay-write-path-u32-truncation](replay-write-path-u32-truncation.md) | murk-replay | 7 `as u32` casts on write path without overflow check; silent data corruption | Open |
+| 73 | [replay-expires-arrival-seq-not-serialized](replay-expires-arrival-seq-not-serialized.md) | murk-replay | `expires_after_tick` and `arrival_seq` silently discarded; replay may diverge | Open |
+| 74 | [python-cstr-from-ptr-potential-ub](python-cstr-from-ptr-potential-ub.md) | murk-python | `CStr::from_ptr` on stack buffer; UB if FFI writes exactly 256 bytes | Open |
+| 75 | [python-reset-all-no-seeds-validation](python-reset-all-no-seeds-validation.md) | murk-python | `BatchedWorld::reset_all()` doesn't validate `seeds.len() == num_worlds` | Open |
+| 76 | [core-fieldtype-zero-dims-constructible](core-fieldtype-zero-dims-constructible.md) | murk-core | `FieldType::Vector { dims: 0 }` constructible; `FieldDef.bounds` no min<=max validation | Open |
+| 77 | [arena-descriptor-clone-per-tick](arena-descriptor-clone-per-tick.md) | murk-arena | `publish()` clones `FieldDescriptor` (String per field) every tick | Open |
+| 78 | [ffi-config-not-consumed-on-null](ffi-config-not-consumed-on-null.md) | murk-ffi | `murk_lockstep_create` leaks config handle on null `world_out`; contradicts docs | Open |
+| 79 | [ffi-inconsistent-mutex-poisoning](ffi-inconsistent-mutex-poisoning.md) | murk-ffi | `batched.rs` handles poisoning gracefully; `world.rs`/`config.rs`/`obs.rs` panic | Open |
+| 80 | [ffi-usize-in-repr-c-struct](ffi-usize-in-repr-c-struct.md) | murk-ffi | `usize` in `#[repr(C)]` structs not ABI-portable; no compile-time size assertions | Open |
+| 81 | [ffi-obs-conversion-duplicated](ffi-obs-conversion-duplicated.md) | murk-ffi | ObsEntry conversion logic duplicated between `obs.rs` and `batched.rs` | Open |
+| 82 | [ffi-obsplan-lock-ordering](ffi-obsplan-lock-ordering.md) | murk-ffi | `OBS_PLANS` held during full observation execution; undocumented lock ordering | Open |
+| 83 | [obs-per-agent-scratch-allocation](obs-per-agent-scratch-allocation.md) | murk-obs | Per-agent Vec alloc in pooled gather; fixed entries re-gathered per agent | Open |
+| 84 | [arena-cell-count-components-overflow](arena-cell-count-components-overflow.md) | murk-arena | `cell_count * components` can overflow u32 silently in descriptor | Open |
+| 85 | [propagator-scratch-bytes-slots-mismatch](propagator-scratch-bytes-slots-mismatch.md) | murk-propagator | `scratch_bytes()` returns bytes but `ScratchRegion::new()` takes f32 slot count | Open |
+| 86 | [python-close-skips-obsplan-destroy](python-close-skips-obsplan-destroy.md) | murk-python | `MurkEnv.close()` destroys World but not ObsPlan; `BatchedVecEnv` no double-close guard | Open |
+| 87 | [python-batched-vecenv-missing-spaces](python-batched-vecenv-missing-spaces.md) | murk-python | `BatchedVecEnv` missing `observation_space`/`action_space`; breaks SB3 compat | Open |
+| 88 | [space-regionplan-public-fields](space-regionplan-public-fields.md) | murk-space | `RegionPlan` fields all pub; `ProductMetric::Weighted` panics in library code | Open |
+| 89 | [obs-canonical-rank-negative-coord](obs-canonical-rank-negative-coord.md) | murk-obs | Negative coord wraps via `as usize`; may read wrong field offset | Open |
 
-### Low (7 open)
+### Low (11 open)
 
 | # | Ticket | Crate | Summary | Status |
 |---|--------|-------|---------|--------|
 | 47 | [arena-scratch-alloc-overflow](arena-scratch-alloc-overflow.md) | murk-arena | Unchecked `*2` growth can overflow usize (practically unreachable on 64-bit) | Open |
 | 48 | [obs-metadata-doc-says-six-fields](obs-metadata-doc-says-six-fields.md) | murk-obs | Doc says "six fields" but struct has five | Open |
-| 49 | [replay-compare-sentinel-zero-divergence](replay-compare-sentinel-zero-divergence.md) | murk-replay | Length/presence mismatches reported with hardcoded 0.0 sentinel | Open |
 | 50 | [core-command-ordering-doc-missing-source-seq](core-command-ordering-doc-missing-source-seq.md) | murk-core | Command ordering doc omits source_seq from sort key description | Open |
 | 51 | [bench-space-ops-degenerate-q-distribution](bench-space-ops-degenerate-q-distribution.md) | murk-bench | LCG multiplier not coprime to modulus; only 4/20 q values exercised | Open |
 | 52 | [script-organize-by-priority-basename-collision](script-organize-by-priority-basename-collision.md) | scripts | --organize-by-priority flattens paths; duplicate basenames overwrite | Open |
 | 53 | [ffi-cbindgen-missing-c-header](ffi-cbindgen-missing-c-header.md) | murk-ffi | No generated C header; C consumers must hand-write 28+ extern declarations | Open |
+| 90 | [workspace-unused-indexmap-deps](workspace-unused-indexmap-deps.md) | murk-core, murk-replay | `indexmap` dependency compiled but never used in either crate | Open |
+| 91 | [workspace-missing-must-use](workspace-missing-must-use.md) | murk-core, murk-arena, murk-propagator | Missing `#[must_use]` on set operations, ID generators, guards | Open |
+| 92 | [workspace-error-types-missing-partialeq](workspace-error-types-missing-partialeq.md) | murk-core, murk-engine, murk-space, murk-propagator | Error types missing `PartialEq`/`Eq`; forces `matches!()` in tests | Open |
+| 93 | [replay-writer-no-flush-on-drop](replay-writer-no-flush-on-drop.md) | murk-replay | `ReplayWriter` has no `Drop` impl to flush; buffered data silently lost | Open |
+| 94 | [propagators-performance-hotspots](propagators-performance-hotspots.md) | murk-propagators | Per-cell BFS alloc, O(n) agent scan, wasted Box-Muller samples | Open |
 
-## Closed Bugs (23 fixed)
+## Closed Bugs (31 fixed)
 
-Fixed in commits `02c12f3`, `dd52604`, `c0f5d55`. Tickets moved to [closed/](closed/).
+Tickets moved to [closed/](closed/).
 
 | # | Ticket | Crate | Summary | Fix Commit |
 |---|--------|-------|---------|------------|
@@ -82,29 +120,43 @@ Fixed in commits `02c12f3`, `dd52604`, `c0f5d55`. Tickets moved to [closed/](clo
 | 12 | [arena-missing-segment-size-validation](closed/arena-missing-segment-size-validation.md) | murk-arena | `segment_size` power-of-two/minimum constraints documented but never enforced | (this session) |
 | 9 | [engine-backoff-config-not-validated](closed/engine-backoff-config-not-validated.md) | murk-engine | `BackoffConfig` invariants not checked; `initial_max_skew > max_skew_cap` allowed | (this session) |
 | 4 | [engine-adaptive-backoff-output-unused](closed/engine-adaptive-backoff-output-unused.md) | murk-engine | Adaptive backoff computes output but result is discarded; dead code in practice | (this session) |
+| 6 | [engine-ring-latest-spurious-none](closed/engine-ring-latest-spurious-none.md) | murk-engine | `SnapshotRing::latest()` returns None when snapshots exist under overwrite races | 0560090 |
+| 7 | [engine-realtime-shutdown-blocks-on-slow-tick](closed/engine-realtime-shutdown-blocks-on-slow-tick.md) | murk-engine | Shutdown blocks indefinitely with low `tick_rate_hz` due to uninterruptible sleep | 0560090 |
+| 32 | [propagator-reward-stale-heat-gradient-dependency](closed/propagator-reward-stale-heat-gradient-dependency.md) | murk-propagators | reads() declares HEAT_GRADIENT but step() never reads it | f456f7b |
+| 33 | [obs-flatbuf-silent-u16-truncation](closed/obs-flatbuf-silent-u16-truncation.md) | murk-obs | serialize truncates entry count to u16 but writes all entries | 1ce373d |
+| 34 | [obs-geometry-is-interior-missing-dim-check](closed/obs-geometry-is-interior-missing-dim-check.md) | murk-obs | is_interior missing dimension validation; empty center returns true | 1ce373d |
+| 36 | [replay-hash-empty-snapshot-returns-nonzero](closed/replay-hash-empty-snapshot-returns-nonzero.md) | murk-replay | Doc says returns 0 for no fields but returns FNV_OFFSET | 0560090 |
+| 49 | [replay-compare-sentinel-zero-divergence](closed/replay-compare-sentinel-zero-divergence.md) | murk-replay | Length/presence mismatches reported with hardcoded 0.0 sentinel | 0560090 |
+| — | [propagator-scratch-byte-capacity-rounds-down](closed/propagator-scratch-byte-capacity-rounds-down.md) | murk-propagator | `with_byte_capacity()` floor division under-allocates non-aligned byte counts | f456f7b |
 
 ## By Crate (open only)
 
-| Crate | High | Medium | Low | Total Open |
-|-------|------|--------|-----|------------|
-| murk-engine | 1 | 3 | 0 | 4 |
-| murk-arena | 0 | 1 | 1 | 2 |
-| murk-ffi | 1 | 2 | 1 | 4 |
-| murk-python | 1 | 4 | 0 | 5 |
-| murk-propagator | 0 | 0 | 0 | 0 |
-| murk-propagators | 0 | 2 | 0 | 2 |
-| murk-obs | 0 | 2 | 1 | 3 |
-| murk-replay | 0 | 2 | 1 | 3 |
-| murk-space | 1 | 2 | 0 | 3 |
-| murk-core | 0 | 0 | 1 | 1 |
-| murk-bench | 0 | 0 | 1 | 1 |
-| examples | 0 | 1 | 0 | 1 |
-| scripts | 0 | 0 | 1 | 1 |
-| **Total** | **3** | **16** | **7** | **31** |
+| Crate | Critical | High | Medium | Low | Total Open |
+|-------|----------|------|--------|-----|------------|
+| murk-engine | 0 | 0 | 7 | 0 | 7 |
+| murk-arena | 1 | 1 | 3 | 1 | 6 |
+| murk-ffi | 0 | 2 | 7 | 1 | 10 |
+| murk-python | 0 | 3 | 8 | 0 | 11 |
+| murk-propagator | 0 | 0 | 1 | 0 | 1 |
+| murk-propagators | 1 | 3 | 1 | 1 | 6 |
+| murk-obs | 0 | 1 | 3 | 1 | 5 |
+| murk-replay | 0 | 0 | 3 | 1 | 4 |
+| murk-space | 0 | 1 | 3 | 0 | 4 |
+| murk-core | 0 | 0 | 1 | 1 | 2 |
+| murk-bench | 0 | 1 | 0 | 1 | 2 |
+| murk (umbrella) | 0 | 1 | 0 | 0 | 1 |
+| examples | 0 | 0 | 1 | 0 | 1 |
+| scripts | 0 | 0 | 0 | 1 | 1 |
+| workspace (cross-crate) | 0 | 0 | 0 | 3 | 3 |
+| **Total** | **2** | **13** | **38** | **11** | **64** |
+
+Note: Workspace-wide tickets (#90-#92) affect multiple crates and are counted once under "workspace".
 
 ## Triage Summaries
 
-Detailed per-batch classification (confirmed/false-positive/design-as-intended) with rationale:
+Detailed per-batch classification (confirmed/false-positive/design-as-intended) with rationale.
+These are point-in-time snapshots from the initial triage (2026-02-17); some bugs
+referenced as "confirmed" have since been fixed. See the Closed table above for current status.
 
 - [engine-TRIAGE-SUMMARY](engine-TRIAGE-SUMMARY.md) — 15 reports → 11 confirmed, 4 skipped
 - [arena-TRIAGE-SUMMARY](arena-TRIAGE-SUMMARY.md) — 13 reports → 8 confirmed, 4 skipped, 1 doc-only
