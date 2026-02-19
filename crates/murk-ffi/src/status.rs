@@ -56,6 +56,8 @@ pub enum MurkStatus {
     BufferTooSmall = -19,
     /// Internal error (e.g. poisoned mutex after a prior panic).
     InternalError = -20,
+    /// Command type not supported by the tick executor.
+    UnsupportedCommand = -21,
 }
 
 impl From<&StepError> for MurkStatus {
@@ -105,6 +107,7 @@ impl From<&IngressError> for MurkStatus {
             IngressError::TickRollback => MurkStatus::TickRollback,
             IngressError::TickDisabled => MurkStatus::TickDisabled,
             IngressError::ShuttingDown => MurkStatus::ShuttingDown,
+            IngressError::UnsupportedCommand => MurkStatus::UnsupportedCommand,
         }
     }
 }
@@ -137,6 +140,7 @@ mod tests {
         assert_eq!(MurkStatus::InvalidArgument as i32, -18);
         assert_eq!(MurkStatus::BufferTooSmall as i32, -19);
         assert_eq!(MurkStatus::InternalError as i32, -20);
+        assert_eq!(MurkStatus::UnsupportedCommand as i32, -21);
     }
 
     #[test]
@@ -222,6 +226,10 @@ mod tests {
         assert_eq!(
             MurkStatus::from(&IngressError::ShuttingDown),
             MurkStatus::ShuttingDown
+        );
+        assert_eq!(
+            MurkStatus::from(&IngressError::UnsupportedCommand),
+            MurkStatus::UnsupportedCommand
         );
     }
 

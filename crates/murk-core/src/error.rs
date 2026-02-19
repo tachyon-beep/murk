@@ -127,6 +127,9 @@ pub enum IngressError {
     TickDisabled,
     /// The world is shutting down (`MURK_ERROR_SHUTTING_DOWN`).
     ShuttingDown,
+    /// The command type is not supported by the current tick executor
+    /// (`MURK_ERROR_UNSUPPORTED_COMMAND`).
+    UnsupportedCommand,
 }
 
 impl fmt::Display for IngressError {
@@ -137,6 +140,7 @@ impl fmt::Display for IngressError {
             Self::TickRollback => write!(f, "tick rolled back"),
             Self::TickDisabled => write!(f, "ticking disabled"),
             Self::ShuttingDown => write!(f, "world is shutting down"),
+            Self::UnsupportedCommand => write!(f, "command type not supported"),
         }
     }
 }

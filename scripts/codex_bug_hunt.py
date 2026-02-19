@@ -23,6 +23,7 @@ Usage examples:
     # Include test files
     python scripts/codex_bug_hunt.py --include-tests --extensions rs,py
 """
+
 from __future__ import annotations
 
 import argparse
@@ -60,7 +61,7 @@ LANG_HINTS: dict[str, str] = {
         "- Arithmetic overflow (checked_add/checked_mul missing, unchecked * 2)\n"
         "- Unsafe blocks: raw pointer derefs, from_raw without matching into_raw, "
         "transmute misuse\n"
-        "- extern \"C\" functions: panic across FFI boundary = UB, "
+        '- extern "C" functions: panic across FFI boundary = UB, '
         "mutex .unwrap() in extern C\n"
         "- Iterator::zip silently truncating mismatched lengths\n"
         "- Off-by-one in slice indexing, capacity vs cursor confusion\n"
@@ -96,7 +97,7 @@ CRATE_HINTS: dict[str, str] = {
         "non-atomic multi-atomic reads, ring overwrite races."
     ),
     "murk-ffi": (
-        "This crate provides the C FFI surface.  Every function is extern \"C\". "
+        'This crate provides the C FFI surface.  Every function is extern "C". '
         "Watch for: panic across FFI boundary (instant UB), mutex .unwrap() in "
         "extern C, null pointer dereference in trampolines, ambiguous zero "
         "returns conflating error with valid state, handle generation ABA."
@@ -210,7 +211,7 @@ EXCLUDE_DIRS = {
     "node_modules",
     "target",
     "book",
-    ".beads",
+    ".filigree",
 }
 
 
@@ -340,9 +341,7 @@ def run_codex_once(
         stderr = result.stderr.strip()
         if len(stderr) > 500:
             stderr = stderr[:500] + "... (truncated)"
-        raise RuntimeError(
-            f"codex exec failed (exit {result.returncode}): {stderr}"
-        )
+        raise RuntimeError(f"codex exec failed (exit {result.returncode}): {stderr}")
 
 
 def run_claude_once(
@@ -351,9 +350,12 @@ def run_claude_once(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
         "claude",
-        "-p", prompt,
-        "--output-format", "text",
-        "--max-turns", "1",
+        "-p",
+        prompt,
+        "--output-format",
+        "text",
+        "--max-turns",
+        "1",
     ]
     if model:
         cmd.extend(["--model", model])
@@ -365,9 +367,7 @@ def run_claude_once(
         stderr = result.stderr.strip()
         if len(stderr) > 500:
             stderr = stderr[:500] + "... (truncated)"
-        raise RuntimeError(
-            f"claude exec failed (exit {result.returncode}): {stderr}"
-        )
+        raise RuntimeError(f"claude exec failed (exit {result.returncode}): {stderr}")
     output_path.write_text(result.stdout, encoding="utf-8")
 
 
@@ -404,8 +404,7 @@ def run_with_retries(
                 break
             delay = retry_delay_s * (2 ** (attempt - 1))
             print(
-                f"  retry {attempt}/{max_attempts - 1} for "
-                f"{output_path.name}: {exc}",
+                f"  retry {attempt}/{max_attempts - 1} for {output_path.name}: {exc}",
                 file=sys.stderr,
             )
             time.sleep(delay)
@@ -534,9 +533,7 @@ def main() -> int:
         return 1
 
     if shutil.which(args.backend) is None:
-        print(
-            f"error: {args.backend} CLI not found on PATH", file=sys.stderr
-        )
+        print(f"error: {args.backend} CLI not found on PATH", file=sys.stderr)
         return 1
 
     repo_root = Path(__file__).resolve().parents[1]
@@ -610,10 +607,7 @@ def main() -> int:
             extra_message=args.extra_message,
         )
         crate = detect_crate(file_path) or "—"
-        print(
-            f"[{idx}/{len(files)}] {file_path.relative_to(repo_root)} "
-            f"({crate})"
-        )
+        print(f"[{idx}/{len(files)}] {file_path.relative_to(repo_root)} ({crate})")
         try:
             run_with_retries(
                 repo_root=repo_root,

@@ -237,9 +237,8 @@ impl TickEngine {
                 | CommandPayload::Spawn { .. }
                 | CommandPayload::Despawn { .. }
                 | CommandPayload::Custom { .. } => {
-                    // Command type not yet implemented — reject honestly
-                    // rather than silently reporting success.
                     receipt.accepted = false;
+                    receipt.reason_code = Some(IngressError::UnsupportedCommand);
                 }
             }
         }
@@ -821,9 +820,10 @@ mod tests {
                     !receipts[0].accepted,
                     "rejected receipt should stay rejected after rollback"
                 );
-                assert!(
-                    receipts[0].reason_code != Some(IngressError::TickRollback),
-                    "rejected receipt should not carry TickRollback reason"
+                assert_eq!(
+                    receipts[0].reason_code,
+                    Some(IngressError::UnsupportedCommand),
+                    "rejected receipt must preserve UnsupportedCommand reason after rollback"
                 );
             }
             other => panic!("expected PropagatorFailed with receipts, got {other:?}"),
@@ -980,12 +980,18 @@ mod tests {
         let result = engine.execute_tick().unwrap();
         assert_eq!(result.receipts.len(), 2);
 
-        // Non-SetField commands must NOT report as applied.
+        // Non-SetField commands must NOT report as applied and must carry
+        // UnsupportedCommand reason so callers can distinguish the failure mode.
         for receipt in &result.receipts {
             assert!(!receipt.accepted, "unimplemented command type must be rejected");
             assert_eq!(
                 receipt.applied_tick_id, None,
                 "unimplemented command must not have applied_tick_id"
+            );
+            assert_eq!(
+                receipt.reason_code,
+                Some(IngressError::UnsupportedCommand),
+                "rejected unsupported command must carry UnsupportedCommand reason"
             );
         }
     }
