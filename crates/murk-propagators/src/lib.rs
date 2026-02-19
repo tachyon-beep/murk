@@ -14,6 +14,7 @@
 #![deny(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]
 
+pub mod agent_emission;
 #[allow(deprecated)]
 pub mod agent_movement;
 #[allow(deprecated)]
@@ -26,6 +27,7 @@ pub mod identity_copy;
 pub mod reward;
 pub mod scalar_diffusion;
 
+pub use agent_emission::{AgentEmission, EmissionMode};
 pub use agent_movement::{ActionBuffer, AgentAction, AgentMovementPropagator, Direction};
 pub use diffusion::DiffusionPropagator;
 #[allow(deprecated)]
