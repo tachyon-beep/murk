@@ -72,7 +72,6 @@ impl StepMetrics {
 
 impl StepMetrics {
     /// Build from FFI MurkStepMetrics + per-propagator queries.
-    #[allow(unsafe_code)]
     pub(crate) fn from_ffi(m: &MurkStepMetrics, world_handle: u64) -> Self {
         let mut propagator_us = Vec::with_capacity(m.n_propagators as usize);
         for i in 0..m.n_propagators {
@@ -86,9 +85,9 @@ impl StepMetrics {
                 &mut us,
             );
             if rc == 0 {
-                let name = unsafe { CStr::from_ptr(name_buf.as_ptr() as *const std::ffi::c_char) }
-                    .to_string_lossy()
-                    .into_owned();
+                let name = CStr::from_bytes_until_nul(&name_buf)
+                    .map(|c| c.to_string_lossy().into_owned())
+                    .unwrap_or_else(|_| "<unknown>".to_string());
                 propagator_us.push((name, us));
             }
         }

@@ -156,8 +156,10 @@ class BatchedVecEnv:
         )
 
     def close(self) -> None:
-        """Destroy the batched engine."""
-        self._engine.destroy()
+        """Destroy the batched engine (idempotent)."""
+        if self._engine is not None:
+            self._engine.destroy()
+            self._engine = None
 
     # ── Override hooks ───────────────────────────────────────────
 

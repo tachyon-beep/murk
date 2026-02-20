@@ -305,6 +305,13 @@ impl ObsPlan {
         self.cached_mask_len
     }
 
+    /// Explicitly destroy the observation plan handle.
+    fn destroy(&mut self, py: Python<'_>) {
+        if let Some(h) = self.handle.take() {
+            py.detach(|| murk_obsplan_destroy(h));
+        }
+    }
+
     fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
         slf
     }
@@ -317,9 +324,7 @@ impl ObsPlan {
         _exc_val: Option<&Bound<'_, PyAny>>,
         _exc_tb: Option<&Bound<'_, PyAny>>,
     ) {
-        if let Some(h) = self.handle.take() {
-            py.detach(|| murk_obsplan_destroy(h));
-        }
+        self.destroy(py);
     }
 }
 

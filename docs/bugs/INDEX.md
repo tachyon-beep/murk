@@ -3,7 +3,7 @@
 Generated 2026-02-17 from static analysis triage of 110 source reports.
 Updated 2026-02-20 with wave-4 deep audit findings (#54-#94).
 
-**Status (updated 2026-02-20):** 66 fixed, 0 partially fixed, 29 open.
+**Status (updated 2026-02-20):** 72 fixed, 0 partially fixed, 23 open.
 
 ## Open Bugs
 
@@ -13,18 +13,16 @@ Updated 2026-02-20 with wave-4 deep audit findings (#54-#94).
 |---|--------|-------|---------|--------|
 | — | (none) | — | — | — |
 
-### High (6 open)
+### High (4 open)
 
 | # | Ticket | Crate | Summary | Status |
 |---|--------|-------|---------|--------|
 | 20 | [ffi-mutex-poisoning-panic-in-extern-c](ffi-mutex-poisoning-panic-in-extern-c.md) | murk-ffi | 43+ `lock().unwrap()` calls in extern "C" functions; poisoned mutex = UB | Open |
-| 23 | [python-propagator-trampoline-leak-on-cstring-error](python-propagator-trampoline-leak-on-cstring-error.md) | murk-python | TrampolineData leaks on CString/add_propagator_handle error paths | Open |
-| 62 | [python-trampoline-panic-across-ffi](python-trampoline-panic-across-ffi.md) | murk-python | `python_trampoline` has no `catch_unwind`; panic = UB across extern "C" | Open |
 | 63 | [python-missing-type-stubs-library-propagators](python-missing-type-stubs-library-propagators.md) | murk-python | `.pyi` stubs missing all 9 library propagator classes | Open |
 | 64 | [bench-missing-black-box](bench-missing-black-box.md) | murk-bench | Missing `black_box` + arena benchmark TickId/generation divergence | Open |
 | 66 | [ffi-callback-propagator-missing-sync](ffi-callback-propagator-missing-sync.md) | murk-ffi | `CallbackPropagator` has `Send` but not `Sync`; unsound if design changes | Open |
 
-### Medium (20 open)
+### Medium (16 open)
 
 | # | Ticket | Crate | Summary | Status |
 |---|--------|-------|---------|--------|
@@ -34,11 +32,8 @@ Updated 2026-02-20 with wave-4 deep audit findings (#54-#94).
 | 38 | [ffi-handle-generation-wraparound](ffi-handle-generation-wraparound.md) | murk-ffi | u32 generation wraps after 4B cycles; ABA handle resurrection | Open |
 | 39 | [python-metrics-race-between-step-and-propagator-query](python-metrics-race-between-step-and-propagator-query.md) | murk-python | Per-propagator timings fetched via separate FFI call; race with concurrent step | Open |
 | 40 | [python-vecenv-false-sb3-compatibility-claim](python-vecenv-false-sb3-compatibility-claim.md) | murk-python | MurkVecEnv claims SB3 compatibility but follows Gymnasium conventions | Open |
-| 41 | [python-command-docstring-expiry-default-mismatch](python-command-docstring-expiry-default-mismatch.md) | murk-python | Docstring says "0 = never" but default is u64::MAX; 0 means immediate expiry | Open |
 | 42 | [python-error-hints-reference-unexposed-config](python-error-hints-reference-unexposed-config.md) | murk-python | Error hints reference config knobs not exposed in Python API | Open |
 | 43 | [example-warmup-ticks-shorten-episode-length](example-warmup-ticks-shorten-episode-length.md) | examples | Warmup ticks consume global tick budget; episodes 27-31% shorter than MAX_STEPS | Open |
-| 74 | [python-cstr-from-ptr-potential-ub](python-cstr-from-ptr-potential-ub.md) | murk-python | `CStr::from_ptr` on stack buffer; UB if FFI writes exactly 256 bytes | Open |
-| 75 | [python-reset-all-no-seeds-validation](python-reset-all-no-seeds-validation.md) | murk-python | `BatchedWorld::reset_all()` doesn't validate `seeds.len() == num_worlds` | Open |
 | 77 | [arena-descriptor-clone-per-tick](arena-descriptor-clone-per-tick.md) | murk-arena | `publish()` clones `FieldDescriptor` (String per field) every tick | Open |
 | 78 | [ffi-config-not-consumed-on-null](ffi-config-not-consumed-on-null.md) | murk-ffi | `murk_lockstep_create` leaks config handle on null `world_out`; contradicts docs | Open |
 | 79 | [ffi-inconsistent-mutex-poisoning](ffi-inconsistent-mutex-poisoning.md) | murk-ffi | `batched.rs` handles poisoning gracefully; `world.rs`/`config.rs`/`obs.rs` panic | Open |
@@ -46,7 +41,6 @@ Updated 2026-02-20 with wave-4 deep audit findings (#54-#94).
 | 81 | [ffi-obs-conversion-duplicated](ffi-obs-conversion-duplicated.md) | murk-ffi | ObsEntry conversion logic duplicated between `obs.rs` and `batched.rs` | Open |
 | 82 | [ffi-obsplan-lock-ordering](ffi-obsplan-lock-ordering.md) | murk-ffi | `OBS_PLANS` held during full observation execution; undocumented lock ordering | Open |
 | 83 | [obs-per-agent-scratch-allocation](obs-per-agent-scratch-allocation.md) | murk-obs | Per-agent Vec alloc in pooled gather; fixed entries re-gathered per agent | Open |
-| 86 | [python-close-skips-obsplan-destroy](python-close-skips-obsplan-destroy.md) | murk-python | `MurkEnv.close()` destroys World but not ObsPlan; `BatchedVecEnv` no double-close guard | Open |
 | 87 | [python-batched-vecenv-missing-spaces](python-batched-vecenv-missing-spaces.md) | murk-python | `BatchedVecEnv` missing `observation_space`/`action_space`; breaks SB3 compat | Open |
 
 ### Low (3 open)
@@ -57,12 +51,18 @@ Updated 2026-02-20 with wave-4 deep audit findings (#54-#94).
 | 52 | [script-organize-by-priority-basename-collision](script-organize-by-priority-basename-collision.md) | scripts | --organize-by-priority flattens paths; duplicate basenames overwrite | Open |
 | 53 | [ffi-cbindgen-missing-c-header](ffi-cbindgen-missing-c-header.md) | murk-ffi | No generated C header; C consumers must hand-write 28+ extern declarations | Open |
 
-## Closed Bugs (66 fixed)
+## Closed Bugs (72 fixed)
 
 Tickets moved to [closed/](closed/).
 
 | # | Ticket | Crate | Summary | Fix Commit |
 |---|--------|-------|---------|------------|
+| 62 | [python-trampoline-panic-across-ffi](closed/python-trampoline-panic-across-ffi.md) | murk-python | `catch_unwind` added to `python_trampoline`; panic no longer crosses extern "C" | (this session) |
+| 23 | [python-propagator-trampoline-leak-on-cstring-error](closed/python-propagator-trampoline-leak-on-cstring-error.md) | murk-python | `CString::new` moved before `Box::into_raw`; cleanup on `add_propagator_handle` failure | (this session) |
+| 74 | [python-cstr-from-ptr-potential-ub](closed/python-cstr-from-ptr-potential-ub.md) | murk-python | `CStr::from_ptr` replaced with safe `CStr::from_bytes_until_nul` | (this session) |
+| 75 | [python-reset-all-no-seeds-validation](closed/python-reset-all-no-seeds-validation.md) | murk-python | `reset_all()` validates `seeds.len() == num_worlds` before FFI call | (this session) |
+| 86 | [python-close-skips-obsplan-destroy](closed/python-close-skips-obsplan-destroy.md) | murk-python | `close()` destroys ObsPlan before World; `BatchedVecEnv` guards double-close | (this session) |
+| 41 | [python-command-docstring-expiry-default-mismatch](closed/python-command-docstring-expiry-default-mismatch.md) | murk-python | Docstring updated: default is u64::MAX (never), 0 = expires immediately | (this session) |
 | 60 | [propagators-resolve-axis-duplicated](closed/propagators-resolve-axis-duplicated.md) | murk-propagators | `resolve_axis`/`neighbours_flat` extracted to `grid_helpers.rs`; 5 files de-duplicated | (this session) |
 | 30 | [propagator-agent-movement-tick0-actions](closed/propagator-agent-movement-tick0-actions.md) | murk-propagators | Early return after tick-0 initialization prevents action processing on init tick | (this session) |
 | 94 | [propagators-performance-hotspots](closed/propagators-performance-hotspots.md) | murk-propagators | BFS containers pre-allocated; agent lookup via HashMap; Box-Muller deferred (replay compat) | (this session) |
@@ -137,7 +137,7 @@ Tickets moved to [closed/](closed/).
 | murk-engine | 0 | 0 | 1 | 0 | 1 |
 | murk-arena | 0 | 0 | 2 | 0 | 2 |
 | murk-ffi | 0 | 2 | 7 | 1 | 10 |
-| murk-python | 0 | 3 | 8 | 0 | 11 |
+| murk-python | 0 | 1 | 4 | 0 | 5 |
 | murk-propagator | 0 | 0 | 0 | 0 | 0 |
 | murk-propagators | 0 | 0 | 0 | 0 | 0 |
 | murk-obs | 0 | 0 | 1 | 0 | 1 |
@@ -149,7 +149,7 @@ Tickets moved to [closed/](closed/).
 | examples | 0 | 0 | 1 | 0 | 1 |
 | scripts | 0 | 0 | 0 | 1 | 1 |
 | workspace (cross-crate) | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **0** | **6** | **20** | **3** | **29** |
+| **Total** | **0** | **4** | **16** | **3** | **23** |
 
 Note: Workspace-wide tickets (#90-#92) affect multiple crates and are counted once under "workspace".
 

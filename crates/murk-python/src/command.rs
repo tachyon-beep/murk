@@ -35,7 +35,8 @@ impl Command {
     ///     field_id: Target field index.
     ///     coord: Cell coordinate (list of ints, 1-4 dimensions).
     ///     value: Float value to set.
-    ///     expires_after_tick: Command expires if not applied by this tick (default 0 = never).
+    ///     expires_after_tick: Tick after which this command expires (default u64::MAX = never).
+    ///         A value of 0 means the command expires after tick 0 (i.e., immediately).
     #[staticmethod]
     #[pyo3(signature = (field_id, coord, value, expires_after_tick=u64::MAX))]
     fn set_field(
@@ -71,6 +72,12 @@ impl Command {
     }
 
     /// Create a SetParameter command.
+    ///
+    /// Args:
+    ///     param_key: Parameter key.
+    ///     value: Float64 value to set.
+    ///     expires_after_tick: Tick after which this command expires (default u64::MAX = never).
+    ///         A value of 0 means the command expires after tick 0 (i.e., immediately).
     #[staticmethod]
     #[pyo3(signature = (param_key, value, expires_after_tick=u64::MAX))]
     fn set_parameter(param_key: u32, value: f64, expires_after_tick: u64) -> PyResult<Self> {

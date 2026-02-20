@@ -259,6 +259,15 @@ impl BatchedWorld {
     #[allow(unsafe_code)]
     fn reset_all(&self, py: Python<'_>, seeds: Vec<u64>) -> PyResult<()> {
         let h = self.require_handle()?;
+
+        if seeds.len() != self.cached_num_worlds {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "seeds has {} elements, expected {} (one per world)",
+                seeds.len(),
+                self.cached_num_worlds
+            )));
+        }
+
         let n_seeds = seeds.len();
         let seeds_addr = seeds.as_ptr() as usize;
 

@@ -153,6 +153,10 @@ class MurkEnv(gymnasium.Env):
         return False
 
     def close(self):
-        """Clean up resources."""
+        """Clean up resources (ObsPlan before World, since ObsPlan may reference World data)."""
+        if hasattr(self, "_obs_plan") and self._obs_plan is not None:
+            self._obs_plan.destroy()
+            self._obs_plan = None
         if hasattr(self, "_world") and self._world is not None:
             self._world.destroy()
+            self._world = None
