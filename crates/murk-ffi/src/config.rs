@@ -60,7 +60,7 @@ pub extern "C" fn murk_config_create(out: *mut u64) -> i32 {
     if out.is_null() {
         return MurkStatus::InvalidArgument as i32;
     }
-    let handle = CONFIGS.lock().unwrap().insert(ConfigBuilder::default());
+    let handle = ffi_lock!(CONFIGS).insert(ConfigBuilder::default());
     unsafe { *out = handle };
     MurkStatus::Ok as i32
 }
@@ -69,7 +69,7 @@ pub extern "C" fn murk_config_create(out: *mut u64) -> i32 {
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_config_destroy(handle: u64) -> i32 {
-    match CONFIGS.lock().unwrap().remove(handle) {
+    match ffi_lock!(CONFIGS).remove(handle) {
         Some(_) => MurkStatus::Ok as i32,
         None => MurkStatus::InvalidHandle as i32,
     }
@@ -229,7 +229,7 @@ pub extern "C" fn murk_config_set_space(
         None => return MurkStatus::InvalidArgument as i32,
     };
 
-    let mut table = CONFIGS.lock().unwrap();
+    let mut table = ffi_lock!(CONFIGS);
     match table.get_mut(handle) {
         Some(cfg) => {
             cfg.space = Some(space);
@@ -296,7 +296,7 @@ pub extern "C" fn murk_config_add_field(
         boundary_behavior: bb,
     };
 
-    let mut table = CONFIGS.lock().unwrap();
+    let mut table = ffi_lock!(CONFIGS);
     match table.get_mut(handle) {
         Some(cfg) => {
             cfg.fields.push(def);
@@ -321,7 +321,7 @@ pub extern "C" fn murk_config_add_propagator(handle: u64, prop_ptr: u64) -> i32 
     // and is consumed exactly once here.
     let prop: Box<dyn Propagator> = *unsafe { Box::from_raw(prop_ptr as *mut Box<dyn Propagator>) };
 
-    let mut table = CONFIGS.lock().unwrap();
+    let mut table = ffi_lock!(CONFIGS);
     match table.get_mut(handle) {
         Some(cfg) => {
             cfg.propagators.push(prop);
@@ -335,7 +335,7 @@ pub extern "C" fn murk_config_add_propagator(handle: u64, prop_ptr: u64) -> i32 
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_config_set_dt(handle: u64, dt: f64) -> i32 {
-    let mut table = CONFIGS.lock().unwrap();
+    let mut table = ffi_lock!(CONFIGS);
     match table.get_mut(handle) {
         Some(cfg) => {
             cfg.dt = dt;
@@ -349,7 +349,7 @@ pub extern "C" fn murk_config_set_dt(handle: u64, dt: f64) -> i32 {
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_config_set_seed(handle: u64, seed: u64) -> i32 {
-    let mut table = CONFIGS.lock().unwrap();
+    let mut table = ffi_lock!(CONFIGS);
     match table.get_mut(handle) {
         Some(cfg) => {
             cfg.seed = seed;
@@ -363,7 +363,7 @@ pub extern "C" fn murk_config_set_seed(handle: u64, seed: u64) -> i32 {
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_config_set_ring_buffer_size(handle: u64, size: usize) -> i32 {
-    let mut table = CONFIGS.lock().unwrap();
+    let mut table = ffi_lock!(CONFIGS);
     match table.get_mut(handle) {
         Some(cfg) => {
             cfg.ring_buffer_size = size;
@@ -377,7 +377,7 @@ pub extern "C" fn murk_config_set_ring_buffer_size(handle: u64, size: usize) -> 
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_config_set_max_ingress_queue(handle: u64, size: usize) -> i32 {
-    let mut table = CONFIGS.lock().unwrap();
+    let mut table = ffi_lock!(CONFIGS);
     match table.get_mut(handle) {
         Some(cfg) => {
             cfg.max_ingress_queue = size;

@@ -3,7 +3,7 @@
 Generated 2026-02-17 from static analysis triage of 110 source reports.
 Updated 2026-02-21 with wave-4 deep audit findings (#54-#94).
 
-**Status (updated 2026-02-21):** 82 fixed, 0 partially fixed, 13 open.
+**Status (updated 2026-02-21):** 85 fixed, 0 partially fixed, 10 open.
 
 ## Open Bugs
 
@@ -13,13 +13,13 @@ Updated 2026-02-21 with wave-4 deep audit findings (#54-#94).
 |---|--------|-------|---------|--------|
 | — | (none) | — | — | — |
 
-### High (1 open)
+### High (0 open)
 
 | # | Ticket | Crate | Summary | Status |
 |---|--------|-------|---------|--------|
-| 20 | [ffi-mutex-poisoning-panic-in-extern-c](ffi-mutex-poisoning-panic-in-extern-c.md) | murk-ffi | 43+ `lock().unwrap()` calls in extern "C" functions; poisoned mutex = UB | Open |
+| — | (none) | — | — | — |
 
-### Medium (10 open)
+### Medium (8 open)
 
 | # | Ticket | Crate | Summary | Status |
 |---|--------|-------|---------|--------|
@@ -30,8 +30,6 @@ Updated 2026-02-21 with wave-4 deep audit findings (#54-#94).
 | 39 | [python-metrics-race-between-step-and-propagator-query](python-metrics-race-between-step-and-propagator-query.md) | murk-python | Per-propagator timings fetched via separate FFI call; race with concurrent step | Open |
 | 43 | [example-warmup-ticks-shorten-episode-length](example-warmup-ticks-shorten-episode-length.md) | examples | Warmup ticks consume global tick budget; episodes 27-31% shorter than MAX_STEPS | Open |
 | 77 | [arena-descriptor-clone-per-tick](arena-descriptor-clone-per-tick.md) | murk-arena | `publish()` clones `FieldDescriptor` (String per field) every tick | Open |
-| 79 | [ffi-inconsistent-mutex-poisoning](ffi-inconsistent-mutex-poisoning.md) | murk-ffi | `batched.rs` handles poisoning gracefully; `world.rs`/`config.rs`/`obs.rs` panic | Open |
-| 82 | [ffi-obsplan-lock-ordering](ffi-obsplan-lock-ordering.md) | murk-ffi | `OBS_PLANS` held during full observation execution; undocumented lock ordering | Open |
 | 83 | [obs-per-agent-scratch-allocation](obs-per-agent-scratch-allocation.md) | murk-obs | Per-agent Vec alloc in pooled gather; fixed entries re-gathered per agent | Open |
 
 ### Low (2 open)
@@ -41,12 +39,15 @@ Updated 2026-02-21 with wave-4 deep audit findings (#54-#94).
 | 52 | [script-organize-by-priority-basename-collision](script-organize-by-priority-basename-collision.md) | scripts | --organize-by-priority flattens paths; duplicate basenames overwrite | Open |
 | 53 | [ffi-cbindgen-missing-c-header](ffi-cbindgen-missing-c-header.md) | murk-ffi | No generated C header; C consumers must hand-write 28+ extern declarations | Open |
 
-## Closed Bugs (82 fixed)
+## Closed Bugs (85 fixed)
 
 Tickets moved to [closed/](closed/).
 
 | # | Ticket | Crate | Summary | Fix Commit |
 |---|--------|-------|---------|------------|
+| 20 | [ffi-mutex-poisoning-panic-in-extern-c](closed/ffi-mutex-poisoning-panic-in-extern-c.md) | murk-ffi | `ffi_lock!` macro replaces 43+ `.lock().unwrap()` calls; poisoned mutex returns `InternalError` | (this session) |
+| 79 | [ffi-inconsistent-mutex-poisoning](closed/ffi-inconsistent-mutex-poisoning.md) | murk-ffi | All modules now use `ffi_lock!` macro; consistent `InternalError` on poisoned mutex | (this session) |
+| 82 | [ffi-obsplan-lock-ordering](closed/ffi-obsplan-lock-ordering.md) | murk-ffi | `ObsPlanState` wrapped in `Arc<Mutex<>>`; global table locks never held during execution | (this session) |
 | 81 | [ffi-obs-conversion-duplicated](closed/ffi-obs-conversion-duplicated.md) | murk-ffi | Shared `convert_obs_entry` extracted; `batched.rs` imports from `obs.rs` | (this session) |
 | 78 | [ffi-config-not-consumed-on-null](closed/ffi-config-not-consumed-on-null.md) | murk-ffi | Config consumed before null check; ownership contract honoured on all paths | (this session) |
 | 80 | [ffi-usize-in-repr-c-struct](closed/ffi-usize-in-repr-c-struct.md) | murk-ffi | `usize` → `u64` in `MurkStepMetrics`/`MurkStepContext`; compile-time size assertions added | (this session) |
@@ -136,7 +137,7 @@ Tickets moved to [closed/](closed/).
 |-------|----------|------|--------|-----|------------|
 | murk-engine | 0 | 0 | 1 | 0 | 1 |
 | murk-arena | 0 | 0 | 2 | 0 | 2 |
-| murk-ffi | 0 | 1 | 4 | 1 | 6 |
+| murk-ffi | 0 | 0 | 2 | 1 | 3 |
 | murk-python | 0 | 0 | 1 | 0 | 1 |
 | murk-propagator | 0 | 0 | 0 | 0 | 0 |
 | murk-propagators | 0 | 0 | 0 | 0 | 0 |
@@ -149,7 +150,7 @@ Tickets moved to [closed/](closed/).
 | examples | 0 | 0 | 1 | 0 | 1 |
 | scripts | 0 | 0 | 0 | 1 | 1 |
 | workspace (cross-crate) | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **0** | **1** | **10** | **2** | **13** |
+| **Total** | **0** | **0** | **8** | **2** | **10** |
 
 Note: Workspace-wide tickets (#90-#92) affect multiple crates and are counted once under "workspace".
 

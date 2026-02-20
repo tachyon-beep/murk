@@ -23,8 +23,10 @@ type WorldArc = Arc<Mutex<LockstepWorld>>;
 static WORLDS: Mutex<HandleTable<WorldArc>> = Mutex::new(HandleTable::new());
 
 /// Clone the Arc for a world handle, briefly locking the global table.
+///
+/// Returns `None` if the handle is invalid or the mutex is poisoned.
 fn get_world(handle: u64) -> Option<WorldArc> {
-    WORLDS.lock().unwrap().get(handle).cloned()
+    WORLDS.lock().ok()?.get(handle).cloned()
 }
 
 pub(crate) fn worlds() -> &'static Mutex<HandleTable<WorldArc>> {
@@ -41,7 +43,7 @@ pub extern "C" fn murk_lockstep_create(config_handle: u64, world_out: *mut u64) 
     // Remove config from table FIRST (consumes it unconditionally).
     // This ensures the "config is always consumed" contract holds even
     // if we return early due to null world_out or validation errors.
-    let builder = match configs().lock().unwrap().remove(config_handle) {
+    let builder = match ffi_lock!(configs()).remove(config_handle) {
         Some(b) => b,
         None => return MurkStatus::InvalidHandle as i32,
     };
@@ -79,7 +81,7 @@ pub extern "C" fn murk_lockstep_create(config_handle: u64, world_out: *mut u64) 
         Err(e) => return MurkStatus::from(&e) as i32,
     };
 
-    let handle = WORLDS.lock().unwrap().insert(Arc::new(Mutex::new(world)));
+    let handle = ffi_lock!(WORLDS).insert(Arc::new(Mutex::new(world)));
     // SAFETY: world_out is valid per caller contract.
     unsafe { *world_out = handle };
     MurkStatus::Ok as i32
@@ -89,7 +91,7 @@ pub extern "C" fn murk_lockstep_create(config_handle: u64, world_out: *mut u64) 
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_lockstep_destroy(world_handle: u64) -> i32 {
-    match WORLDS.lock().unwrap().remove(world_handle) {
+    match ffi_lock!(WORLDS).remove(world_handle) {
         Some(_) => MurkStatus::Ok as i32,
         None => MurkStatus::InvalidHandle as i32,
     }
@@ -133,7 +135,7 @@ pub extern "C" fn murk_lockstep_step(
         None => return MurkStatus::InvalidHandle as i32,
     };
     // Per-world lock: only this world is locked, not the global table.
-    let mut world = world_arc.lock().unwrap();
+    let mut world = ffi_lock!(world_arc);
 
     match world.step_sync(rust_cmds) {
         Ok(result) => {
@@ -171,7 +173,7 @@ pub extern "C" fn murk_lockstep_reset(world_handle: u64, seed: u64) -> i32 {
         Some(arc) => arc,
         None => return MurkStatus::InvalidHandle as i32,
     };
-    let mut world = world_arc.lock().unwrap();
+    let mut world = ffi_lock!(world_arc);
 
     match world.reset(seed) {
         Ok(_) => MurkStatus::Ok as i32,
@@ -200,7 +202,7 @@ pub extern "C" fn murk_snapshot_read_field(
         Some(arc) => arc,
         None => return MurkStatus::InvalidHandle as i32,
     };
-    let world = world_arc.lock().unwrap();
+    let world = ffi_lock!(world_arc);
 
     let snap = world.snapshot();
     let data = match snap.read_field(FieldId(field_id)) {
@@ -221,43 +223,47 @@ pub extern "C" fn murk_snapshot_read_field(
 }
 
 /// Current tick ID for a world (0 after construction or reset).
+///
+/// Returns 0 for invalid handles or poisoned mutex.
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_current_tick(world_handle: u64) -> u64 {
-    match get_world(world_handle) {
-        Some(arc) => arc.lock().unwrap().current_tick().0,
-        None => 0,
-    }
+    get_world(world_handle)
+        .and_then(|arc| arc.lock().ok().map(|w| w.current_tick().0))
+        .unwrap_or(0)
 }
 
 /// Whether ticking is disabled due to consecutive rollbacks.
+///
+/// Returns 0 for invalid handles or poisoned mutex.
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_is_tick_disabled(world_handle: u64) -> u8 {
-    match get_world(world_handle) {
-        Some(arc) => u8::from(arc.lock().unwrap().is_tick_disabled()),
-        None => 0,
-    }
+    get_world(world_handle)
+        .and_then(|arc| arc.lock().ok().map(|w| u8::from(w.is_tick_disabled())))
+        .unwrap_or(0)
 }
 
 /// Number of consecutive rollbacks since the last successful tick.
+///
+/// Returns 0 for invalid handles or poisoned mutex.
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_consecutive_rollbacks(world_handle: u64) -> u32 {
-    match get_world(world_handle) {
-        Some(arc) => arc.lock().unwrap().consecutive_rollback_count(),
-        None => 0,
-    }
+    get_world(world_handle)
+        .and_then(|arc| arc.lock().ok().map(|w| w.consecutive_rollback_count()))
+        .unwrap_or(0)
 }
 
 /// The world's current seed.
+///
+/// Returns 0 for invalid handles or poisoned mutex.
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_seed(world_handle: u64) -> u64 {
-    match get_world(world_handle) {
-        Some(arc) => arc.lock().unwrap().seed(),
-        None => 0,
-    }
+    get_world(world_handle)
+        .and_then(|arc| arc.lock().ok().map(|w| w.seed()))
+        .unwrap_or(0)
 }
 
 /// Step multiple worlds sequentially. v1: no parallelism.
@@ -309,7 +315,7 @@ pub extern "C" fn murk_lockstep_step_vec(
             Some(arc) => arc,
             None => return MurkStatus::InvalidHandle as i32,
         };
-        let mut world = world_arc.lock().unwrap();
+        let mut world = ffi_lock!(world_arc);
 
         match world.step_sync(rust_cmds) {
             Ok(result) => {

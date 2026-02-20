@@ -59,13 +59,13 @@ pub extern "C" fn murk_step_metrics_propagator(
     }
 
     let world_arc = {
-        let table = worlds().lock().unwrap();
+        let table = ffi_lock!(worlds());
         match table.get(world_handle).cloned() {
             Some(arc) => arc,
             None => return MurkStatus::InvalidHandle as i32,
         }
     };
-    let world = world_arc.lock().unwrap();
+    let world = ffi_lock!(world_arc);
 
     let metrics = world.last_metrics();
     let idx = index as usize;
@@ -103,13 +103,13 @@ pub extern "C" fn murk_step_metrics(world_handle: u64, out: *mut MurkStepMetrics
     }
 
     let world_arc = {
-        let table = worlds().lock().unwrap();
+        let table = ffi_lock!(worlds());
         match table.get(world_handle).cloned() {
             Some(arc) => arc,
             None => return MurkStatus::InvalidHandle as i32,
         }
     };
-    let world = world_arc.lock().unwrap();
+    let world = ffi_lock!(world_arc);
 
     let metrics = MurkStepMetrics::from_rust(world.last_metrics());
     // SAFETY: out is valid per caller contract.

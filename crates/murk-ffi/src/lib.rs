@@ -20,6 +20,20 @@
 // FFI functions inherently dereference raw pointers; safety is documented per-block.
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
 
+/// Lock a mutex, returning `MurkStatus::InternalError` if poisoned.
+///
+/// For use in `extern "C"` functions that return `i32`. On a poisoned
+/// mutex (caused by a prior panic), this early-returns an error status
+/// instead of panicking — preventing undefined behavior at the FFI boundary.
+macro_rules! ffi_lock {
+    ($mutex:expr) => {
+        match ($mutex).lock() {
+            Ok(guard) => guard,
+            Err(_) => return $crate::status::MurkStatus::InternalError as i32,
+        }
+    };
+}
+
 pub mod batched;
 pub mod command;
 pub mod config;
