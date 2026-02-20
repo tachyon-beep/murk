@@ -27,6 +27,7 @@ class BatchedVecEnv:
     - ``_compute_rewards``: compute per-world rewards from observations
     - ``_check_terminated``: check per-world termination conditions
     - ``_check_truncated``: check per-world truncation conditions
+    - ``_on_world_reset``: per-world Python state initialization after reset
 
     Args:
         config_factory: Callable taking a world index (int) and returning
@@ -111,6 +112,9 @@ class BatchedVecEnv:
 
         self._engine.reset_all(seeds)
 
+        for i, s in enumerate(seeds):
+            self._on_world_reset(i, s)
+
         # Extract initial observations.
         self._engine.observe_all(self._obs_flat, self._mask_flat)
 
@@ -155,9 +159,9 @@ class BatchedVecEnv:
             if needs_reset[i]:
                 final_observations[i] = obs[i].copy()
                 final_infos[i] = {}
-                self._engine.reset_world(i, int(self._tick_ids[i]))
-                # Re-observe this world (fills its slice in _obs_flat).
-                # We do a full observe_all after the loop instead.
+                seed = int(self._tick_ids[i])
+                self._engine.reset_world(i, seed)
+                self._on_world_reset(i, seed)
 
         if needs_reset.any():
             # Re-extract observations for reset worlds.
@@ -250,3 +254,18 @@ class BatchedVecEnv:
             Boolean array, shape (num_envs,).
         """
         return np.zeros(self.num_envs, dtype=bool)
+
+    def _on_world_reset(self, world_index: int, seed: int) -> None:
+        """Called after each world is reset (both initial and auto-reset).
+
+        Override this to reinitialize per-world Python state (episode
+        counters, agent coordinates, etc.). Called once per world during
+        ``reset()`` and during ``step()`` auto-reset for terminated/truncated
+        worlds.
+
+        Default: no-op.
+
+        Args:
+            world_index: Index of the world that was just reset.
+            seed: The seed used for this reset.
+        """

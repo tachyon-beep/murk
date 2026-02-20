@@ -227,6 +227,14 @@ def resolve_path(repo_root: Path, value: str) -> Path:
     return (repo_root / path).resolve()
 
 
+def display_path(path: Path, base: Path) -> Path | str:
+    """Return *path* relative to *base*, or absolute if not a subpath."""
+    try:
+        return path.relative_to(base)
+    except ValueError:
+        return path
+
+
 def detect_crate(file_path: Path) -> str | None:
     """Return the murk crate name that *file_path* belongs to, or None."""
     parts = file_path.parts
@@ -413,10 +421,25 @@ def run_with_retries(
     raise last_error
 
 
+_SEVERITY_TO_PRIORITY = {
+    "Critical": "P0",
+    "High": "P1",
+    "Medium": "P2",
+    "Low": "P3",
+}
+
+
 def report_priority(report_path: Path) -> str:
     text = report_path.read_text(encoding="utf-8")
+    # Prefer explicit P0-P3 token if present.
     match = re.search(r"\bP[0-3]\b", text)
-    return match.group(0) if match else "P3"
+    if match:
+        return match.group(0)
+    # Fall back to deriving priority from the severity checkbox.
+    for level, priority in _SEVERITY_TO_PRIORITY.items():
+        if f"[x] {level}" in text:
+            return priority
+    return "P3"
 
 
 def report_severity(report_path: Path) -> str:
@@ -582,7 +605,7 @@ def main() -> int:
         for path in files:
             crate = detect_crate(path)
             crate_tag = f"  [{crate}]" if crate else ""
-            print(f"  {path.relative_to(repo_root)}{crate_tag}")
+            print(f"  {display_path(path, repo_root)}{crate_tag}")
         return 0
 
     print(f"Scanning {len(files)} files ({lang_summary}) with {args.backend}...")
@@ -598,7 +621,7 @@ def main() -> int:
 
         if args.skip_existing and output_path.exists():
             skipped += 1
-            print(f"[{idx}/{len(files)}] skip {file_path.relative_to(repo_root)}")
+            print(f"[{idx}/{len(files)}] skip {display_path(file_path, repo_root)}")
             continue
 
         prompt = build_prompt(
@@ -607,7 +630,7 @@ def main() -> int:
             extra_message=args.extra_message,
         )
         crate = detect_crate(file_path) or "—"
-        print(f"[{idx}/{len(files)}] {file_path.relative_to(repo_root)} ({crate})")
+        print(f"[{idx}/{len(files)}] {display_path(file_path, repo_root)} ({crate})")
         try:
             run_with_retries(
                 repo_root=repo_root,
@@ -652,7 +675,7 @@ def main() -> int:
     print(f"  Succeeded: {ok}")
     print(f"  Failed:    {failed}")
     print(f"  Skipped:   {skipped}")
-    print(f"  Output:    {output_dir.relative_to(repo_root)}")
+    print(f"  Output:    {display_path(output_dir, repo_root)}")
 
     return 0 if failed == 0 else 2
 
