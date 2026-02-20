@@ -3,7 +3,7 @@
 Generated 2026-02-17 from static analysis triage of 110 source reports.
 Updated 2026-02-21 with wave-4 deep audit findings (#54-#94).
 
-**Status (updated 2026-02-21):** 94 fixed, 0 partially fixed, 4 open.
+**Status (updated 2026-02-21):** 95 fixed, 0 partially fixed, 3 open.
 
 ## Open Bugs
 
@@ -19,11 +19,11 @@ Updated 2026-02-21 with wave-4 deep audit findings (#54-#94).
 |---|--------|-------|---------|--------|
 | — | (none) | — | — | — |
 
-### Medium (1 open)
+### Medium (0 open)
 
 | # | Ticket | Crate | Summary | Status |
 |---|--------|-------|---------|--------|
-| 95 | [arena-sparse-no-match-fallback-untested](arena-sparse-no-match-fallback-untested.md) | murk-arena | Two test gaps in sparse reclamation: no-match fallback to bump, multi-field interleaved CoW | Open |
+| — | (none) | — | — | — |
 
 ### Low (3 open)
 
@@ -33,7 +33,7 @@ Updated 2026-02-21 with wave-4 deep audit findings (#54-#94).
 | 96 | [arena-sparse-retired-range-named-struct](arena-sparse-retired-range-named-struct.md) | murk-arena | `(u16, u32, u32)` tuple in SparseSlab should be a named `RetiredRange` struct | Open |
 | 97 | [arena-sparse-fragmentation-metric](arena-sparse-fragmentation-metric.md) | murk-arena | Sparse reclamation metrics not wired to engine metrics or FFI/Python | Open |
 
-## Closed Bugs (94 fixed)
+## Closed Bugs (95 fixed)
 
 Tickets moved to [closed/](closed/).
 
@@ -41,6 +41,7 @@ Tickets moved to [closed/](closed/).
 |---|--------|-------|---------|------------|
 | 29 | [arena-sparse-segment-memory-leak](closed/arena-sparse-segment-memory-leak.md) | murk-arena | Two-phase retired range reclamation in SparseSlab; pending→retired→reuse | (this session) |
 | 39 | [python-metrics-race-between-step-and-propagator-query](closed/python-metrics-race-between-step-and-propagator-query.md) | murk-python | Thread-local propagator timing snapshot during step; eliminates TOCTOU race | (this session) |
+| 95 | [arena-sparse-no-match-fallback-untested](closed/arena-sparse-no-match-fallback-untested.md) | murk-arena | Two regression tests: no-match fallback to bump, multi-field interleaved CoW | (this session) |
 | 77 | [arena-descriptor-clone-per-tick](closed/arena-descriptor-clone-per-tick.md) | murk-arena | `FieldMeta.name` changed to `Arc<str>`; `write()` no longer clones entire meta | (this session) |
 | 83 | [obs-per-agent-scratch-allocation](closed/obs-per-agent-scratch-allocation.md) | murk-obs | Pooling scratch pre-allocated and reused across agents; fixed entries computed once and memcpy'd | (this session) |
 | 52 | [script-organize-by-priority-basename-collision](closed/script-organize-by-priority-basename-collision.md) | scripts | Original script replaced by `codex_bug_hunt.py` which uses `relative_to()` correctly | (already fixed) |
@@ -139,7 +140,7 @@ Tickets moved to [closed/](closed/).
 | Crate | Critical | High | Medium | Low | Total Open |
 |-------|----------|------|--------|-----|------------|
 | murk-engine | 0 | 0 | 0 | 0 | 0 |
-| murk-arena | 0 | 0 | 1 | 2 | 3 |
+| murk-arena | 0 | 0 | 0 | 2 | 2 |
 | murk-ffi | 0 | 0 | 0 | 1 | 1 |
 | murk-python | 0 | 0 | 0 | 0 | 0 |
 | murk-propagator | 0 | 0 | 0 | 0 | 0 |
@@ -153,7 +154,7 @@ Tickets moved to [closed/](closed/).
 | examples | 0 | 0 | 0 | 0 | 0 |
 | scripts | 0 | 0 | 0 | 0 | 0 |
 | workspace (cross-crate) | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **0** | **0** | **1** | **3** | **4** |
+| **Total** | **0** | **0** | **0** | **3** | **3** |
 
 Note: Workspace-wide tickets (#90-#92) affect multiple crates and are counted once under "workspace".
 

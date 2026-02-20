@@ -345,6 +345,65 @@ mod tests {
     }
 
     #[test]
+    fn alloc_falls_back_to_bump_when_no_size_match() {
+        let mut slab = SparseSlab::new();
+        let mut segs = make_segments();
+
+        // Gen 0: allocate two fields of size 100.
+        slab.alloc(FieldId(0), 100, 0, &mut segs).unwrap();
+        slab.alloc(FieldId(1), 100, 0, &mut segs).unwrap();
+
+        // Gen 1: CoW both — their ranges go to pending_retired.
+        slab.alloc(FieldId(0), 100, 1, &mut segs).unwrap();
+        slab.alloc(FieldId(1), 100, 1, &mut segs).unwrap();
+        slab.flush_retired();
+        assert_eq!(slab.retired_range_count(), 2);
+
+        let used_before = segs.total_used();
+
+        // Request size 200 — no retired range matches, must bump-allocate.
+        slab.alloc(FieldId(2), 200, 2, &mut segs).unwrap();
+        assert!(
+            segs.total_used() > used_before,
+            "should bump-allocate when no retired range matches the requested size"
+        );
+        // Both size-100 retired ranges should be untouched.
+        assert_eq!(slab.retired_range_count(), 2);
+    }
+
+    #[test]
+    fn three_fields_same_size_all_ranges_retired() {
+        let mut slab = SparseSlab::new();
+        let mut segs = make_segments();
+
+        // Gen 0: allocate three fields of equal size.
+        slab.alloc(FieldId(0), 100, 0, &mut segs).unwrap();
+        slab.alloc(FieldId(1), 100, 0, &mut segs).unwrap();
+        slab.alloc(FieldId(2), 100, 0, &mut segs).unwrap();
+
+        // Gen 1: CoW all three — old ranges go to pending_retired.
+        slab.alloc(FieldId(0), 100, 1, &mut segs).unwrap();
+        slab.alloc(FieldId(1), 100, 1, &mut segs).unwrap();
+        slab.alloc(FieldId(2), 100, 1, &mut segs).unwrap();
+        slab.flush_retired();
+        assert_eq!(slab.retired_range_count(), 3);
+
+        let used_before = segs.total_used();
+
+        // Gen 2: CoW all three again — should reuse all three retired ranges.
+        slab.alloc(FieldId(0), 100, 2, &mut segs).unwrap();
+        slab.alloc(FieldId(1), 100, 2, &mut segs).unwrap();
+        slab.alloc(FieldId(2), 100, 2, &mut segs).unwrap();
+
+        assert_eq!(
+            segs.total_used(),
+            used_before,
+            "no new segment memory consumed — all retired ranges reused"
+        );
+        assert_eq!(slab.retired_range_count(), 0, "all retired ranges consumed");
+    }
+
+    #[test]
     fn different_size_ranges_not_mixed() {
         let mut slab = SparseSlab::new();
         let mut segs = make_segments();
