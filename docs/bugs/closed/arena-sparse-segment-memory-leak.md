@@ -99,3 +99,17 @@ for tick in 1..=1_000_000 {
 **Verified lines:** sparse.rs:69 (always bumps), sparse.rs:72-74 (free list tracks slot indices, not segment ranges), segment.rs:13 (bump-only, no deallocation), pingpong.rs:56 (sparse pool documented as "dedicated, never reset"), pingpong.rs:344 (reset() recreates sparse pool)
 **Root cause:** The `free_list` tracks `slots` vector indices for metadata reuse, not freed segment memory ranges. The allocator recycles bookkeeping entries but not underlying storage.
 **Suggested fix:** Track retired sparse ranges separately and allocate from the reclaim list before falling back to `SegmentList::alloc`. Alternatively, implement periodic sparse compaction that rewrites only live sparse fields into a fresh segment list. The epoch-reclamation design doc (docs/design/epoch-reclamation.md) may already cover this for RealtimeAsync mode; the same mechanism should apply to Lockstep.
+
+## Resolution
+
+**Fixed:** 2026-02-21
+**Commit branch:** feat/release-0.1.7
+
+**Fix:** Two-phase retired range reclamation in `SparseSlab`:
+- `pending_retired: Vec<(u16, u32, u32)>` — segment ranges freed during the current tick (published descriptor may still reference them).
+- `retired_ranges: Vec<(u16, u32, u32)>` — ranges freed in previous ticks, safe to reuse.
+- `flush_retired()` moves pending → retired; called by `PingPongArena::begin_tick()` after publish.
+- `alloc()` searches `retired_ranges` for an exact-size match before falling back to bump allocation.
+
+**Files changed:** `crates/murk-arena/src/sparse.rs`, `crates/murk-arena/src/pingpong.rs`
+**Tests added:** `retired_range_reused_after_flush`, `pending_retired_not_reused_before_flush`, `many_cow_writes_with_flush_stays_bounded`, `different_size_ranges_not_mixed`, `sparse_cow_does_not_leak_segment_memory` (integration)

@@ -1,8 +1,30 @@
 //! C-compatible step metrics.
+//!
+//! Per-propagator timings are snapshotted into a thread-local buffer during
+//! `murk_lockstep_step` (while the world lock is held). This ensures that
+//! subsequent calls to `murk_step_metrics_propagator` return data from the
+//! same tick, even if another thread steps the same world concurrently.
 
+use std::cell::RefCell;
 use std::ffi::c_char;
 
 use crate::status::MurkStatus;
+
+thread_local! {
+    /// Per-propagator timings snapshotted during the most recent
+    /// `murk_lockstep_step` on this thread.
+    static LAST_PROPAGATOR_US: RefCell<Vec<(String, u64)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Snapshot propagator timings from a step result into the thread-local
+/// buffer. Called by `murk_lockstep_step` while the world lock is held.
+pub(crate) fn snapshot_propagator_timings(us: &[(String, u64)]) {
+    LAST_PROPAGATOR_US.with(|cell| {
+        let mut buf = cell.borrow_mut();
+        buf.clear();
+        buf.extend(us.iter().cloned());
+    });
+}
 
 /// C-compatible step metrics returned from `murk_lockstep_step`.
 #[repr(C)]
@@ -38,7 +60,12 @@ impl MurkStepMetrics {
     }
 }
 
-/// Query per-propagator timing from the most recent step.
+/// Query per-propagator timing from the most recent step on this thread.
+///
+/// Reads from the thread-local snapshot populated by `murk_lockstep_step`,
+/// ensuring consistency with the aggregate `MurkStepMetrics` from the same
+/// call. `world_handle` is accepted for API compatibility but unused — the
+/// data comes from the thread-local buffer, not a world lock re-acquisition.
 ///
 /// `index` is 0-based. Writes the propagator name into `name_buf` (up to
 /// `name_cap` bytes including null terminator) and its execution time
@@ -46,50 +73,41 @@ impl MurkStepMetrics {
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_step_metrics_propagator(
-    world_handle: u64,
+    _world_handle: u64,
     index: u32,
     name_buf: *mut c_char,
     name_cap: usize,
     us_out: *mut u64,
 ) -> i32 {
-    use crate::world::worlds;
-
     if us_out.is_null() {
         return MurkStatus::InvalidArgument as i32;
     }
 
-    let world_arc = {
-        let table = ffi_lock!(worlds());
-        match table.get(world_handle).cloned() {
-            Some(arc) => arc,
-            None => return MurkStatus::InvalidHandle as i32,
+    LAST_PROPAGATOR_US.with(|cell| {
+        let data = cell.borrow();
+        let idx = index as usize;
+        if idx >= data.len() {
+            return MurkStatus::InvalidArgument as i32;
         }
-    };
-    let world = ffi_lock!(world_arc);
 
-    let metrics = world.last_metrics();
-    let idx = index as usize;
-    if idx >= metrics.propagator_us.len() {
-        return MurkStatus::InvalidArgument as i32;
-    }
+        let (ref name, us) = data[idx];
 
-    let (ref name, us) = metrics.propagator_us[idx];
+        // SAFETY: us_out is valid per caller contract.
+        unsafe { *us_out = us };
 
-    // SAFETY: us_out is valid per caller contract.
-    unsafe { *us_out = us };
-
-    // Write name if buffer provided.
-    if !name_buf.is_null() && name_cap > 0 {
-        let bytes = name.as_bytes();
-        let copy_len = bytes.len().min(name_cap - 1);
-        // SAFETY: name_buf points to name_cap valid bytes.
-        unsafe {
-            std::ptr::copy_nonoverlapping(bytes.as_ptr(), name_buf as *mut u8, copy_len);
-            *name_buf.add(copy_len) = 0; // null-terminate
+        // Write name if buffer provided.
+        if !name_buf.is_null() && name_cap > 0 {
+            let bytes = name.as_bytes();
+            let copy_len = bytes.len().min(name_cap - 1);
+            // SAFETY: name_buf points to name_cap valid bytes.
+            unsafe {
+                std::ptr::copy_nonoverlapping(bytes.as_ptr(), name_buf as *mut u8, copy_len);
+                *name_buf.add(copy_len) = 0; // null-terminate
+            }
         }
-    }
 
-    MurkStatus::Ok as i32
+        MurkStatus::Ok as i32
+    })
 }
 
 /// Retrieve latest metrics for a world.

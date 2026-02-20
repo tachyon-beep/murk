@@ -36,6 +36,12 @@ pub struct SparseSlot {
 ///
 /// Reclamation in Lockstep mode is immediate (`&mut self` guarantees no
 /// readers). In RealtimeAsync mode, reclamation is epoch-gated.
+///
+/// Segment memory reclamation uses a two-phase scheme:
+/// - Ranges freed during the current tick go into `pending_retired` (the
+///   published descriptor may still reference them).
+/// - At the start of the next tick (after `publish()`), `flush_retired()`
+///   moves them into `retired_ranges`, where they become available for reuse.
 pub struct SparseSlab {
     /// All allocation slots (live and dead).
     slots: Vec<SparseSlot>,
@@ -43,6 +49,10 @@ pub struct SparseSlab {
     free_list: Vec<usize>,
     /// Current mapping: FieldId → slot index (the live slot for each field).
     live_map: indexmap::IndexMap<FieldId, usize>,
+    /// Segment ranges that are safe to reuse (freed in previous ticks).
+    retired_ranges: Vec<(u16, u32, u32)>,
+    /// Segment ranges freed during the current tick (not yet safe to reuse).
+    pending_retired: Vec<(u16, u32, u32)>,
 }
 
 impl SparseSlab {
@@ -52,6 +62,8 @@ impl SparseSlab {
             slots: Vec::new(),
             free_list: Vec::new(),
             live_map: indexmap::IndexMap::new(),
+            retired_ranges: Vec::new(),
+            pending_retired: Vec::new(),
         }
     }
 
@@ -66,10 +78,25 @@ impl SparseSlab {
         generation: u32,
         segments: &mut SegmentList,
     ) -> Result<FieldHandle, ArenaError> {
-        let (segment_index, offset) = segments.alloc(len)?;
+        // Try to reuse a retired segment range of the exact size before
+        // bump-allocating. Retired ranges are guaranteed safe (freed in a
+        // previous tick, after publish).
+        let (segment_index, offset) = if let Some(pos) = self
+            .retired_ranges
+            .iter()
+            .position(|&(_, _, rlen)| rlen == len)
+        {
+            let (seg, off, _) = self.retired_ranges.swap_remove(pos);
+            (seg, off)
+        } else {
+            segments.alloc(len)?
+        };
 
         // Mark old allocation as dead if it exists.
         if let Some(&old_idx) = self.live_map.get(&field) {
+            let old = &self.slots[old_idx];
+            self.pending_retired
+                .push((old.segment_index, old.offset, old.len));
             self.slots[old_idx].live = false;
             self.free_list.push(old_idx);
         }
@@ -134,6 +161,25 @@ impl SparseSlab {
     /// Number of free (dead) slots available for reuse.
     pub fn free_count(&self) -> usize {
         self.free_list.len()
+    }
+
+    /// Promote pending retired ranges to the reusable pool.
+    ///
+    /// Must be called after `publish()` and before the next round of
+    /// `alloc()` calls. At this point the published descriptor no longer
+    /// references the pending ranges, so they are safe to hand out.
+    pub fn flush_retired(&mut self) {
+        self.retired_ranges.append(&mut self.pending_retired);
+    }
+
+    /// Number of segment ranges available for reuse.
+    pub fn retired_range_count(&self) -> usize {
+        self.retired_ranges.len()
+    }
+
+    /// Number of segment ranges pending promotion (freed this tick).
+    pub fn pending_retired_count(&self) -> usize {
+        self.pending_retired.len()
     }
 
     /// Iterate over all live field → slot index mappings.
@@ -219,6 +265,93 @@ mod tests {
         // The dead slot was immediately reused, so total slots should stay at 1.
         // (free_list pops the old slot, then it's reused for the new one.)
         assert_eq!(slab.total_slots(), 1);
+    }
+
+    #[test]
+    fn retired_range_reused_after_flush() {
+        let mut slab = SparseSlab::new();
+        let mut segs = make_segments();
+
+        // Gen 0: initial allocation.
+        slab.alloc(FieldId(0), 100, 0, &mut segs).unwrap();
+        let used_after_init = segs.total_used();
+
+        // Gen 1: CoW write — old range goes to pending_retired.
+        slab.alloc(FieldId(0), 100, 1, &mut segs).unwrap();
+        let used_after_cow1 = segs.total_used();
+        assert!(used_after_cow1 > used_after_init);
+        assert_eq!(slab.pending_retired_count(), 1);
+        assert_eq!(slab.retired_range_count(), 0);
+
+        // Simulate publish + begin_tick: flush pending → retired.
+        slab.flush_retired();
+        assert_eq!(slab.pending_retired_count(), 0);
+        assert_eq!(slab.retired_range_count(), 1);
+
+        // Gen 2: CoW write — should reuse the retired range.
+        slab.alloc(FieldId(0), 100, 2, &mut segs).unwrap();
+        assert_eq!(segs.total_used(), used_after_cow1, "no new segment memory consumed");
+        assert_eq!(slab.retired_range_count(), 0, "retired range was consumed");
+    }
+
+    #[test]
+    fn pending_retired_not_reused_before_flush() {
+        let mut slab = SparseSlab::new();
+        let mut segs = make_segments();
+
+        // Gen 0: initial allocation.
+        slab.alloc(FieldId(0), 100, 0, &mut segs).unwrap();
+        // Gen 1: CoW — range goes to pending_retired.
+        slab.alloc(FieldId(0), 100, 1, &mut segs).unwrap();
+        let used_before = segs.total_used();
+
+        // Gen 2: another CoW WITHOUT flush — must bump-allocate.
+        slab.alloc(FieldId(0), 100, 2, &mut segs).unwrap();
+        assert!(
+            segs.total_used() > used_before,
+            "should bump-allocate because pending ranges are not reusable"
+        );
+    }
+
+    #[test]
+    fn many_cow_writes_with_flush_stays_bounded() {
+        let mut slab = SparseSlab::new();
+        // Small segments to make exhaustion easy to detect.
+        let mut segs = SegmentList::new(1024, 2);
+
+        slab.alloc(FieldId(0), 100, 0, &mut segs).unwrap();
+
+        // 50 ticks of CoW writes with flush between each — should never
+        // exhaust the pool (only 200 f32s ever live at once).
+        for gen in 1..=50u32 {
+            slab.flush_retired();
+            slab.alloc(FieldId(0), 100, gen, &mut segs).unwrap();
+        }
+        // Pool should still be well within bounds.
+        assert!(segs.total_used() <= 300);
+    }
+
+    #[test]
+    fn different_size_ranges_not_mixed() {
+        let mut slab = SparseSlab::new();
+        let mut segs = make_segments();
+
+        // Two fields with different sizes.
+        slab.alloc(FieldId(0), 100, 0, &mut segs).unwrap();
+        slab.alloc(FieldId(1), 200, 0, &mut segs).unwrap();
+
+        // CoW both — retire both ranges.
+        slab.alloc(FieldId(0), 100, 1, &mut segs).unwrap();
+        slab.alloc(FieldId(1), 200, 1, &mut segs).unwrap();
+        slab.flush_retired();
+
+        let used_before = segs.total_used();
+
+        // Request size 200 — should reuse the size-200 range, not size-100.
+        slab.alloc(FieldId(1), 200, 2, &mut segs).unwrap();
+        assert_eq!(segs.total_used(), used_before);
+        // The size-100 range should still be available.
+        assert_eq!(slab.retired_range_count(), 1);
     }
 
     #[cfg(not(miri))]

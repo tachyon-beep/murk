@@ -224,6 +224,10 @@ impl PingPongArena {
             reason: "generation counter overflow (u32::MAX ticks reached)".into(),
         })?;
 
+        // Promote sparse ranges retired during the previous tick. After
+        // publish(), the published descriptor no longer references them.
+        self.sparse_slab.flush_retired();
+
         // Reset the staging buffer (it was the published buffer last tick).
         if self.b_is_staging {
             self.buffer_b.reset();
@@ -1035,5 +1039,49 @@ mod tests {
         // Second publish without begin_tick should fail.
         let result = arena.publish(TickId(2), ParameterVersion(0));
         assert!(matches!(result, Err(ArenaError::InvalidConfig { .. })));
+    }
+
+    #[test]
+    fn sparse_cow_does_not_leak_segment_memory() {
+        // Regression test for arena-sparse-segment-memory-leak:
+        // Repeated sparse CoW writes must reclaim segment memory from dead
+        // allocations instead of exhausting the sparse segment pool.
+        let cell_count = 100u32;
+        let config = ArenaConfig {
+            segment_size: 1024,
+            // Tight budget: 1 segment per pool × 3 = barely enough
+            // for one live + one pending allocation per field.
+            max_segments: 6,
+            max_generation_age: 1,
+            cell_count,
+        };
+        let field_defs = vec![(
+            FieldId(0),
+            FieldDef {
+                name: "resources".into(),
+                field_type: FieldType::Scalar,
+                mutability: FieldMutability::Sparse,
+                units: None,
+                bounds: None,
+                boundary_behavior: BoundaryBehavior::Clamp,
+            },
+        )];
+        let static_arena = StaticArena::new(&[]).into_shared();
+        let mut arena = PingPongArena::new(config, field_defs, static_arena).unwrap();
+
+        // 200 ticks of per-tick sparse writes. Without reclamation this
+        // would exhaust 2 sparse segments × 1024 f32s after ~20 ticks.
+        for tick in 1u64..=200 {
+            {
+                let mut guard = arena.begin_tick().unwrap();
+                let data = guard.writer.write(FieldId(0)).unwrap();
+                data[0] = tick as f32;
+            }
+            arena.publish(TickId(tick), ParameterVersion(0)).unwrap();
+
+            // Published data must be correct.
+            let snap = arena.snapshot();
+            assert_eq!(snap.read(FieldId(0)).unwrap()[0], tick as f32);
+        }
     }
 }

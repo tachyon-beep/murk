@@ -93,3 +93,13 @@ t1.join(); t2.join()
 **Verified lines:** `crates/murk-python/src/metrics.rs:76-101`, `crates/murk-python/src/world.rs:68,106-128`, `crates/murk-ffi/src/metrics.rs:35,62-64`
 **Root cause:** Per-propagator timings are fetched via a separate FFI call to `world.last_metrics()` rather than being part of the atomic step result. The world lock is released between the step and the per-propagator query.
 **Suggested fix:** Include per-propagator timings in the `MurkStepMetrics` struct returned by `murk_lockstep_step`, or snapshot the propagator timings within the same lock acquisition as the step result. Alternatively, have `from_ffi` use `murk_step_metrics` (which also reads `last_metrics()`) rather than the step-returned struct, accepting that both sources are at least reading the same snapshot.
+
+## Resolution
+
+**Fixed:** 2026-02-21
+**Commit branch:** feat/release-0.1.7
+
+**Fix:** Thread-local propagator timing snapshot. During `murk_lockstep_step` (while the world lock is held), the per-propagator timings are cloned into a `thread_local!` buffer via `snapshot_propagator_timings()`. `murk_step_metrics_propagator` now reads from this thread-local buffer instead of re-acquiring the world lock. This guarantees the aggregate metrics and per-propagator timings always come from the same tick, regardless of concurrent stepping by other threads.
+
+**Files changed:** `crates/murk-ffi/src/metrics.rs`, `crates/murk-ffi/src/world.rs`
+**No new tests:** The race requires multi-threaded Python with GIL release and is inherently timing-dependent. The fix is verified by code inspection — the thread-local snapshot is populated atomically during step, making the race impossible.

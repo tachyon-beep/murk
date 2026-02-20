@@ -142,6 +142,11 @@ pub extern "C" fn murk_lockstep_step(
             // Write receipts.
             write_receipts(&result.receipts, receipts_out, receipts_cap, n_receipts_out);
 
+            // Snapshot propagator timings into thread-local while the
+            // world lock is still held, so murk_step_metrics_propagator
+            // returns data from the same tick as the aggregate metrics.
+            crate::metrics::snapshot_propagator_timings(&result.metrics.propagator_us);
+
             // Write metrics.
             if !metrics_out.is_null() {
                 let m = MurkStepMetrics::from_rust(&result.metrics);
@@ -399,6 +404,7 @@ pub extern "C" fn murk_lockstep_step_vec(
 
         match world.step_sync(rust_cmds) {
             Ok(result) => {
+                crate::metrics::snapshot_propagator_timings(&result.metrics.propagator_us);
                 if !metrics_out.is_null() {
                     let m = MurkStepMetrics::from_rust(&result.metrics);
                     unsafe { *metrics_out.add(i) = m };
