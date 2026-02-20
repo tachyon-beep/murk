@@ -118,8 +118,10 @@ class BatchedVecEnv:
         # Extract initial observations.
         self._engine.observe_all(self._obs_flat, self._mask_flat)
 
-        obs = self._obs_flat.reshape(self.num_envs, self._obs_per_world).copy()
-        return obs, {}
+        obs = self._obs_flat.reshape(self.num_envs, self._obs_per_world)
+        for i in range(self.num_envs):
+            self._patch_reset_observation(i, obs[i])
+        return obs.copy(), {}
 
     def step(
         self, actions: np.ndarray
@@ -167,6 +169,9 @@ class BatchedVecEnv:
             # Re-extract observations for reset worlds.
             self._engine.observe_all(self._obs_flat, self._mask_flat)
             obs = self._obs_flat.reshape(self.num_envs, self._obs_per_world)
+            for i in range(self.num_envs):
+                if needs_reset[i]:
+                    self._patch_reset_observation(i, obs[i])
 
         info_dict: dict[str, Any] = {
             "final_observation": final_observations,
@@ -268,4 +273,23 @@ class BatchedVecEnv:
         Args:
             world_index: Index of the world that was just reset.
             seed: The seed used for this reset.
+        """
+
+    def _patch_reset_observation(
+        self, world_index: int, obs: np.ndarray
+    ) -> None:
+        """Patch the observation buffer for a world after reset.
+
+        Called after ``observe_all`` during auto-reset in ``step()`` and
+        after initial ``reset()``.  Override to write agent-controlled
+        field values (e.g. agent position markers) that are not part of
+        any propagator and would otherwise read as zero from the freshly
+        reset engine state.
+
+        Default: no-op.
+
+        Args:
+            world_index: Index of the world that was just reset.
+            obs: Observation slice for this world, shape
+                ``(obs_output_len,)``.  Modify in place.
         """

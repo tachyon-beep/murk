@@ -146,6 +146,7 @@ class HeatSeekerEnv(murk.MurkEnv):
             decay=HEAT_DECAY,
             sources=[(source_idx, SOURCE_INTENSITY)],
             clamp_min=0.0,
+            max_degree=4,  # Square4 topology has degree 4
         ).register(config)
 
         # Observation plan: observe both fields in full.

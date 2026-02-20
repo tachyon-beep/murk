@@ -52,6 +52,7 @@ pub struct ScalarDiffusion {
     sources: Vec<(usize, f32)>,
     clamp_min: Option<f32>,
     clamp_max: Option<f32>,
+    max_degree: u32,
 }
 
 /// Builder for [`ScalarDiffusion`].
@@ -67,6 +68,7 @@ pub struct ScalarDiffusionBuilder {
     sources: Vec<(usize, f32)>,
     clamp_min: Option<f32>,
     clamp_max: Option<f32>,
+    max_degree: u32,
 }
 
 impl ScalarDiffusion {
@@ -81,6 +83,7 @@ impl ScalarDiffusion {
             sources: Vec::new(),
             clamp_min: None,
             clamp_max: None,
+            max_degree: 12,
         }
     }
 
@@ -376,6 +379,16 @@ impl ScalarDiffusionBuilder {
         self
     }
 
+    /// Override the assumed maximum neighbor degree for the CFL stability
+    /// constraint (`max_dt = 1 / (max_degree * coefficient)`).
+    ///
+    /// Default is 12 (worst-case for Fcc12). Set to 4 for Square4, 6 for
+    /// Hex2D, etc. to allow larger timesteps when the topology is known.
+    pub fn max_degree(mut self, degree: u32) -> Self {
+        self.max_degree = degree;
+        self
+    }
+
     /// Build the propagator, validating all configuration.
     ///
     /// # Errors
@@ -423,6 +436,7 @@ impl ScalarDiffusionBuilder {
             sources: self.sources,
             clamp_min: self.clamp_min,
             clamp_max: self.clamp_max,
+            max_degree: self.max_degree,
         })
     }
 }
@@ -451,8 +465,10 @@ impl Propagator for ScalarDiffusion {
     fn max_dt(&self) -> Option<f64> {
         if self.coefficient > 0.0 {
             // CFL stability constraint: dt <= 1 / (max_degree * D)
-            // Use worst-case degree 12 (Fcc12) so it's safe for all topologies.
-            Some(1.0 / (12.0 * self.coefficient))
+            // Default max_degree is 12 (worst-case Fcc12). Users can lower
+            // this via the builder when the topology is known (e.g. 4 for
+            // Square4, 6 for Hex2D).
+            Some(1.0 / (self.max_degree as f64 * self.coefficient))
         } else {
             None
         }

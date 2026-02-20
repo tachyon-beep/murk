@@ -50,6 +50,8 @@ fn box_propagator_to_handle(prop: Box<dyn Propagator>) -> u64 {
 ///     clamp_min: Minimum clamp value. Default None.
 ///     clamp_max: Maximum clamp value. Default None.
 ///     gradient_field: Optional field ID for 2-component gradient output. Default None.
+///     max_degree: Maximum neighbor degree for CFL stability. Default 12 (Fcc12).
+///         Set to 4 for Square4, 6 for Hex2D to allow larger timesteps.
 #[pyclass(name = "ScalarDiffusion")]
 pub(crate) struct PyScalarDiffusion {
     input_field: u32,
@@ -60,13 +62,14 @@ pub(crate) struct PyScalarDiffusion {
     clamp_min: Option<f32>,
     clamp_max: Option<f32>,
     gradient_field: Option<u32>,
+    max_degree: u32,
 }
 
 #[pymethods]
 impl PyScalarDiffusion {
     /// Create a new ScalarDiffusion propagator.
     #[new]
-    #[pyo3(signature = (input_field, output_field, coefficient=0.0, decay=0.0, sources=vec![], clamp_min=None, clamp_max=None, gradient_field=None))]
+    #[pyo3(signature = (input_field, output_field, coefficient=0.0, decay=0.0, sources=vec![], clamp_min=None, clamp_max=None, gradient_field=None, max_degree=12))]
     fn new(
         input_field: u32,
         output_field: u32,
@@ -76,6 +79,7 @@ impl PyScalarDiffusion {
         clamp_min: Option<f32>,
         clamp_max: Option<f32>,
         gradient_field: Option<u32>,
+        max_degree: u32,
     ) -> Self {
         PyScalarDiffusion {
             input_field,
@@ -86,6 +90,7 @@ impl PyScalarDiffusion {
             clamp_min,
             clamp_max,
             gradient_field,
+            max_degree,
         }
     }
 
@@ -102,7 +107,8 @@ impl PyScalarDiffusion {
             .output_field(FieldId(self.output_field))
             .coefficient(self.coefficient)
             .decay(self.decay)
-            .sources(self.sources.clone());
+            .sources(self.sources.clone())
+            .max_degree(self.max_degree);
 
         if let Some(lo) = self.clamp_min {
             builder = builder.clamp_min(lo);

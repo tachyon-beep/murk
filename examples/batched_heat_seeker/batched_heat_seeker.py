@@ -277,6 +277,15 @@ class BatchedHeatSeekerEnv(BatchedVecEnv):
             self._engine.observe_all(self._obs_flat, self._mask_flat)
             obs = self._obs_flat.reshape(self.num_envs, self._obs_per_world)
 
+            # Patch agent_pos for reset worlds: observe_all sees zeroed
+            # fields because reset_world clears everything and there is
+            # no engine API to apply commands without stepping.  The
+            # next step() call will stamp the correct position via
+            # _make_agent_stamp_commands before step_and_observe.
+            for i in np.where(needs_reset)[0]:
+                cell_idx = int(self._agent_y[i]) * GRID_W + int(self._agent_x[i])
+                obs[i, CELL_COUNT + cell_idx] = 1.0
+
         infos: dict[str, Any] = {
             "final_observation": final_observations,
             "tick_ids": list(tick_ids),

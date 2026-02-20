@@ -1084,4 +1084,132 @@ mod tests {
             assert_eq!(snap.read(FieldId(0)).unwrap()[0], tick as f32);
         }
     }
+
+    #[test]
+    fn reset_after_near_exhaustion_allows_continued_cow() {
+        // Regression test: drive the sparse pool toward exhaustion, reset,
+        // then verify CoW writes succeed for another 200 ticks. Exercises
+        // the full 65-line reset() reconstruction sequence including fresh
+        // SparseSlab creation and sparse re-initialisation.
+        let cell_count = 100u32;
+        let config = ArenaConfig {
+            segment_size: 1024,
+            max_segments: 6,
+            max_generation_age: 1,
+            cell_count,
+        };
+        let field_defs = vec![(
+            FieldId(0),
+            FieldDef {
+                name: "resources".into(),
+                field_type: FieldType::Scalar,
+                mutability: FieldMutability::Sparse,
+                units: None,
+                bounds: None,
+                boundary_behavior: BoundaryBehavior::Clamp,
+            },
+        )];
+        let static_arena = StaticArena::new(&[]).into_shared();
+        let mut arena = PingPongArena::new(config, field_defs, static_arena).unwrap();
+
+        // Phase 1: drive sparse pool with 150 ticks of CoW writes.
+        for tick in 1u64..=150 {
+            {
+                let mut guard = arena.begin_tick().unwrap();
+                let data = guard.writer.write(FieldId(0)).unwrap();
+                data[0] = tick as f32;
+            }
+            arena.publish(TickId(tick), ParameterVersion(0)).unwrap();
+        }
+
+        // Reset: clears all reclamation state and recreates sparse pool.
+        arena.reset().unwrap();
+        assert_eq!(arena.generation(), 0);
+
+        // Phase 2: another 200 ticks must succeed — the reset released
+        // all sparse segment memory.
+        for tick in 1u64..=200 {
+            {
+                let mut guard = arena.begin_tick().unwrap();
+                let data = guard.writer.write(FieldId(0)).unwrap();
+                data[0] = (tick + 1000) as f32;
+            }
+            arena.publish(TickId(tick), ParameterVersion(0)).unwrap();
+
+            let snap = arena.snapshot();
+            assert_eq!(snap.read(FieldId(0)).unwrap()[0], (tick + 1000) as f32);
+        }
+    }
+
+    #[test]
+    fn owned_snapshot_sparse_stable_after_reuse() {
+        // Regression guard: an OwnedSnapshot taken after a sparse write must
+        // retain its data even after the next tick reuses the retired range.
+        // This proves SegmentList::clone() deep-copies segment data, which is
+        // the safety contract that protects OwnedSnapshot in RealtimeAsync mode.
+        let cell_count = 100u32;
+        let config = ArenaConfig {
+            segment_size: 1024,
+            max_segments: 6,
+            max_generation_age: 1,
+            cell_count,
+        };
+        let field_defs = vec![(
+            FieldId(0),
+            FieldDef {
+                name: "resources".into(),
+                field_type: FieldType::Scalar,
+                mutability: FieldMutability::Sparse,
+                units: None,
+                bounds: None,
+                boundary_behavior: BoundaryBehavior::Clamp,
+            },
+        )];
+        let static_arena = StaticArena::new(&[]).into_shared();
+        let mut arena = PingPongArena::new(config, field_defs, static_arena).unwrap();
+
+        // Tick 1: write sparse field with recognisable value.
+        {
+            let mut guard = arena.begin_tick().unwrap();
+            let data = guard.writer.write(FieldId(0)).unwrap();
+            data[0] = 42.0;
+            data[99] = 99.0;
+        }
+        arena.publish(TickId(1), ParameterVersion(0)).unwrap();
+
+        // Capture an OwnedSnapshot (deep clone of sparse segments).
+        let owned = arena.owned_snapshot();
+        assert_eq!(owned.read_field(FieldId(0)).unwrap()[0], 42.0);
+        assert_eq!(owned.read_field(FieldId(0)).unwrap()[99], 99.0);
+
+        // Tick 2: CoW write — old range goes to pending_retired.
+        {
+            let mut guard = arena.begin_tick().unwrap();
+            let data = guard.writer.write(FieldId(0)).unwrap();
+            data[0] = 100.0;
+            data[99] = 200.0;
+        }
+        arena.publish(TickId(2), ParameterVersion(0)).unwrap();
+
+        // Tick 3: begin_tick flushes pending → retired; alloc reuses the
+        // range that tick 1 wrote to. This overwrites the segment memory
+        // in the live arena.
+        {
+            let mut guard = arena.begin_tick().unwrap();
+            let data = guard.writer.write(FieldId(0)).unwrap();
+            data[0] = 999.0;
+            data[99] = 888.0;
+        }
+        arena.publish(TickId(3), ParameterVersion(0)).unwrap();
+
+        // The OwnedSnapshot from tick 1 must be completely unaffected.
+        assert_eq!(owned.read_field(FieldId(0)).unwrap()[0], 42.0);
+        assert_eq!(owned.read_field(FieldId(0)).unwrap()[99], 99.0);
+        assert_eq!(owned.tick_id(), TickId(1));
+
+        // Current snapshot should see tick 3 data.
+        let snap = arena.snapshot();
+        assert_eq!(snap.read_field(FieldId(0)).unwrap()[0], 999.0);
+        assert_eq!(snap.read_field(FieldId(0)).unwrap()[99], 888.0);
+    }
 }

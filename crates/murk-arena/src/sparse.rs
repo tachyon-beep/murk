@@ -50,6 +50,19 @@ pub struct SparseSlab {
     /// Current mapping: FieldId → slot index (the live slot for each field).
     live_map: indexmap::IndexMap<FieldId, usize>,
     /// Segment ranges that are safe to reuse (freed in previous ticks).
+    ///
+    /// Reuse relies on exact-size matching: `alloc()` searches for a retired
+    /// range whose `len` equals the requested allocation length. This is correct
+    /// because field sizes are fixed for the arena's lifetime — the same field
+    /// CoW'd repeatedly always produces the same `len`. The fixed-size invariant
+    /// is enforced at three independent layers:
+    ///   1. `PingPongArena` exposes no `resize_field()` API.
+    ///   2. `Config` is build-then-consume: field defs are sealed at `World` construction.
+    ///   3. Per-world isolation: `reset()` replaces the entire `SparseSlab`,
+    ///      so stale ranges from a previous schema cannot accumulate.
+    ///
+    /// If dynamic schema support is ever added, `retired_ranges` must be cleared
+    /// on field resize or replaced with a best-fit allocator.
     retired_ranges: Vec<(u16, u32, u32)>,
     /// Segment ranges freed during the current tick (not yet safe to reuse).
     pending_retired: Vec<(u16, u32, u32)>,
