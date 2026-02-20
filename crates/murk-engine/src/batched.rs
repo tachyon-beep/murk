@@ -161,6 +161,36 @@ impl BatchedEngine {
             Some(spec) => {
                 let result =
                     ObsPlan::compile(spec, worlds[0].space()).map_err(BatchError::Observe)?;
+
+                // Validate all worlds have matching field schemas for observed fields.
+                // ObsPlan::compile only takes a Space (not a snapshot), so field
+                // existence isn't checked until execute(). Catching mismatches here
+                // prevents late observation failures after worlds have been stepped.
+                let ref_snap = worlds[0].snapshot();
+                for entry in &spec.entries {
+                    let fid = entry.field_id;
+                    let ref_len = ref_snap.read_field(fid).map(|d| d.len());
+                    for (i, world) in worlds.iter().enumerate().skip(1) {
+                        let snap = world.snapshot();
+                        let other_len = snap.read_field(fid).map(|d| d.len());
+                        if other_len != ref_len {
+                            return Err(BatchError::InvalidArgument {
+                                reason: format!(
+                                    "world {i} field {fid:?}: {} elements, \
+                                     world 0 has {} elements; \
+                                     all worlds must share the same field schema",
+                                    other_len
+                                        .map(|n| n.to_string())
+                                        .unwrap_or_else(|| "missing".into()),
+                                    ref_len
+                                        .map(|n| n.to_string())
+                                        .unwrap_or_else(|| "missing".into()),
+                                ),
+                            });
+                        }
+                    }
+                }
+
                 (Some(result.plan), result.output_len, result.mask_len)
             }
             None => (None, 0, 0),
@@ -672,5 +702,72 @@ mod tests {
         // Worlds must still be at tick 0.
         assert_eq!(engine.world_tick(0), Some(TickId(0)));
         assert_eq!(engine.world_tick(1), Some(TickId(0)));
+    }
+
+    // ── Field schema validation ─────────────────────────────
+
+    #[test]
+    fn mismatched_field_schemas_rejected() {
+        // World 0 has 2 fields, world 1 has only 1. Obs spec references
+        // FieldId(1) which is missing in world 1. Construction must fail.
+        let spec = ObsSpec {
+            entries: vec![
+                ObsEntry {
+                    field_id: FieldId(0),
+                    region: ObsRegion::Fixed(RegionSpec::All),
+                    pool: None,
+                    transform: ObsTransform::Identity,
+                    dtype: ObsDtype::F32,
+                },
+                ObsEntry {
+                    field_id: FieldId(1),
+                    region: ObsRegion::Fixed(RegionSpec::All),
+                    pool: None,
+                    transform: ObsTransform::Identity,
+                    dtype: ObsDtype::F32,
+                },
+            ],
+        };
+
+        // World 0: has 2 fields (FieldId(0) and FieldId(1))
+        let config_two_fields = WorldConfig {
+            space: Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()),
+            fields: vec![scalar_field("energy"), scalar_field("temp")],
+            propagators: vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))],
+            dt: 0.1,
+            seed: 1,
+            ring_buffer_size: 8,
+            max_ingress_queue: 1024,
+            tick_rate_hz: None,
+            backoff: BackoffConfig::default(),
+        };
+
+        // World 1: has only 1 field (FieldId(0)), missing FieldId(1)
+        let config_one_field = WorldConfig {
+            space: Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()),
+            fields: vec![scalar_field("energy")],
+            propagators: vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))],
+            dt: 0.1,
+            seed: 2,
+            ring_buffer_size: 8,
+            max_ingress_queue: 1024,
+            tick_rate_hz: None,
+            backoff: BackoffConfig::default(),
+        };
+
+        let result = BatchedEngine::new(
+            vec![config_two_fields, config_one_field],
+            Some(&spec),
+        );
+        match result {
+            Err(e) => {
+                let msg = format!("{e}");
+                assert!(
+                    msg.contains("field") && msg.contains("missing"),
+                    "error should mention missing field, got: {msg}"
+                );
+            }
+            Ok(_) => panic!("expected error for mismatched field schemas"),
+        }
     }
 }

@@ -102,6 +102,18 @@ impl GradientCompute {
                     reason: format!("output field {:?} not writable", self.output_field),
                 })?;
 
+        let cell_count = rows as usize * cols as usize;
+        if grad_out.len() < cell_count * 2 {
+            return Err(PropagatorError::ExecutionFailed {
+                reason: format!(
+                    "output field {:?} has {} elements, need {} (2 per cell for gradient)",
+                    self.output_field,
+                    grad_out.len(),
+                    cell_count * 2,
+                ),
+            });
+        }
+
         for r in 0..rows_i {
             for c in 0..cols_i {
                 let i = r as usize * cols as usize + c as usize;
@@ -191,6 +203,16 @@ impl GradientCompute {
                 .ok_or_else(|| PropagatorError::ExecutionFailed {
                     reason: format!("output field {:?} not writable", self.output_field),
                 })?;
+        if grad_out.len() != cell_count * 2 {
+            return Err(PropagatorError::ExecutionFailed {
+                reason: format!(
+                    "output field {:?} has {} elements, need {} (2 per cell for gradient)",
+                    self.output_field,
+                    grad_out.len(),
+                    cell_count * 2,
+                ),
+            });
+        }
         grad_out.copy_from_slice(&grad_buf);
 
         Ok(())
@@ -513,5 +535,44 @@ mod tests {
             "wrap grad_y at (0,0) should be 0, got {}",
             grad[1]
         );
+    }
+
+    // ---------------------------------------------------------------
+    // Buffer validation (P1: guard against scalar output fields)
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn scalar_output_field_returns_error() {
+        // Output field has cell_count elements (scalar) instead of cell_count*2 (vector).
+        // GradientCompute must return ExecutionFailed, not panic with index OOB.
+        let grid = Square4::new(3, 3, EdgeBehavior::Absorb).unwrap();
+        let n = grid.cell_count();
+        let prop = GradientCompute::builder()
+            .input_field(F_SCALAR)
+            .output_field(F_GRAD)
+            .build()
+            .unwrap();
+
+        let mut reader = MockFieldReader::new();
+        reader.set_field(F_SCALAR, vec![1.0; n]);
+
+        let mut writer = MockFieldWriter::new();
+        writer.add_field(F_GRAD, n); // scalar-sized: n, not n*2
+
+        let mut scratch = ScratchRegion::new(0);
+        let mut ctx = make_ctx(&reader, &mut writer, &mut scratch, &grid, 0.01);
+
+        let result = prop.step(&mut ctx);
+        assert!(result.is_err(), "expected error for undersized output buffer");
+        let err = result.unwrap_err();
+        match err {
+            PropagatorError::ExecutionFailed { reason } => {
+                assert!(
+                    reason.contains("elements"),
+                    "error should mention element count, got: {reason}"
+                );
+            }
+            other => panic!("expected ExecutionFailed, got {other:?}"),
+        }
     }
 }
