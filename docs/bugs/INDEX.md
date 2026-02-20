@@ -3,7 +3,7 @@
 Generated 2026-02-17 from static analysis triage of 110 source reports.
 Updated 2026-02-21 with wave-4 deep audit findings (#54-#94).
 
-**Status (updated 2026-02-21):** 89 fixed, 0 partially fixed, 6 open.
+**Status (updated 2026-02-21):** 92 fixed, 0 partially fixed, 3 open.
 
 ## Open Bugs
 
@@ -19,28 +19,28 @@ Updated 2026-02-21 with wave-4 deep audit findings (#54-#94).
 |---|--------|-------|---------|--------|
 | — | (none) | — | — | — |
 
-### Medium (4 open)
+### Medium (2 open)
 
 | # | Ticket | Crate | Summary | Status |
 |---|--------|-------|---------|--------|
 | 29 | [arena-sparse-segment-memory-leak](arena-sparse-segment-memory-leak.md) | murk-arena | Sparse CoW bump-allocates but never reclaims dead segment memory | Open |
 | 39 | [python-metrics-race-between-step-and-propagator-query](python-metrics-race-between-step-and-propagator-query.md) | murk-python | Per-propagator timings fetched via separate FFI call; race with concurrent step | Open |
-| 77 | [arena-descriptor-clone-per-tick](arena-descriptor-clone-per-tick.md) | murk-arena | `publish()` clones `FieldDescriptor` (String per field) every tick | Open |
-| 83 | [obs-per-agent-scratch-allocation](obs-per-agent-scratch-allocation.md) | murk-obs | Per-agent Vec alloc in pooled gather; fixed entries re-gathered per agent | Open |
 
-### Low (2 open)
+### Low (1 open)
 
 | # | Ticket | Crate | Summary | Status |
 |---|--------|-------|---------|--------|
-| 52 | [script-organize-by-priority-basename-collision](script-organize-by-priority-basename-collision.md) | scripts | --organize-by-priority flattens paths; duplicate basenames overwrite | Open |
 | 53 | [ffi-cbindgen-missing-c-header](ffi-cbindgen-missing-c-header.md) | murk-ffi | No generated C header; C consumers must hand-write 28+ extern declarations | Open |
 
-## Closed Bugs (89 fixed)
+## Closed Bugs (92 fixed)
 
 Tickets moved to [closed/](closed/).
 
 | # | Ticket | Crate | Summary | Fix Commit |
 |---|--------|-------|---------|------------|
+| 77 | [arena-descriptor-clone-per-tick](closed/arena-descriptor-clone-per-tick.md) | murk-arena | `FieldMeta.name` changed to `Arc<str>`; `write()` no longer clones entire meta | (this session) |
+| 83 | [obs-per-agent-scratch-allocation](closed/obs-per-agent-scratch-allocation.md) | murk-obs | Pooling scratch pre-allocated and reused across agents; fixed entries computed once and memcpy'd | (this session) |
+| 52 | [script-organize-by-priority-basename-collision](closed/script-organize-by-priority-basename-collision.md) | scripts | Original script replaced by `codex_bug_hunt.py` which uses `relative_to()` correctly | (already fixed) |
 | 37 | [ffi-accessor-ambiguous-zero-return](closed/ffi-accessor-ambiguous-zero-return.md) | murk-ffi | Added `_get` status-returning accessor variants; old functions documented as ambiguous | (this session) |
 | 38 | [ffi-handle-generation-wraparound](closed/ffi-handle-generation-wraparound.md) | murk-ffi | Slots retired (not recycled) when generation wraps to 0; prevents ABA handle resurrection | (this session) |
 | 27 | [engine-quickstart-setfield-noop](closed/engine-quickstart-setfield-noop.md) | murk-engine | Added HEAT_SOURCE command-only field; propagator reads it via reads_previous and incorporates as external forcing | (this session) |
@@ -136,21 +136,21 @@ Tickets moved to [closed/](closed/).
 | Crate | Critical | High | Medium | Low | Total Open |
 |-------|----------|------|--------|-----|------------|
 | murk-engine | 0 | 0 | 0 | 0 | 0 |
-| murk-arena | 0 | 0 | 2 | 0 | 2 |
+| murk-arena | 0 | 0 | 1 | 0 | 1 |
 | murk-ffi | 0 | 0 | 0 | 1 | 1 |
 | murk-python | 0 | 0 | 1 | 0 | 1 |
 | murk-propagator | 0 | 0 | 0 | 0 | 0 |
 | murk-propagators | 0 | 0 | 0 | 0 | 0 |
-| murk-obs | 0 | 0 | 1 | 0 | 1 |
+| murk-obs | 0 | 0 | 0 | 0 | 0 |
 | murk-replay | 0 | 0 | 0 | 0 | 0 |
 | murk-space | 0 | 0 | 0 | 0 | 0 |
 | murk-core | 0 | 0 | 0 | 0 | 0 |
 | murk-bench | 0 | 0 | 0 | 0 | 0 |
 | murk (umbrella) | 0 | 0 | 0 | 0 | 0 |
 | examples | 0 | 0 | 0 | 0 | 0 |
-| scripts | 0 | 0 | 0 | 1 | 1 |
+| scripts | 0 | 0 | 0 | 0 | 0 |
 | workspace (cross-crate) | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **0** | **0** | **4** | **2** | **6** |
+| **Total** | **0** | **0** | **2** | **1** | **3** |
 
 Note: Workspace-wide tickets (#90-#92) affect multiple crates and are counted once under "workspace".
 

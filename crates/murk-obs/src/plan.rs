@@ -824,6 +824,53 @@ impl ObsPlan {
             }
         }
 
+        // ── Compute fixed entries ONCE (identical for all agents) ──
+        // Allocate scratch buffers for the fixed-entry output and mask, gather
+        // into them, then memcpy per agent. This avoids redundant N*M gathers.
+        let mut fixed_out_scratch = vec![0.0f32; self.output_len];
+        let mut fixed_mask_scratch = vec![0u8; self.mask_len];
+        let mut fixed_valid = 0usize;
+        let mut fixed_elements = 0usize;
+
+        for entry in &standard.fixed_entries {
+            let field_data = field_data_map[&entry.field_id];
+            let out_slice = &mut fixed_out_scratch
+                [entry.output_offset..entry.output_offset + entry.element_count];
+            let mask_slice =
+                &mut fixed_mask_scratch[entry.mask_offset..entry.mask_offset + entry.element_count];
+
+            mask_slice.copy_from_slice(&entry.valid_mask);
+            for op in &entry.gather_ops {
+                let raw = *field_data.get(op.field_data_idx).ok_or_else(|| {
+                    ObsError::ExecutionFailed {
+                        reason: format!(
+                            "field {:?} has {} elements but gather requires index {}",
+                            entry.field_id,
+                            field_data.len(),
+                            op.field_data_idx,
+                        ),
+                    }
+                })?;
+                out_slice[op.tensor_idx] = apply_transform(raw, &entry.transform);
+            }
+
+            fixed_valid += entry.valid_mask.iter().filter(|&&v| v == 1).count();
+            fixed_elements += entry.element_count;
+        }
+
+        // ── Pre-allocate pooling scratch buffers ──────────────────
+        // Find the maximum pre_pool_element_count across all pooled entries
+        // so we can allocate once and reuse across agents (sequential processing).
+        let max_pool_scratch = standard
+            .agent_entries
+            .iter()
+            .filter(|e| e.pool.is_some())
+            .map(|e| e.pre_pool_element_count)
+            .max()
+            .unwrap_or(0);
+        let mut pool_scratch = vec![0.0f32; max_pool_scratch];
+        let mut pool_scratch_mask = vec![0u8; max_pool_scratch];
+
         let mut metadata = Vec::with_capacity(n_agents);
 
         for (agent_i, center) in agent_centers.iter().enumerate() {
@@ -832,38 +879,12 @@ impl ObsPlan {
             let agent_output = &mut output[out_start..out_start + self.output_len];
             let agent_mask = &mut mask[mask_start..mask_start + self.mask_len];
 
-            agent_output.fill(0.0);
-            agent_mask.fill(0);
+            // Stamp fixed entries from pre-computed scratch (memcpy, not re-gather).
+            agent_output[..self.output_len].copy_from_slice(&fixed_out_scratch);
+            agent_mask[..self.mask_len].copy_from_slice(&fixed_mask_scratch);
 
-            let mut total_valid = 0usize;
-            let mut total_elements = 0usize;
-
-            // ── Fixed entries (same for all agents) ──────────────
-            for entry in &standard.fixed_entries {
-                let field_data = field_data_map[&entry.field_id];
-                let out_slice = &mut agent_output
-                    [entry.output_offset..entry.output_offset + entry.element_count];
-                let mask_slice =
-                    &mut agent_mask[entry.mask_offset..entry.mask_offset + entry.element_count];
-
-                mask_slice.copy_from_slice(&entry.valid_mask);
-                for op in &entry.gather_ops {
-                    let raw = *field_data.get(op.field_data_idx).ok_or_else(|| {
-                        ObsError::ExecutionFailed {
-                            reason: format!(
-                                "field {:?} has {} elements but gather requires index {}",
-                                entry.field_id,
-                                field_data.len(),
-                                op.field_data_idx,
-                            ),
-                        }
-                    })?;
-                    out_slice[op.tensor_idx] = apply_transform(raw, &entry.transform);
-                }
-
-                total_valid += entry.valid_mask.iter().filter(|&&v| v == 1).count();
-                total_elements += entry.element_count;
-            }
+            let mut total_valid = fixed_valid;
+            let mut total_elements = fixed_elements;
 
             // ── Agent-relative entries ───────────────────────────
             for entry in &standard.agent_entries {
@@ -878,6 +899,12 @@ impl ObsPlan {
                     .map(|geo| !geo.all_wrap && geo.is_interior(center, entry.radius))
                     .unwrap_or(false);
 
+                // Zero the pooling scratch region for this entry before reuse.
+                if entry.pool.is_some() {
+                    pool_scratch[..entry.pre_pool_element_count].fill(0.0);
+                    pool_scratch_mask[..entry.pre_pool_element_count].fill(0);
+                }
+
                 let valid = execute_agent_entry(
                     entry,
                     center,
@@ -887,6 +914,8 @@ impl ObsPlan {
                     use_fast_path,
                     agent_output,
                     agent_mask,
+                    &mut pool_scratch,
+                    &mut pool_scratch_mask,
                 );
 
                 total_valid += valid;
@@ -924,6 +953,10 @@ impl ObsPlan {
 
 /// Execute a single agent-relative entry for one agent.
 ///
+/// For pooled entries, `pool_scratch` and `pool_scratch_mask` must be
+/// provided with sufficient capacity (zeroed by the caller). For
+/// non-pooled entries these are ignored.
+///
 /// Returns the number of valid cells written.
 #[allow(clippy::too_many_arguments)]
 fn execute_agent_entry(
@@ -935,6 +968,8 @@ fn execute_agent_entry(
     use_fast_path: bool,
     agent_output: &mut [f32],
     agent_mask: &mut [u8],
+    pool_scratch: &mut [f32],
+    pool_scratch_mask: &mut [u8],
 ) -> usize {
     if entry.pool.is_some() {
         execute_agent_entry_pooled(
@@ -946,6 +981,8 @@ fn execute_agent_entry(
             use_fast_path,
             agent_output,
             agent_mask,
+            &mut pool_scratch[..entry.pre_pool_element_count],
+            &mut pool_scratch_mask[..entry.pre_pool_element_count],
         )
     } else {
         execute_agent_entry_direct(
@@ -1015,6 +1052,11 @@ fn execute_agent_entry_direct(
 }
 
 /// Pooled gather: gather → scratch → pool → transform → output.
+///
+/// `scratch` and `scratch_mask` are caller-provided buffers that must be
+/// at least `entry.pre_pool_element_count` long. They are zeroed by the
+/// caller before each invocation. This avoids per-agent heap allocation
+/// when processing many agents sequentially (bug #83).
 #[allow(clippy::too_many_arguments)]
 fn execute_agent_entry_pooled(
     entry: &AgentCompiledEntry,
@@ -1025,9 +1067,9 @@ fn execute_agent_entry_pooled(
     use_fast_path: bool,
     agent_output: &mut [f32],
     agent_mask: &mut [u8],
+    scratch: &mut [f32],
+    scratch_mask: &mut [u8],
 ) -> usize {
-    let mut scratch = vec![0.0f32; entry.pre_pool_element_count];
-    let mut scratch_mask = vec![0u8; entry.pre_pool_element_count];
 
     if use_fast_path {
         let geo = geometry.as_ref().unwrap();

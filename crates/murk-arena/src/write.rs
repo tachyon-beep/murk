@@ -8,7 +8,7 @@
 use murk_core::traits::FieldWriter;
 use murk_core::{FieldId, FieldMutability};
 
-use crate::descriptor::{FieldDescriptor, FieldMeta};
+use crate::descriptor::FieldDescriptor;
 use crate::handle::FieldLocation;
 use crate::segment::SegmentList;
 use crate::sparse::SparseSlab;
@@ -67,11 +67,11 @@ impl<'a> WriteArena<'a> {
     }
 
     /// Write a sparse field (CoW: allocate new copy in sparse segments).
-    fn write_sparse(&mut self, field: FieldId, meta: &FieldMeta) -> Option<&mut [f32]> {
+    fn write_sparse(&mut self, field: FieldId, total_len: u32) -> Option<&mut [f32]> {
         // Allocate new storage for this generation.
         let handle = self
             .sparse_slab
-            .alloc(field, meta.total_len, self.generation, self.sparse_segments)
+            .alloc(field, total_len, self.generation, self.sparse_segments)
             .ok()?;
 
         // If there was a previous allocation, copy its data.
@@ -145,10 +145,14 @@ impl<'a> WriteArena<'a> {
 impl FieldWriter for WriteArena<'_> {
     fn write(&mut self, field: FieldId) -> Option<&mut [f32]> {
         let entry = self.descriptor.get(field)?;
-        let meta = entry.meta.clone();
+        // Extract only the scalar values we need — avoids cloning the
+        // entire FieldMeta (which previously heap-allocated a String
+        // copy on every write call).
+        let mutability = entry.meta.mutability;
+        let total_len = entry.meta.total_len;
         let handle = entry.handle;
 
-        match meta.mutability {
+        match mutability {
             FieldMutability::PerTick => {
                 // PerTick fields were pre-allocated at begin_tick().
                 // Just return a mutable slice to the pre-allocated region.
@@ -177,7 +181,7 @@ impl FieldWriter for WriteArena<'_> {
                         None
                     }
                 } else {
-                    self.write_sparse(field, &meta)
+                    self.write_sparse(field, total_len)
                 }
             }
             FieldMutability::Static => {

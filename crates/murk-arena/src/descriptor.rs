@@ -6,6 +6,8 @@
 //! per `PingPongArena` — one for the published generation, one for staging.
 //! They are swapped on publish.
 
+use std::sync::Arc;
+
 use indexmap::IndexMap;
 use murk_core::{FieldDef, FieldId, FieldMutability};
 
@@ -26,7 +28,11 @@ pub struct FieldMeta {
     /// Total allocation size: `cell_count * components`.
     pub total_len: u32,
     /// Human-readable name (for diagnostics).
-    pub name: String,
+    ///
+    /// Uses `Arc<str>` so that cloning the descriptor (which happens every
+    /// tick in `publish()`) is a reference-count bump rather than N heap
+    /// allocations for N fields.
+    pub name: Arc<str>,
 }
 
 /// A single entry in the descriptor table.
@@ -69,7 +75,7 @@ impl FieldDescriptor {
                 components,
                 mutability: def.mutability,
                 total_len,
-                name: def.name.clone(),
+                name: Arc::from(def.name.as_str()),
             };
             let handle =
                 FieldHandle::new(0, 0, total_len, FieldLocation::PerTick { segment_index: 0 });
