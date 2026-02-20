@@ -175,13 +175,16 @@ impl Propagator for MorphologicalOp {
         // Binarize input
         let binary: Vec<bool> = prev.iter().map(|&v| v > self.threshold).collect();
 
-        // Compute output into local buffer
+        // Compute output into local buffer.
+        // Pre-allocate BFS containers outside the loop; clear() between
+        // iterations to amortise allocation cost (fixes #94 hotspot 1).
         let mut out_buf = vec![0.0f32; cell_count];
+        let mut visited = HashSet::new();
+        let mut queue = VecDeque::new();
 
         for i in 0..cell_count {
-            // BFS to find all cells within radius hops
-            let mut visited = HashSet::new();
-            let mut queue = VecDeque::new();
+            visited.clear();
+            queue.clear();
             visited.insert(i);
             queue.push_back((i, 0u32));
 

@@ -7,6 +7,7 @@
 //!
 //! Constructed via the builder pattern: [`ScalarDiffusion::builder`].
 
+use crate::grid_helpers::{neighbours_flat, resolve_axis};
 use murk_core::{FieldId, FieldSet, PropagatorError};
 use murk_propagator::context::StepContext;
 use murk_propagator::propagator::{Propagator, WriteMode};
@@ -83,40 +84,6 @@ impl ScalarDiffusion {
         }
     }
 
-    /// Resolve a single axis value under the given edge behavior.
-    /// Returns `Some(resolved)` or `None` for Absorb out-of-bounds.
-    fn resolve_axis(val: i32, len: i32, edge: EdgeBehavior) -> Option<i32> {
-        if val >= 0 && val < len {
-            return Some(val);
-        }
-        match edge {
-            EdgeBehavior::Absorb => None,
-            EdgeBehavior::Clamp => Some(val.clamp(0, len - 1)),
-            EdgeBehavior::Wrap => Some(((val % len) + len) % len),
-        }
-    }
-
-    /// Collect the flat indices of the 4-connected neighbours for cell (r,c),
-    /// respecting the grid's edge behavior.
-    fn neighbours_flat(
-        r: i32,
-        c: i32,
-        rows: i32,
-        cols: i32,
-        edge: EdgeBehavior,
-    ) -> smallvec::SmallVec<[usize; 4]> {
-        let offsets: [(i32, i32); 4] = [(-1, 0), (1, 0), (0, -1), (0, 1)];
-        let mut result = smallvec::SmallVec::new();
-        for (dr, dc) in offsets {
-            let nr = Self::resolve_axis(r + dr, rows, edge);
-            let nc = Self::resolve_axis(c + dc, cols, edge);
-            if let (Some(nr), Some(nc)) = (nr, nc) {
-                result.push(nr as usize * cols as usize + nc as usize);
-            }
-        }
-        result
-    }
-
     /// Apply decay, sources, and clamping to a mutable output buffer.
     fn apply_post_processing(&self, out: &mut [f32], dt: f64) {
         // True exponential decay: v *= exp(-decay * dt)
@@ -190,7 +157,7 @@ impl ScalarDiffusion {
         for r in 0..rows_i {
             for c in 0..cols_i {
                 let i = r as usize * cols as usize + c as usize;
-                let nbs = Self::neighbours_flat(r, c, rows_i, cols_i, edge);
+                let nbs = neighbours_flat(r, c, rows_i, cols_i, edge);
                 let count = nbs.len() as u32;
                 if count > 0 {
                     let sum: f32 = nbs.iter().map(|&ni| prev[ni]).sum();
@@ -219,16 +186,16 @@ impl ScalarDiffusion {
                 for c in 0..cols_i {
                     let i = r as usize * cols as usize + c as usize;
 
-                    let h_east = Self::resolve_axis(c + 1, cols_i, edge)
+                    let h_east = resolve_axis(c + 1, cols_i, edge)
                         .map(|nc| prev[r as usize * cols as usize + nc as usize])
                         .unwrap_or(prev[i]);
-                    let h_west = Self::resolve_axis(c - 1, cols_i, edge)
+                    let h_west = resolve_axis(c - 1, cols_i, edge)
                         .map(|nc| prev[r as usize * cols as usize + nc as usize])
                         .unwrap_or(prev[i]);
-                    let h_south = Self::resolve_axis(r + 1, rows_i, edge)
+                    let h_south = resolve_axis(r + 1, rows_i, edge)
                         .map(|nr| prev[nr as usize * cols as usize + c as usize])
                         .unwrap_or(prev[i]);
-                    let h_north = Self::resolve_axis(r - 1, rows_i, edge)
+                    let h_north = resolve_axis(r - 1, rows_i, edge)
                         .map(|nr| prev[nr as usize * cols as usize + c as usize])
                         .unwrap_or(prev[i]);
 

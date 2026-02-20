@@ -22,6 +22,7 @@ pub mod diffusion;
 pub mod fields;
 pub mod flow_field;
 pub mod gradient_compute;
+pub(crate) mod grid_helpers;
 pub mod identity_copy;
 pub mod morphological_op;
 pub mod noise_injection;

@@ -17,6 +17,7 @@
 //!
 //! Constructed via the builder pattern: [`WavePropagation::builder`].
 
+use crate::grid_helpers::neighbours_flat;
 use murk_core::{FieldId, FieldSet, PropagatorError};
 use murk_propagator::context::StepContext;
 use murk_propagator::propagator::{Propagator, WriteMode};
@@ -60,38 +61,6 @@ impl WavePropagation {
         }
     }
 
-    /// Resolve a single axis value under the given edge behavior.
-    fn resolve_axis(val: i32, len: i32, edge: EdgeBehavior) -> Option<i32> {
-        if val >= 0 && val < len {
-            return Some(val);
-        }
-        match edge {
-            EdgeBehavior::Absorb => None,
-            EdgeBehavior::Clamp => Some(val.clamp(0, len - 1)),
-            EdgeBehavior::Wrap => Some(((val % len) + len) % len),
-        }
-    }
-
-    /// Collect flat indices of 4-connected neighbours.
-    fn neighbours_flat(
-        r: i32,
-        c: i32,
-        rows: i32,
-        cols: i32,
-        edge: EdgeBehavior,
-    ) -> smallvec::SmallVec<[usize; 4]> {
-        let offsets: [(i32, i32); 4] = [(-1, 0), (1, 0), (0, -1), (0, 1)];
-        let mut result = smallvec::SmallVec::new();
-        for (dr, dc) in offsets {
-            let nr = Self::resolve_axis(r + dr, rows, edge);
-            let nc = Self::resolve_axis(c + dc, cols, edge);
-            if let (Some(nr), Some(nc)) = (nr, nc) {
-                result.push(nr as usize * cols as usize + nc as usize);
-            }
-        }
-        result
-    }
-
     /// Square4 fast path.
     fn step_square4(
         &self,
@@ -131,7 +100,7 @@ impl WavePropagation {
         for r in 0..rows_i {
             for c in 0..cols_i {
                 let i = r as usize * cols as usize + c as usize;
-                let nbs = Self::neighbours_flat(r, c, rows_i, cols_i, edge);
+                let nbs = neighbours_flat(r, c, rows_i, cols_i, edge);
                 let count = nbs.len();
                 let laplacian = if count > 0 {
                     let sum: f32 = nbs.iter().map(|&ni| prev_d[ni]).sum();

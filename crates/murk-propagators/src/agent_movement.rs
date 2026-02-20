@@ -9,6 +9,7 @@ use murk_core::{FieldId, FieldSet, PropagatorError};
 use murk_propagator::context::StepContext;
 use murk_propagator::propagator::{Propagator, WriteMode};
 use murk_space::Square4;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 /// Cardinal direction for agent movement.
@@ -151,7 +152,9 @@ impl Propagator for AgentMovementPropagator {
                     reason: "agent_presence field not writable".into(),
                 })?;
 
-        // Tick 0 init: if all zeros, place agents at initial positions
+        // Tick 0 init: if all zeros, place agents at initial positions.
+        // Early return prevents actions queued before tick 0 from being
+        // processed on the initialization tick.
         let all_zero = presence.iter().all(|&v| v == 0.0);
         if all_zero && !self.initial_positions.is_empty() {
             for &(agent_id, flat_idx) in &self.initial_positions {
@@ -159,6 +162,7 @@ impl Propagator for AgentMovementPropagator {
                     presence[flat_idx] = (agent_id as f32) + 1.0;
                 }
             }
+            return Ok(());
         }
 
         if actions_snapshot.is_empty() {
@@ -167,19 +171,24 @@ impl Propagator for AgentMovementPropagator {
 
         let (rows, cols) = grid_dims.unwrap_or((0, 0));
 
+        // Build O(1) lookup: agent_id → flat index (fixes #94 hotspot 2).
+        // Replaces O(n) linear scan per action with O(n + k) total.
+        let mut agent_positions: HashMap<u16, usize> = HashMap::new();
+        for (idx, &v) in presence.iter().enumerate() {
+            if v > 0.5 {
+                let agent_id = (v - 1.0 + 0.5) as u16;
+                agent_positions.insert(agent_id, idx);
+            }
+        }
+
         for action in &actions_snapshot {
             if action.direction == Direction::Stay {
                 continue;
             }
 
-            let agent_marker = (action.agent_id as f32) + 1.0;
-
-            // Find current position of this agent
-            let current_pos = match presence
-                .iter()
-                .position(|&v| (v - agent_marker).abs() < 0.5)
-            {
-                Some(pos) => pos,
+            // O(1) lookup instead of linear scan
+            let current_pos = match agent_positions.get(&action.agent_id) {
+                Some(&pos) => pos,
                 None => continue,
             };
 
@@ -215,6 +224,7 @@ impl Propagator for AgentMovementPropagator {
 
             presence[target] = presence[current_pos];
             presence[current_pos] = 0.0;
+            agent_positions.insert(action.agent_id, target);
         }
 
         Ok(())
@@ -430,6 +440,47 @@ mod tests {
         prop.step(&mut ctx).unwrap();
 
         assert!(ab.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn tick0_ignores_queued_actions() {
+        // Regression test for #30: actions queued before tick 0 must not
+        // be processed during the initialization tick.
+        let grid = Square4::new(3, 3, EdgeBehavior::Absorb).unwrap();
+        let ab = new_action_buffer();
+
+        // Queue action BEFORE tick 0
+        ab.lock().unwrap().push(AgentAction {
+            agent_id: 0,
+            direction: Direction::North,
+        });
+
+        let prop = AgentMovementPropagator::new(ab.clone(), vec![(0, 4)]); // center
+
+        let reader = MockFieldReader::new();
+        let mut writer = MockFieldWriter::new();
+        writer.add_field(AGENT_PRESENCE, 9);
+
+        let mut scratch = ScratchRegion::new(0);
+        let mut ctx = make_ctx(&reader, &mut writer, &mut scratch, &grid);
+
+        prop.step(&mut ctx).unwrap();
+
+        let presence = writer.get_field(AGENT_PRESENCE).unwrap();
+        // Agent should be at initial position (center=4), NOT moved north (to 1)
+        assert_eq!(
+            presence[4], 1.0,
+            "agent should stay at initial position on tick 0"
+        );
+        assert_eq!(
+            presence[1], 0.0,
+            "agent should NOT have moved north on tick 0"
+        );
+        // Actions should still be drained (not re-processed next tick)
+        assert!(
+            ab.lock().unwrap().is_empty(),
+            "action buffer should be drained even on tick 0"
+        );
     }
 
     #[test]

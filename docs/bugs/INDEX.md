@@ -3,7 +3,7 @@
 Generated 2026-02-17 from static analysis triage of 110 source reports.
 Updated 2026-02-20 with wave-4 deep audit findings (#54-#94).
 
-**Status (updated 2026-02-20):** 63 fixed, 0 partially fixed, 32 open.
+**Status (updated 2026-02-20):** 66 fixed, 0 partially fixed, 29 open.
 
 ## Open Bugs
 
@@ -13,25 +13,23 @@ Updated 2026-02-20 with wave-4 deep audit findings (#54-#94).
 |---|--------|-------|---------|--------|
 | — | (none) | — | — | — |
 
-### High (7 open)
+### High (6 open)
 
 | # | Ticket | Crate | Summary | Status |
 |---|--------|-------|---------|--------|
 | 20 | [ffi-mutex-poisoning-panic-in-extern-c](ffi-mutex-poisoning-panic-in-extern-c.md) | murk-ffi | 43+ `lock().unwrap()` calls in extern "C" functions; poisoned mutex = UB | Open |
 | 23 | [python-propagator-trampoline-leak-on-cstring-error](python-propagator-trampoline-leak-on-cstring-error.md) | murk-python | TrampolineData leaks on CString/add_propagator_handle error paths | Open |
-| 60 | [propagators-resolve-axis-duplicated](propagators-resolve-axis-duplicated.md) | murk-propagators | `resolve_axis`/`neighbours_flat` copy-pasted across 5 files | Open |
 | 62 | [python-trampoline-panic-across-ffi](python-trampoline-panic-across-ffi.md) | murk-python | `python_trampoline` has no `catch_unwind`; panic = UB across extern "C" | Open |
 | 63 | [python-missing-type-stubs-library-propagators](python-missing-type-stubs-library-propagators.md) | murk-python | `.pyi` stubs missing all 9 library propagator classes | Open |
 | 64 | [bench-missing-black-box](bench-missing-black-box.md) | murk-bench | Missing `black_box` + arena benchmark TickId/generation divergence | Open |
 | 66 | [ffi-callback-propagator-missing-sync](ffi-callback-propagator-missing-sync.md) | murk-ffi | `CallbackPropagator` has `Send` but not `Sync`; unsound if design changes | Open |
 
-### Medium (21 open)
+### Medium (20 open)
 
 | # | Ticket | Crate | Summary | Status |
 |---|--------|-------|---------|--------|
 | 27 | [engine-quickstart-setfield-noop](engine-quickstart-setfield-noop.md) | murk-engine | Quickstart example's SetField injection overwritten by diffusion propagator | Open |
 | 29 | [arena-sparse-segment-memory-leak](arena-sparse-segment-memory-leak.md) | murk-arena | Sparse CoW bump-allocates but never reclaims dead segment memory | Open |
-| 30 | [propagator-agent-movement-tick0-actions](propagator-agent-movement-tick0-actions.md) | murk-propagators | Actions processed on tick 0 alongside initialization | Open |
 | 37 | [ffi-accessor-ambiguous-zero-return](ffi-accessor-ambiguous-zero-return.md) | murk-ffi | World accessors return 0 for invalid handles, indistinguishable from valid state | Open |
 | 38 | [ffi-handle-generation-wraparound](ffi-handle-generation-wraparound.md) | murk-ffi | u32 generation wraps after 4B cycles; ABA handle resurrection | Open |
 | 39 | [python-metrics-race-between-step-and-propagator-query](python-metrics-race-between-step-and-propagator-query.md) | murk-python | Per-propagator timings fetched via separate FFI call; race with concurrent step | Open |
@@ -51,21 +49,23 @@ Updated 2026-02-20 with wave-4 deep audit findings (#54-#94).
 | 86 | [python-close-skips-obsplan-destroy](python-close-skips-obsplan-destroy.md) | murk-python | `MurkEnv.close()` destroys World but not ObsPlan; `BatchedVecEnv` no double-close guard | Open |
 | 87 | [python-batched-vecenv-missing-spaces](python-batched-vecenv-missing-spaces.md) | murk-python | `BatchedVecEnv` missing `observation_space`/`action_space`; breaks SB3 compat | Open |
 
-### Low (4 open)
+### Low (3 open)
 
 | # | Ticket | Crate | Summary | Status |
 |---|--------|-------|---------|--------|
 | 51 | [bench-space-ops-degenerate-q-distribution](bench-space-ops-degenerate-q-distribution.md) | murk-bench | LCG multiplier not coprime to modulus; only 4/20 q values exercised | Open |
 | 52 | [script-organize-by-priority-basename-collision](script-organize-by-priority-basename-collision.md) | scripts | --organize-by-priority flattens paths; duplicate basenames overwrite | Open |
 | 53 | [ffi-cbindgen-missing-c-header](ffi-cbindgen-missing-c-header.md) | murk-ffi | No generated C header; C consumers must hand-write 28+ extern declarations | Open |
-| 94 | [propagators-performance-hotspots](propagators-performance-hotspots.md) | murk-propagators | Per-cell BFS alloc, O(n) agent scan, wasted Box-Muller samples | Open |
 
-## Closed Bugs (63 fixed)
+## Closed Bugs (66 fixed)
 
 Tickets moved to [closed/](closed/).
 
 | # | Ticket | Crate | Summary | Fix Commit |
 |---|--------|-------|---------|------------|
+| 60 | [propagators-resolve-axis-duplicated](closed/propagators-resolve-axis-duplicated.md) | murk-propagators | `resolve_axis`/`neighbours_flat` extracted to `grid_helpers.rs`; 5 files de-duplicated | (this session) |
+| 30 | [propagator-agent-movement-tick0-actions](closed/propagator-agent-movement-tick0-actions.md) | murk-propagators | Early return after tick-0 initialization prevents action processing on init tick | (this session) |
+| 94 | [propagators-performance-hotspots](closed/propagators-performance-hotspots.md) | murk-propagators | BFS containers pre-allocated; agent lookup via HashMap; Box-Muller deferred (replay compat) | (this session) |
 | 45 | [space-hex2d-disk-overflow](closed/space-hex2d-disk-overflow.md) | murk-space | `compile_hex_disk` uses `checked_mul` for bounding area; returns `InvalidRegion` on overflow | (this session) |
 | 46 | [space-compliance-ordering-membership](closed/space-compliance-ordering-membership.md) | murk-space | Compliance suite cross-validates `canonical_ordering()` against `compile_region(All)` coords | (this session) |
 | 88 | [space-regionplan-public-fields](closed/space-regionplan-public-fields.md) | murk-space | `RegionPlan` fields `pub(crate)` with accessors; `cell_count` derived; `metric_distance` returns `Result` | (this session) |
@@ -139,7 +139,7 @@ Tickets moved to [closed/](closed/).
 | murk-ffi | 0 | 2 | 7 | 1 | 10 |
 | murk-python | 0 | 3 | 8 | 0 | 11 |
 | murk-propagator | 0 | 0 | 0 | 0 | 0 |
-| murk-propagators | 0 | 1 | 1 | 1 | 3 |
+| murk-propagators | 0 | 0 | 0 | 0 | 0 |
 | murk-obs | 0 | 0 | 1 | 0 | 1 |
 | murk-replay | 0 | 0 | 0 | 0 | 0 |
 | murk-space | 0 | 0 | 0 | 0 | 0 |
@@ -149,7 +149,7 @@ Tickets moved to [closed/](closed/).
 | examples | 0 | 0 | 1 | 0 | 1 |
 | scripts | 0 | 0 | 0 | 1 | 1 |
 | workspace (cross-crate) | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **0** | **7** | **21** | **4** | **32** |
+| **Total** | **0** | **6** | **20** | **3** | **29** |
 
 Note: Workspace-wide tickets (#90-#92) affect multiple crates and are counted once under "workspace".
 

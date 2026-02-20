@@ -9,6 +9,7 @@
 //!
 //! Constructed via the builder pattern: [`FlowField::builder`].
 
+use crate::grid_helpers::resolve_axis;
 use murk_core::{FieldId, FieldSet, PropagatorError};
 use murk_propagator::context::StepContext;
 use murk_propagator::propagator::{Propagator, WriteMode};
@@ -77,19 +78,6 @@ impl FlowField {
         }
     }
 
-    /// Resolve a single axis value under the given edge behavior.
-    /// Returns `Some(resolved)` or `None` for Absorb out-of-bounds.
-    fn resolve_axis(val: i32, len: i32, edge: EdgeBehavior) -> Option<i32> {
-        if val >= 0 && val < len {
-            return Some(val);
-        }
-        match edge {
-            EdgeBehavior::Absorb => None,
-            EdgeBehavior::Clamp => Some(val.clamp(0, len - 1)),
-            EdgeBehavior::Wrap => Some(((val % len) + len) % len),
-        }
-    }
-
     /// Square4 fast path: central-difference negative gradient using direct
     /// index arithmetic.
     fn step_square4(
@@ -121,16 +109,16 @@ impl FlowField {
             for c in 0..cols_i {
                 let i = r as usize * cols as usize + c as usize;
 
-                let h_east = Self::resolve_axis(c + 1, cols_i, edge)
+                let h_east = resolve_axis(c + 1, cols_i, edge)
                     .map(|nc| prev[r as usize * cols as usize + nc as usize])
                     .unwrap_or(prev[i]);
-                let h_west = Self::resolve_axis(c - 1, cols_i, edge)
+                let h_west = resolve_axis(c - 1, cols_i, edge)
                     .map(|nc| prev[r as usize * cols as usize + nc as usize])
                     .unwrap_or(prev[i]);
-                let h_south = Self::resolve_axis(r + 1, rows_i, edge)
+                let h_south = resolve_axis(r + 1, rows_i, edge)
                     .map(|nr| prev[nr as usize * cols as usize + c as usize])
                     .unwrap_or(prev[i]);
-                let h_north = Self::resolve_axis(r - 1, rows_i, edge)
+                let h_north = resolve_axis(r - 1, rows_i, edge)
                     .map(|nr| prev[nr as usize * cols as usize + c as usize])
                     .unwrap_or(prev[i]);
 
