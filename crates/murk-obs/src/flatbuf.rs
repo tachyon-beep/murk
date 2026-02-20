@@ -332,7 +332,7 @@ fn decode_region(tag: u8, params: &[i32], idx: usize) -> Result<ObsRegion, ObsEr
             Ok(ObsRegion::Fixed(RegionSpec::Disk { center, radius }))
         }
         REGION_RECT => {
-            if params.is_empty() || !params.len().is_multiple_of(2) {
+            if params.is_empty() || params.len() % 2 != 0 {
                 return Err(ObsError::InvalidObsSpec {
                     reason: format!("entry {idx}: Rect region needs even number of params"),
                 });

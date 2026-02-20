@@ -34,6 +34,7 @@ pub enum ReadSource {
 /// to configure each propagator's `FieldReader` before calling `step()`
 /// and to seed [`WriteMode::Incremental`] buffers from the previous generation.
 #[derive(Debug)]
+#[must_use]
 pub struct ReadResolutionPlan {
     /// `routes[propagator_index]` maps `FieldId → ReadSource`.
     routes: Vec<IndexMap<FieldId, ReadSource>>,
@@ -94,7 +95,7 @@ impl ReadResolutionPlan {
 // ── Errors ─────────────────────────────────────────────────────────
 
 /// A detected write-write conflict between two propagators.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WriteConflict {
     /// The contested field.
     pub field_id: FieldId,
@@ -105,7 +106,7 @@ pub struct WriteConflict {
 }
 
 /// Errors from pipeline validation (startup-time, not per-tick).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum PipelineError {
     /// No propagators registered.
     EmptyPipeline,

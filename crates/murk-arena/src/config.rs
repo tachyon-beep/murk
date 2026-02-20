@@ -5,6 +5,7 @@
 /// Controls segment sizing, capacity limits, and generation retention.
 /// Validated at construction; all values are immutable after creation.
 #[derive(Clone, Debug)]
+#[must_use]
 pub struct ArenaConfig {
     /// Size of each arena segment in f32 elements.
     ///

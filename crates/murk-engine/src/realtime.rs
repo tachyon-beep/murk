@@ -48,7 +48,7 @@ use crate::tick_thread::{IngressBatch, TickThreadState};
 // ── Error types ──────────────────────────────────────────────────
 
 /// Error submitting commands to the tick thread.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum SubmitError {
     /// The tick thread has shut down.
     Shutdown,

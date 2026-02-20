@@ -96,7 +96,7 @@ impl AsyncConfig {
 // ── ConfigError ────────────────────────────────────────────────────
 
 /// Errors detected during [`WorldConfig::validate()`].
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum ConfigError {
     /// Propagator pipeline validation failed.
     Pipeline(PipelineError),
@@ -300,8 +300,10 @@ impl WorldConfig {
         }
 
         // 7. Pipeline validation (delegates to murk-propagator).
+        //    The plan is intentionally discarded here — the world constructor
+        //    calls validate_pipeline() again to obtain it.
         let defined = self.defined_field_set();
-        validate_pipeline(&self.propagators, &defined, self.dt)?;
+        let _ = validate_pipeline(&self.propagators, &defined, self.dt)?;
 
         Ok(())
     }

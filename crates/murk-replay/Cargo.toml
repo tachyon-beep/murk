@@ -15,7 +15,6 @@ readme = "README.md"
 
 [dependencies]
 murk-core = { path = "../murk-core", version = "0.1.6" }
-indexmap = { workspace = true }
 
 [dev-dependencies]
 murk-engine = { path = "../murk-engine" }

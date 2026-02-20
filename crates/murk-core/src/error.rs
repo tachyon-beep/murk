@@ -9,7 +9,7 @@ use std::fmt;
 /// Errors from the tick engine during `step()`.
 ///
 /// Corresponds to the TickEngine and Pipeline subsystem codes in HLD §9.7.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StepError {
     /// A propagator returned an error during execution
     /// (`MURK_ERROR_PROPAGATOR_FAILED`).
@@ -64,7 +64,7 @@ impl Error for StepError {
 ///
 /// Returned by `Propagator::step()` and wrapped in
 /// [`StepError::PropagatorFailed`] by the tick engine.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PropagatorError {
     /// The propagator's step function failed
     /// (`MURK_ERROR_PROPAGATOR_FAILED`).
@@ -150,7 +150,7 @@ impl Error for IngressError {}
 /// Errors from the observation (egress) pipeline.
 ///
 /// Covers ObsPlan compilation, execution, and snapshot access failures.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ObsError {
     /// ObsPlan generation does not match the current snapshot
     /// (`MURK_ERROR_PLAN_INVALIDATED`).

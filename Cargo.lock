@@ -421,6 +421,7 @@ checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 name = "murk"
 version = "0.1.6"
 dependencies = [
+ "murk-arena",
  "murk-core",
  "murk-engine",
  "murk-obs",
@@ -459,7 +460,6 @@ dependencies = [
 name = "murk-core"
 version = "0.1.6"
 dependencies = [
- "indexmap",
  "proptest",
  "smallvec",
 ]
@@ -550,7 +550,6 @@ dependencies = [
 name = "murk-replay"
 version = "0.1.6"
 dependencies = [
- "indexmap",
  "murk-bench",
  "murk-core",
  "murk-engine",

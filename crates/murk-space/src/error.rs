@@ -4,7 +4,7 @@ use murk_core::Coord;
 use std::fmt;
 
 /// Errors arising from space construction or spatial queries.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SpaceError {
     /// A coordinate is outside the bounds of the space.
     CoordOutOfBounds {

@@ -254,6 +254,7 @@ impl FieldSet {
     /// assert!(u.contains(FieldId(1)));
     /// assert!(u.contains(FieldId(2)));
     /// ```
+    #[must_use]
     pub fn union(&self, other: &Self) -> Self {
         let max_len = self.bits.len().max(other.bits.len());
         let mut bits = Vec::with_capacity(max_len);
@@ -278,6 +279,7 @@ impl FieldSet {
     /// assert_eq!(inter.len(), 1);
     /// assert!(inter.contains(FieldId(1)));
     /// ```
+    #[must_use]
     pub fn intersection(&self, other: &Self) -> Self {
         let min_len = self.bits.len().min(other.bits.len());
         let mut bits = Vec::with_capacity(min_len);
@@ -305,6 +307,7 @@ impl FieldSet {
     /// assert!(!diff.contains(FieldId(1)));
     /// assert!(diff.contains(FieldId(2)));
     /// ```
+    #[must_use]
     pub fn difference(&self, other: &Self) -> Self {
         let mut bits = Vec::with_capacity(self.bits.len());
         for i in 0..self.bits.len() {
@@ -318,6 +321,7 @@ impl FieldSet {
     }
 
     /// Check whether `self` is a subset of `other`.
+    #[must_use]
     pub fn is_subset(&self, other: &Self) -> bool {
         for i in 0..self.bits.len() {
             let b = other.bits.get(i).copied().unwrap_or(0);
@@ -329,11 +333,13 @@ impl FieldSet {
     }
 
     /// Returns `true` if the set contains no fields.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.bits.iter().all(|&w| w == 0)
     }
 
     /// Returns the number of fields in the set.
+    #[must_use]
     pub fn len(&self) -> usize {
         self.bits.iter().map(|w| w.count_ones() as usize).sum()
     }

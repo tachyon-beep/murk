@@ -31,7 +31,7 @@ use crate::tick::TickError;
 // ── Error type ──────────────────────────────────────────────────
 
 /// Error from a batched operation, annotated with the failing world index.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum BatchError {
     /// A world's `step_sync()` failed.
     Step {

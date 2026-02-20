@@ -56,6 +56,7 @@
 //!
 //! | Module | Sub-crate | Contents |
 //! |--------|-----------|----------|
+//! | [`arena`] | `murk-arena` | Arena storage, `Snapshot`, `OwnedSnapshot` |
 //! | [`types`] | `murk-core` | IDs, field definitions, commands, core traits |
 //! | [`space`] | `murk-space` | Spatial backends and region planning |
 //! | [`propagator`] | `murk-propagator` | Propagator trait and pipeline validation |
@@ -67,6 +68,12 @@
 #![deny(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]
 #![forbid(unsafe_code)]
+
+/// Arena, snapshot, and field storage (`murk-arena`).
+///
+/// Most users only need [`arena::Snapshot`] and [`arena::OwnedSnapshot`]
+/// from this module — they are also available in the [`prelude`].
+pub use murk_arena as arena;
 
 /// Core types, traits, and IDs (`murk-core`).
 ///
@@ -122,6 +129,9 @@ pub use murk_replay as replay;
 /// This imports the most frequently used types: world builders, core traits,
 /// field definitions, commands, spatial types, and the propagator trait.
 pub mod prelude {
+    // Arena snapshots
+    pub use murk_arena::{OwnedSnapshot, Snapshot};
+
     // Core types and traits
     pub use murk_core::{
         BoundaryBehavior, Command, CommandPayload, Coord, FieldDef, FieldId, FieldMutability,

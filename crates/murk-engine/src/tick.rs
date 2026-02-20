@@ -49,7 +49,7 @@ pub struct TickResult {
 /// Wraps the underlying [`StepError`] and any receipts that were produced
 /// before the failure. On rollback, receipts carry `TickRollback` reason
 /// codes; callers must not discard them.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct TickError {
     /// The underlying error.
     pub kind: StepError,

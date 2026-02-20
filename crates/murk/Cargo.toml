@@ -15,6 +15,7 @@ readme = "README.md"
 
 [dependencies]
 murk-core = { path = "../murk-core", version = "0.1.6" }
+murk-arena = { path = "../murk-arena", version = "0.1.6" }
 murk-space = { path = "../murk-space", version = "0.1.6" }
 murk-propagator = { path = "../murk-propagator", version = "0.1.6" }
 murk-propagators = { path = "../murk-propagators", version = "0.1.6" }

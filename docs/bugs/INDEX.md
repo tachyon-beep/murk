@@ -3,7 +3,7 @@
 Generated 2026-02-17 from static analysis triage of 110 source reports.
 Updated 2026-02-20 with wave-4 deep audit findings (#54-#94).
 
-**Status (updated 2026-02-20):** 55 fixed, 0 partially fixed, 40 open.
+**Status (updated 2026-02-20):** 60 fixed, 0 partially fixed, 35 open.
 
 ## Open Bugs
 
@@ -13,18 +13,16 @@ Updated 2026-02-20 with wave-4 deep audit findings (#54-#94).
 |---|--------|-------|---------|--------|
 | — | (none) | — | — | — |
 
-### High (9 open)
+### High (7 open)
 
 | # | Ticket | Crate | Summary | Status |
 |---|--------|-------|---------|--------|
 | 20 | [ffi-mutex-poisoning-panic-in-extern-c](ffi-mutex-poisoning-panic-in-extern-c.md) | murk-ffi | 43+ `lock().unwrap()` calls in extern "C" functions; poisoned mutex = UB | Open |
 | 23 | [python-propagator-trampoline-leak-on-cstring-error](python-propagator-trampoline-leak-on-cstring-error.md) | murk-python | TrampolineData leaks on CString/add_propagator_handle error paths | Open |
 | 60 | [propagators-resolve-axis-duplicated](propagators-resolve-axis-duplicated.md) | murk-propagators | `resolve_axis`/`neighbours_flat` copy-pasted across 5 files | Open |
-| 61 | [space-is-multiple-of-msrv-compat](space-is-multiple-of-msrv-compat.md) | murk-space, murk-obs | `u32::is_multiple_of(2)` not stable at MSRV 1.87 (stabilized 1.88) | Open |
 | 62 | [python-trampoline-panic-across-ffi](python-trampoline-panic-across-ffi.md) | murk-python | `python_trampoline` has no `catch_unwind`; panic = UB across extern "C" | Open |
 | 63 | [python-missing-type-stubs-library-propagators](python-missing-type-stubs-library-propagators.md) | murk-python | `.pyi` stubs missing all 9 library propagator classes | Open |
 | 64 | [bench-missing-black-box](bench-missing-black-box.md) | murk-bench | Missing `black_box` + arena benchmark TickId/generation divergence | Open |
-| 65 | [umbrella-snapshot-not-importable](umbrella-snapshot-not-importable.md) | murk | `Snapshot` in return types but not importable through facade crate | Open |
 | 66 | [ffi-callback-propagator-missing-sync](ffi-callback-propagator-missing-sync.md) | murk-ffi | `CallbackPropagator` has `Send` but not `Sync`; unsound if design changes | Open |
 
 ### Medium (24 open)
@@ -56,19 +54,16 @@ Updated 2026-02-20 with wave-4 deep audit findings (#54-#94).
 | 87 | [python-batched-vecenv-missing-spaces](python-batched-vecenv-missing-spaces.md) | murk-python | `BatchedVecEnv` missing `observation_space`/`action_space`; breaks SB3 compat | Open |
 | 88 | [space-regionplan-public-fields](space-regionplan-public-fields.md) | murk-space | `RegionPlan` fields all pub; `ProductMetric::Weighted` panics in library code | Open |
 
-### Low (7 open)
+### Low (4 open)
 
 | # | Ticket | Crate | Summary | Status |
 |---|--------|-------|---------|--------|
 | 51 | [bench-space-ops-degenerate-q-distribution](bench-space-ops-degenerate-q-distribution.md) | murk-bench | LCG multiplier not coprime to modulus; only 4/20 q values exercised | Open |
 | 52 | [script-organize-by-priority-basename-collision](script-organize-by-priority-basename-collision.md) | scripts | --organize-by-priority flattens paths; duplicate basenames overwrite | Open |
 | 53 | [ffi-cbindgen-missing-c-header](ffi-cbindgen-missing-c-header.md) | murk-ffi | No generated C header; C consumers must hand-write 28+ extern declarations | Open |
-| 90 | [workspace-unused-indexmap-deps](workspace-unused-indexmap-deps.md) | murk-core, murk-replay | `indexmap` dependency compiled but never used in either crate | Open |
-| 91 | [workspace-missing-must-use](workspace-missing-must-use.md) | murk-core, murk-arena, murk-propagator | Missing `#[must_use]` on set operations, ID generators, guards | Open |
-| 92 | [workspace-error-types-missing-partialeq](workspace-error-types-missing-partialeq.md) | murk-core, murk-engine, murk-space, murk-propagator | Error types missing `PartialEq`/`Eq`; forces `matches!()` in tests | Open |
 | 94 | [propagators-performance-hotspots](propagators-performance-hotspots.md) | murk-propagators | Per-cell BFS alloc, O(n) agent scan, wasted Box-Muller samples | Open |
 
-## Closed Bugs (55 fixed)
+## Closed Bugs (60 fixed)
 
 Tickets moved to [closed/](closed/).
 
@@ -114,6 +109,11 @@ Tickets moved to [closed/](closed/).
 | 44 | [space-fcc12-parity-overflow](closed/space-fcc12-parity-overflow.md) | murk-space | XOR-based parity replaces arithmetic overflow in all 5 sites | (this session) |
 | 22 | [ffi-obs-negative-to-unsigned-cast](closed/ffi-obs-negative-to-unsigned-cast.md) | murk-ffi | Negative i32 params cast to u32/usize; -1 becomes u32::MAX | c0f5d55 |
 | 31 | [propagator-pipeline-nan-maxdt-bypass](closed/propagator-pipeline-nan-maxdt-bypass.md) | murk-propagator | NaN from max_dt() bypasses all stability constraints | (this session) |
+| 61 | [space-is-multiple-of-msrv-compat](closed/space-is-multiple-of-msrv-compat.md) | murk-space, murk-obs | `is_multiple_of()` replaced with `% 2 != 0` for MSRV 1.87 compat | (this session) |
+| 65 | [umbrella-snapshot-not-importable](closed/umbrella-snapshot-not-importable.md) | murk | murk-arena added as dep; Snapshot/OwnedSnapshot re-exported in prelude | (this session) |
+| 90 | [workspace-unused-indexmap-deps](closed/workspace-unused-indexmap-deps.md) | murk-core, murk-replay | Removed unused `indexmap` dependency from both crates | (this session) |
+| 91 | [workspace-missing-must-use](closed/workspace-missing-must-use.md) | murk-core, murk-arena, murk-propagator | `#[must_use]` added to FieldSet ops, SpaceInstanceId::next, TickGuard, etc. | (this session) |
+| 92 | [workspace-error-types-missing-partialeq](closed/workspace-error-types-missing-partialeq.md) | murk-core, murk-engine, murk-space, murk-propagator | PartialEq/Eq derived bottom-up through error type dependency chain | (this session) |
 | 13 | [arena-placeholder-pertick-handles-in-snapshot](closed/arena-placeholder-pertick-handles-in-snapshot.md) | murk-arena | Placeholder handles readable via snapshot before any begin_tick/publish cycle | (this session) |
 | 28 | [arena-segment-slice-beyond-cursor](closed/arena-segment-slice-beyond-cursor.md) | murk-arena | Segment::slice checks capacity not cursor; reads stale data | (this session) |
 | 24 | [space-product-weighted-metric-truncation](closed/space-product-weighted-metric-truncation.md) | murk-space | Weighted metric silently drops trailing component distances via zip truncation | (this session) |
@@ -142,14 +142,14 @@ Tickets moved to [closed/](closed/).
 | murk-propagators | 0 | 1 | 1 | 1 | 3 |
 | murk-obs | 0 | 0 | 1 | 0 | 1 |
 | murk-replay | 0 | 0 | 0 | 0 | 0 |
-| murk-space | 0 | 1 | 3 | 0 | 4 |
+| murk-space | 0 | 0 | 3 | 0 | 3 |
 | murk-core | 0 | 0 | 0 | 0 | 0 |
 | murk-bench | 0 | 1 | 0 | 1 | 2 |
-| murk (umbrella) | 0 | 1 | 0 | 0 | 1 |
+| murk (umbrella) | 0 | 0 | 0 | 0 | 0 |
 | examples | 0 | 0 | 1 | 0 | 1 |
 | scripts | 0 | 0 | 0 | 1 | 1 |
-| workspace (cross-crate) | 0 | 0 | 0 | 3 | 3 |
-| **Total** | **0** | **9** | **24** | **7** | **40** |
+| workspace (cross-crate) | 0 | 0 | 0 | 0 | 0 |
+| **Total** | **0** | **7** | **24** | **4** | **35** |
 
 Note: Workspace-wide tickets (#90-#92) affect multiple crates and are counted once under "workspace".
 

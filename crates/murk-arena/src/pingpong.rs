@@ -33,6 +33,7 @@ use crate::write::WriteArena;
 /// Created by [`PingPongArena::begin_tick()`] and consumed before
 /// [`PingPongArena::publish()`]. Holds mutable borrows into the staging
 /// buffer, preventing any other access to the arena during the tick.
+#[must_use]
 pub struct TickGuard<'a> {
     /// Mutable write access to the staging buffer.
     pub writer: WriteArena<'a>,
