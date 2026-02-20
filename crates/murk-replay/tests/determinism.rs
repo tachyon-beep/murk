@@ -66,7 +66,7 @@ fn record_run(
 ) {
     for tick in 1..=ticks {
         let cmds = commands_per_tick(tick);
-        let serialized: Vec<_> = cmds.iter().map(serialize_command).collect();
+        let serialized: Vec<_> = cmds.iter().map(|c| serialize_command(c).unwrap()).collect();
         let result = world.step_sync(cmds).unwrap();
         let hash = snapshot_hash(&result.snapshot, field_count);
         let frame = murk_replay::Frame {

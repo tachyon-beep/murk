@@ -11,7 +11,7 @@ use murk_core::id::{Coord, FieldId, ParameterKey, TickId};
 
 use crate::error::ReplayError;
 use crate::types::*;
-use crate::{FORMAT_VERSION, MAGIC};
+use crate::{FORMAT_VERSION, MAGIC, MAX_BLOB_LEN, MAX_COMMANDS_PER_FRAME, MAX_STRING_LEN};
 
 // ── Primitive writers ───────────────────────────────────────────
 
@@ -53,14 +53,20 @@ pub fn write_i32_le(w: &mut dyn Write, v: i32) -> Result<(), ReplayError> {
 
 /// Write a length-prefixed UTF-8 string (u32 length + bytes).
 pub fn write_length_prefixed_str(w: &mut dyn Write, s: &str) -> Result<(), ReplayError> {
-    write_u32_le(w, s.len() as u32)?;
+    let len = u32::try_from(s.len()).map_err(|_| ReplayError::DataTooLarge {
+        detail: format!("string length {} exceeds u32::MAX", s.len()),
+    })?;
+    write_u32_le(w, len)?;
     w.write_all(s.as_bytes())?;
     Ok(())
 }
 
 /// Write a length-prefixed byte array (u32 length + bytes).
 pub fn write_length_prefixed_bytes(w: &mut dyn Write, b: &[u8]) -> Result<(), ReplayError> {
-    write_u32_le(w, b.len() as u32)?;
+    let len = u32::try_from(b.len()).map_err(|_| ReplayError::DataTooLarge {
+        detail: format!("byte array length {} exceeds u32::MAX", b.len()),
+    })?;
+    write_u32_le(w, len)?;
     w.write_all(b)?;
     Ok(())
 }
@@ -112,6 +118,11 @@ pub fn read_i32_le(r: &mut dyn Read) -> Result<i32, ReplayError> {
 /// Read a length-prefixed UTF-8 string.
 pub fn read_length_prefixed_str(r: &mut dyn Read) -> Result<String, ReplayError> {
     let len = read_u32_le(r)? as usize;
+    if len > MAX_STRING_LEN {
+        return Err(ReplayError::MalformedFrame {
+            detail: format!("string length {len} exceeds limit {MAX_STRING_LEN}"),
+        });
+    }
     let mut buf = vec![0u8; len];
     r.read_exact(&mut buf)?;
     String::from_utf8(buf).map_err(|e| ReplayError::MalformedFrame {
@@ -122,6 +133,11 @@ pub fn read_length_prefixed_str(r: &mut dyn Read) -> Result<String, ReplayError>
 /// Read a length-prefixed byte array.
 pub fn read_length_prefixed_bytes(r: &mut dyn Read) -> Result<Vec<u8>, ReplayError> {
     let len = read_u32_le(r)? as usize;
+    if len > MAX_BLOB_LEN {
+        return Err(ReplayError::MalformedFrame {
+            detail: format!("byte array length {len} exceeds limit {MAX_BLOB_LEN}"),
+        });
+    }
     let mut buf = vec![0u8; len];
     r.read_exact(&mut buf)?;
     Ok(buf)
@@ -198,7 +214,12 @@ pub fn decode_header(r: &mut dyn Read) -> Result<(BuildMetadata, InitDescriptor)
 /// Encode a single replay frame.
 pub fn encode_frame(w: &mut dyn Write, frame: &Frame) -> Result<(), ReplayError> {
     write_u64_le(w, frame.tick_id)?;
-    write_u32_le(w, frame.commands.len() as u32)?;
+    let command_count = u32::try_from(frame.commands.len()).map_err(|_| {
+        ReplayError::DataTooLarge {
+            detail: format!("command count {} exceeds u32::MAX", frame.commands.len()),
+        }
+    })?;
+    write_u32_le(w, command_count)?;
 
     for cmd in &frame.commands {
         write_u8(w, cmd.payload_type)?;
@@ -220,6 +241,9 @@ pub fn encode_frame(w: &mut dyn Write, frame: &Frame) -> Result<(), ReplayError>
             }
             None => write_u8(w, 0)?,
         }
+        // v3: expires_after_tick and arrival_seq
+        write_u64_le(w, cmd.expires_after_tick)?;
+        write_u64_le(w, cmd.arrival_seq)?;
     }
 
     write_u64_le(w, frame.snapshot_hash)?;
@@ -255,6 +279,13 @@ pub fn decode_frame(r: &mut dyn Read) -> Result<Option<Frame>, ReplayError> {
     let tick_id = u64::from_le_bytes(tick_buf);
 
     let command_count = read_u32_le(r)? as usize;
+    if command_count > MAX_COMMANDS_PER_FRAME {
+        return Err(ReplayError::MalformedFrame {
+            detail: format!(
+                "command count {command_count} exceeds limit {MAX_COMMANDS_PER_FRAME}"
+            ),
+        });
+    }
     let mut commands = Vec::with_capacity(command_count);
 
     for _ in 0..command_count {
@@ -282,12 +313,18 @@ pub fn decode_frame(r: &mut dyn Read) -> Result<Option<Frame>, ReplayError> {
             }
         };
 
+        // v3: expires_after_tick and arrival_seq
+        let expires_after_tick = read_u64_le(r)?;
+        let arrival_seq = read_u64_le(r)?;
+
         commands.push(SerializedCommand {
             payload_type,
             payload,
             priority_class,
             source_id,
             source_seq,
+            expires_after_tick,
+            arrival_seq,
         });
     }
 
@@ -303,12 +340,15 @@ pub fn decode_frame(r: &mut dyn Read) -> Result<Option<Frame>, ReplayError> {
 // ── Command serialization ───────────────────────────────────────
 
 /// Serialize a `Coord` (SmallVec<[i32; 4]>) as a length-prefixed i32 array.
-fn serialize_coord(buf: &mut Vec<u8>, coord: &Coord) {
-    let len = coord.len() as u32;
+fn serialize_coord(buf: &mut Vec<u8>, coord: &Coord) -> Result<(), ReplayError> {
+    let len = u32::try_from(coord.len()).map_err(|_| ReplayError::DataTooLarge {
+        detail: format!("coord length {} exceeds u32::MAX", coord.len()),
+    })?;
     buf.extend_from_slice(&len.to_le_bytes());
     for &v in coord.iter() {
         buf.extend_from_slice(&v.to_le_bytes());
     }
+    Ok(())
 }
 
 /// Deserialize a `Coord` from a byte slice, advancing the offset.
@@ -339,9 +379,8 @@ fn deserialize_coord(data: &[u8], offset: &mut usize) -> Result<Coord, ReplayErr
 
 /// Serialize a [`Command`] into a [`SerializedCommand`].
 ///
-/// Only `payload`, `priority_class`, `source_id`, and `source_seq` are recorded.
-/// `expires_after_tick` and `arrival_seq` are not serialized per spec.
-pub fn serialize_command(cmd: &Command) -> SerializedCommand {
+/// Returns an error if any length field exceeds `u32::MAX`.
+pub fn serialize_command(cmd: &Command) -> Result<SerializedCommand, ReplayError> {
     let (payload_type, payload) = match &cmd.payload {
         CommandPayload::Move {
             entity_id,
@@ -349,7 +388,7 @@ pub fn serialize_command(cmd: &Command) -> SerializedCommand {
         } => {
             let mut buf = Vec::new();
             buf.extend_from_slice(&entity_id.to_le_bytes());
-            serialize_coord(&mut buf, target_coord);
+            serialize_coord(&mut buf, target_coord)?;
             (PAYLOAD_MOVE, buf)
         }
         CommandPayload::Spawn {
@@ -357,8 +396,15 @@ pub fn serialize_command(cmd: &Command) -> SerializedCommand {
             field_values,
         } => {
             let mut buf = Vec::new();
-            serialize_coord(&mut buf, coord);
-            buf.extend_from_slice(&(field_values.len() as u32).to_le_bytes());
+            serialize_coord(&mut buf, coord)?;
+            let fv_len =
+                u32::try_from(field_values.len()).map_err(|_| ReplayError::DataTooLarge {
+                    detail: format!(
+                        "Spawn field_values count {} exceeds u32::MAX",
+                        field_values.len()
+                    ),
+                })?;
+            buf.extend_from_slice(&fv_len.to_le_bytes());
             for (fid, val) in field_values {
                 buf.extend_from_slice(&fid.0.to_le_bytes());
                 buf.extend_from_slice(&val.to_le_bytes());
@@ -375,7 +421,7 @@ pub fn serialize_command(cmd: &Command) -> SerializedCommand {
             value,
         } => {
             let mut buf = Vec::new();
-            serialize_coord(&mut buf, coord);
+            serialize_coord(&mut buf, coord)?;
             buf.extend_from_slice(&field_id.0.to_le_bytes());
             buf.extend_from_slice(&value.to_le_bytes());
             (PAYLOAD_SET_FIELD, buf)
@@ -383,7 +429,10 @@ pub fn serialize_command(cmd: &Command) -> SerializedCommand {
         CommandPayload::Custom { type_id, data } => {
             let mut buf = Vec::new();
             buf.extend_from_slice(&type_id.to_le_bytes());
-            buf.extend_from_slice(&(data.len() as u32).to_le_bytes());
+            let data_len = u32::try_from(data.len()).map_err(|_| ReplayError::DataTooLarge {
+                detail: format!("Custom data length {} exceeds u32::MAX", data.len()),
+            })?;
+            buf.extend_from_slice(&data_len.to_le_bytes());
             buf.extend_from_slice(data);
             (PAYLOAD_CUSTOM, buf)
         }
@@ -395,7 +444,14 @@ pub fn serialize_command(cmd: &Command) -> SerializedCommand {
         }
         CommandPayload::SetParameterBatch { params } => {
             let mut buf = Vec::new();
-            buf.extend_from_slice(&(params.len() as u32).to_le_bytes());
+            let params_len =
+                u32::try_from(params.len()).map_err(|_| ReplayError::DataTooLarge {
+                    detail: format!(
+                        "SetParameterBatch count {} exceeds u32::MAX",
+                        params.len()
+                    ),
+                })?;
+            buf.extend_from_slice(&params_len.to_le_bytes());
             for (key, value) in params {
                 buf.extend_from_slice(&key.0.to_le_bytes());
                 buf.extend_from_slice(&value.to_le_bytes());
@@ -404,19 +460,18 @@ pub fn serialize_command(cmd: &Command) -> SerializedCommand {
         }
     };
 
-    SerializedCommand {
+    Ok(SerializedCommand {
         payload_type,
         payload,
         priority_class: cmd.priority_class,
         source_id: cmd.source_id,
         source_seq: cmd.source_seq,
-    }
+        expires_after_tick: cmd.expires_after_tick.0,
+        arrival_seq: cmd.arrival_seq,
+    })
 }
 
 /// Deserialize a [`SerializedCommand`] back into a [`Command`].
-///
-/// Sets `expires_after_tick` to `TickId(u64::MAX)` and `arrival_seq` to `0`
-/// since those fields are not recorded in the replay.
 pub fn deserialize_command(sc: &SerializedCommand) -> Result<Command, ReplayError> {
     let data = &sc.payload;
     let payload = match sc.payload_type {
@@ -548,11 +603,11 @@ pub fn deserialize_command(sc: &SerializedCommand) -> Result<Command, ReplayErro
 
     Ok(Command {
         payload,
-        expires_after_tick: TickId(u64::MAX),
+        expires_after_tick: TickId(sc.expires_after_tick),
         source_id: sc.source_id,
         source_seq: sc.source_seq,
         priority_class: sc.priority_class,
-        arrival_seq: 0,
+        arrival_seq: sc.arrival_seq,
     })
 }
 
@@ -576,65 +631,70 @@ mod tests {
     fn arb_command() -> impl Strategy<Value = Command> {
         prop_oneof![
             // Move
-            (any::<u64>(), arb_coord(), arb_opt_u64(), arb_opt_u64()).prop_map(
-                |(eid, coord, sid, sseq)| Command {
+            (any::<u64>(), arb_coord(), arb_opt_u64(), arb_opt_u64(), any::<u64>(), any::<u64>())
+                .prop_map(|(eid, coord, sid, sseq, eat, aseq)| Command {
                     payload: CommandPayload::Move {
                         entity_id: eid,
                         target_coord: coord,
                     },
-                    expires_after_tick: TickId(u64::MAX),
+                    expires_after_tick: TickId(eat),
                     source_id: sid,
                     source_seq: sseq,
                     priority_class: 1,
-                    arrival_seq: 0,
-                }
-            ),
+                    arrival_seq: aseq,
+                }),
             // Spawn
             (
                 arb_coord(),
                 prop::collection::vec((0u32..10, any::<f32>()), 0..4),
                 arb_opt_u64(),
                 arb_opt_u64(),
+                any::<u64>(),
+                any::<u64>(),
             )
-                .prop_map(|(coord, fvs, sid, sseq)| Command {
+                .prop_map(|(coord, fvs, sid, sseq, eat, aseq)| Command {
                     payload: CommandPayload::Spawn {
                         coord,
                         field_values: fvs.into_iter().map(|(f, v)| (FieldId(f), v)).collect(),
                     },
-                    expires_after_tick: TickId(u64::MAX),
+                    expires_after_tick: TickId(eat),
                     source_id: sid,
                     source_seq: sseq,
                     priority_class: 0,
-                    arrival_seq: 0,
+                    arrival_seq: aseq,
                 }),
             // Despawn
-            (any::<u64>(), arb_opt_u64(), arb_opt_u64()).prop_map(|(eid, sid, sseq)| Command {
-                payload: CommandPayload::Despawn { entity_id: eid },
-                expires_after_tick: TickId(u64::MAX),
-                source_id: sid,
-                source_seq: sseq,
-                priority_class: 1,
-                arrival_seq: 0,
-            }),
+            (any::<u64>(), arb_opt_u64(), arb_opt_u64(), any::<u64>(), any::<u64>()).prop_map(
+                |(eid, sid, sseq, eat, aseq)| Command {
+                    payload: CommandPayload::Despawn { entity_id: eid },
+                    expires_after_tick: TickId(eat),
+                    source_id: sid,
+                    source_seq: sseq,
+                    priority_class: 1,
+                    arrival_seq: aseq,
+                }
+            ),
             // SetField
             (
                 arb_coord(),
                 0u32..10,
                 any::<f32>(),
                 arb_opt_u64(),
-                arb_opt_u64()
+                arb_opt_u64(),
+                any::<u64>(),
+                any::<u64>(),
             )
-                .prop_map(|(coord, fid, val, sid, sseq)| Command {
+                .prop_map(|(coord, fid, val, sid, sseq, eat, aseq)| Command {
                     payload: CommandPayload::SetField {
                         coord,
                         field_id: FieldId(fid),
                         value: val,
                     },
-                    expires_after_tick: TickId(u64::MAX),
+                    expires_after_tick: TickId(eat),
                     source_id: sid,
                     source_seq: sseq,
                     priority_class: 1,
-                    arrival_seq: 0,
+                    arrival_seq: aseq,
                 }),
             // Custom
             (
@@ -642,49 +702,54 @@ mod tests {
                 prop::collection::vec(any::<u8>(), 0..32),
                 arb_opt_u64(),
                 arb_opt_u64(),
+                any::<u64>(),
+                any::<u64>(),
             )
-                .prop_map(|(tid, data, sid, sseq)| {
+                .prop_map(|(tid, data, sid, sseq, eat, aseq)| {
                     Command {
                         payload: CommandPayload::Custom { type_id: tid, data },
-                        expires_after_tick: TickId(u64::MAX),
+                        expires_after_tick: TickId(eat),
                         source_id: sid,
                         source_seq: sseq,
                         priority_class: 1,
-                        arrival_seq: 0,
+                        arrival_seq: aseq,
                     }
                 }),
             // SetParameter
-            (0u32..10, any::<f64>(), arb_opt_u64(), arb_opt_u64()).prop_map(|(k, v, sid, sseq)| {
-                Command {
-                    payload: CommandPayload::SetParameter {
-                        key: ParameterKey(k),
-                        value: v,
-                    },
-                    expires_after_tick: TickId(u64::MAX),
-                    source_id: sid,
-                    source_seq: sseq,
-                    priority_class: 1,
-                    arrival_seq: 0,
-                }
-            }),
+            (0u32..10, any::<f64>(), arb_opt_u64(), arb_opt_u64(), any::<u64>(), any::<u64>())
+                .prop_map(|(k, v, sid, sseq, eat, aseq)| {
+                    Command {
+                        payload: CommandPayload::SetParameter {
+                            key: ParameterKey(k),
+                            value: v,
+                        },
+                        expires_after_tick: TickId(eat),
+                        source_id: sid,
+                        source_seq: sseq,
+                        priority_class: 1,
+                        arrival_seq: aseq,
+                    }
+                }),
             // SetParameterBatch
             (
                 prop::collection::vec((0u32..10, any::<f64>()), 1..4),
                 arb_opt_u64(),
                 arb_opt_u64(),
+                any::<u64>(),
+                any::<u64>(),
             )
-                .prop_map(|(params, sid, sseq)| Command {
+                .prop_map(|(params, sid, sseq, eat, aseq)| Command {
                     payload: CommandPayload::SetParameterBatch {
                         params: params
                             .into_iter()
                             .map(|(k, v)| (ParameterKey(k), v))
                             .collect(),
                     },
-                    expires_after_tick: TickId(u64::MAX),
+                    expires_after_tick: TickId(eat),
                     source_id: sid,
                     source_seq: sseq,
                     priority_class: 1,
-                    arrival_seq: 0,
+                    arrival_seq: aseq,
                 }),
         ]
     }
@@ -809,13 +874,14 @@ mod tests {
     proptest! {
         #[test]
         fn roundtrip_command(cmd in arb_command()) {
-            let sc = serialize_command(&cmd);
+            let sc = serialize_command(&cmd).unwrap();
             let got = deserialize_command(&sc).unwrap();
-            // Compare payloads (expires_after_tick and arrival_seq differ by design)
             prop_assert_eq!(&cmd.payload, &got.payload);
             prop_assert_eq!(cmd.priority_class, got.priority_class);
             prop_assert_eq!(cmd.source_id, got.source_id);
             prop_assert_eq!(cmd.source_seq, got.source_seq);
+            prop_assert_eq!(cmd.expires_after_tick, got.expires_after_tick);
+            prop_assert_eq!(cmd.arrival_seq, got.arrival_seq);
         }
     }
 
@@ -850,18 +916,20 @@ mod tests {
                     source_seq: Some(1),
                     priority_class: 1,
                     arrival_seq: 0,
-                }),
+                })
+                .unwrap(),
                 serialize_command(&Command {
                     payload: CommandPayload::Move {
                         entity_id: 7,
                         target_coord: Coord::from_slice(&[1, 2]),
                     },
-                    expires_after_tick: TickId(u64::MAX),
+                    expires_after_tick: TickId(500),
                     source_id: Some(2),
                     source_seq: Some(3),
                     priority_class: 0,
-                    arrival_seq: 0,
-                }),
+                    arrival_seq: 42,
+                })
+                .unwrap(),
             ],
             snapshot_hash: 0xDEAD,
         };
@@ -925,7 +993,7 @@ mod tests {
             priority_class: 1,
             arrival_seq: 0,
         };
-        let sc = serialize_command(&cmd);
+        let sc = serialize_command(&cmd).unwrap();
         assert_eq!(sc.source_id, None);
         assert_eq!(sc.source_seq, None);
         let got = deserialize_command(&sc).unwrap();
@@ -944,7 +1012,7 @@ mod tests {
             priority_class: 1,
             arrival_seq: 0,
         };
-        let sc = serialize_command(&cmd);
+        let sc = serialize_command(&cmd).unwrap();
         assert_eq!(sc.source_id, Some(0));
         assert_eq!(sc.source_seq, Some(0));
         let got = deserialize_command(&sc).unwrap();
@@ -964,6 +1032,8 @@ mod tests {
                 priority_class: 1,
                 source_id: Some(0),
                 source_seq: Some(0),
+                expires_after_tick: u64::MAX,
+                arrival_seq: 0,
             }],
             snapshot_hash: 0,
         };
@@ -986,6 +1056,8 @@ mod tests {
                 priority_class: 1,
                 source_id: None,
                 source_seq: None,
+                expires_after_tick: u64::MAX,
+                arrival_seq: 0,
             }],
             snapshot_hash: 0,
         };
@@ -997,6 +1069,8 @@ mod tests {
                 priority_class: 1,
                 source_id: Some(0),
                 source_seq: Some(0),
+                expires_after_tick: u64::MAX,
+                arrival_seq: 0,
             }],
             snapshot_hash: 0,
         };
@@ -1029,6 +1103,8 @@ mod tests {
                 priority_class: 1,
                 source_id: None,
                 source_seq: None,
+                expires_after_tick: u64::MAX,
+                arrival_seq: 0,
             }],
             snapshot_hash: 0,
         };
@@ -1069,6 +1145,8 @@ mod tests {
                 priority_class: 1,
                 source_id: None,
                 source_seq: None,
+                expires_after_tick: u64::MAX,
+                arrival_seq: 0,
             }],
             snapshot_hash: 0,
         };
@@ -1092,5 +1170,108 @@ mod tests {
             }
             other => panic!("expected MalformedFrame, got {other:?}"),
         }
+    }
+
+    // ── P3: Decode limit enforcement ───────────────────────────
+
+    #[test]
+    fn decode_rejects_oversized_string() {
+        // Craft a wire buffer declaring a string of MAX_STRING_LEN + 1 bytes.
+        let bad_len = (crate::MAX_STRING_LEN as u32) + 1;
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&bad_len.to_le_bytes());
+        let result = read_length_prefixed_str(&mut buf.as_slice());
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ReplayError::MalformedFrame { detail } => {
+                assert!(detail.contains("exceeds limit"), "wrong detail: {detail}");
+            }
+            other => panic!("expected MalformedFrame, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decode_rejects_oversized_blob() {
+        let bad_len = (crate::MAX_BLOB_LEN as u32) + 1;
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&bad_len.to_le_bytes());
+        let result = read_length_prefixed_bytes(&mut buf.as_slice());
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ReplayError::MalformedFrame { detail } => {
+                assert!(detail.contains("exceeds limit"), "wrong detail: {detail}");
+            }
+            other => panic!("expected MalformedFrame, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decode_rejects_oversized_command_count() {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&1u64.to_le_bytes()); // tick_id
+        let bad_count = (crate::MAX_COMMANDS_PER_FRAME as u32) + 1;
+        buf.extend_from_slice(&bad_count.to_le_bytes());
+        let result = decode_frame(&mut buf.as_slice());
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ReplayError::MalformedFrame { detail } => {
+                assert!(detail.contains("exceeds limit"), "wrong detail: {detail}");
+            }
+            other => panic!("expected MalformedFrame, got {other:?}"),
+        }
+    }
+
+    // ── P4: expires_after_tick and arrival_seq roundtrip ────────
+
+    #[test]
+    fn expires_after_tick_and_arrival_seq_roundtrip() {
+        let cmd = Command {
+            payload: CommandPayload::Despawn { entity_id: 1 },
+            expires_after_tick: TickId(500),
+            source_id: Some(1),
+            source_seq: Some(2),
+            priority_class: 1,
+            arrival_seq: 42,
+        };
+        let sc = serialize_command(&cmd).unwrap();
+        assert_eq!(sc.expires_after_tick, 500);
+        assert_eq!(sc.arrival_seq, 42);
+
+        let got = deserialize_command(&sc).unwrap();
+        assert_eq!(got.expires_after_tick, TickId(500));
+        assert_eq!(got.arrival_seq, 42);
+    }
+
+    #[test]
+    fn expires_after_tick_survives_frame_roundtrip() {
+        let cmd = Command {
+            payload: CommandPayload::SetField {
+                coord: Coord::from_slice(&[3, 4]),
+                field_id: FieldId(1),
+                value: 1.0,
+            },
+            expires_after_tick: TickId(999),
+            source_id: None,
+            source_seq: None,
+            priority_class: 0,
+            arrival_seq: 77,
+        };
+        let sc = serialize_command(&cmd).unwrap();
+        let frame = Frame {
+            tick_id: 10,
+            commands: vec![sc],
+            snapshot_hash: 0xBEEF,
+        };
+
+        let mut buf = Vec::new();
+        encode_frame(&mut buf, &frame).unwrap();
+        let got = decode_frame(&mut buf.as_slice()).unwrap().unwrap();
+
+        assert_eq!(got.commands[0].expires_after_tick, 999);
+        assert_eq!(got.commands[0].arrival_seq, 77);
+
+        let deserialized = deserialize_command(&got.commands[0]).unwrap();
+        assert_eq!(deserialized.expires_after_tick, TickId(999));
+        assert_eq!(deserialized.arrival_seq, 77);
     }
 }

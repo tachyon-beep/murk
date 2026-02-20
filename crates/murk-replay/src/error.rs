@@ -32,6 +32,11 @@ pub enum ReplayError {
         /// Hash computed from the current configuration.
         current: u64,
     },
+    /// A value exceeds the maximum size representable in the replay format.
+    DataTooLarge {
+        /// Human-readable description of what exceeded the limit.
+        detail: String,
+    },
     /// A snapshot hash does not match between recorded and replayed state.
     SnapshotMismatch {
         /// The tick at which the mismatch was detected.
@@ -55,6 +60,7 @@ impl fmt::Display for ReplayError {
             Self::UnknownPayloadType { tag } => {
                 write!(f, "unknown payload type tag {tag}")
             }
+            Self::DataTooLarge { detail } => write!(f, "data too large: {detail}"),
             Self::ConfigMismatch { recorded, current } => {
                 write!(
                     f,

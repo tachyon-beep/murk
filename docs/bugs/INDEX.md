@@ -3,7 +3,7 @@
 Generated 2026-02-17 from static analysis triage of 110 source reports.
 Updated 2026-02-20 with wave-4 deep audit findings (#54-#94).
 
-**Status (updated 2026-02-20):** 45 fixed, 0 partially fixed, 50 open.
+**Status (updated 2026-02-20):** 49 fixed, 0 partially fixed, 46 open.
 
 ## Open Bugs
 
@@ -27,7 +27,7 @@ Updated 2026-02-20 with wave-4 deep audit findings (#54-#94).
 | 65 | [umbrella-snapshot-not-importable](umbrella-snapshot-not-importable.md) | murk | `Snapshot` in return types but not importable through facade crate | Open |
 | 66 | [ffi-callback-propagator-missing-sync](ffi-callback-propagator-missing-sync.md) | murk-ffi | `CallbackPropagator` has `Send` but not `Sync`; unsound if design changes | Open |
 
-### Medium (31 open)
+### Medium (28 open)
 
 | # | Ticket | Crate | Summary | Status |
 |---|--------|-------|---------|--------|
@@ -35,7 +35,6 @@ Updated 2026-02-20 with wave-4 deep audit findings (#54-#94).
 | 27 | [engine-quickstart-setfield-noop](engine-quickstart-setfield-noop.md) | murk-engine | Quickstart example's SetField injection overwritten by diffusion propagator | Open |
 | 29 | [arena-sparse-segment-memory-leak](arena-sparse-segment-memory-leak.md) | murk-arena | Sparse CoW bump-allocates but never reclaims dead segment memory | Open |
 | 30 | [propagator-agent-movement-tick0-actions](propagator-agent-movement-tick0-actions.md) | murk-propagators | Actions processed on tick 0 alongside initialization | Open |
-| 35 | [replay-codec-unbounded-alloc-from-wire](replay-codec-unbounded-alloc-from-wire.md) | murk-replay | decode_frame allocates from untrusted u32 lengths; DoS vector | Open |
 | 37 | [ffi-accessor-ambiguous-zero-return](ffi-accessor-ambiguous-zero-return.md) | murk-ffi | World accessors return 0 for invalid handles, indistinguishable from valid state | Open |
 | 38 | [ffi-handle-generation-wraparound](ffi-handle-generation-wraparound.md) | murk-ffi | u32 generation wraps after 4B cycles; ABA handle resurrection | Open |
 | 39 | [python-metrics-race-between-step-and-propagator-query](python-metrics-race-between-step-and-propagator-query.md) | murk-python | Per-propagator timings fetched via separate FFI call; race with concurrent step | Open |
@@ -46,8 +45,6 @@ Updated 2026-02-20 with wave-4 deep audit findings (#54-#94).
 | 45 | [space-hex2d-disk-overflow](space-hex2d-disk-overflow.md) | murk-space | compile_hex_disk i64 overflow when radius near i32::MAX | Open |
 | 46 | [space-compliance-ordering-membership](space-compliance-ordering-membership.md) | murk-space | Compliance test checks cardinality/uniqueness but not cell membership | Open |
 | 67 | [engine-cell-count-u32-truncation](engine-cell-count-u32-truncation.md) | murk-engine | `cell_count as u32` silent truncation; 65536x65536 grid overflows to 0 | Open |
-| 72 | [replay-write-path-u32-truncation](replay-write-path-u32-truncation.md) | murk-replay | 7 `as u32` casts on write path without overflow check; silent data corruption | Open |
-| 73 | [replay-expires-arrival-seq-not-serialized](replay-expires-arrival-seq-not-serialized.md) | murk-replay | `expires_after_tick` and `arrival_seq` silently discarded; replay may diverge | Open |
 | 74 | [python-cstr-from-ptr-potential-ub](python-cstr-from-ptr-potential-ub.md) | murk-python | `CStr::from_ptr` on stack buffer; UB if FFI writes exactly 256 bytes | Open |
 | 75 | [python-reset-all-no-seeds-validation](python-reset-all-no-seeds-validation.md) | murk-python | `BatchedWorld::reset_all()` doesn't validate `seeds.len() == num_worlds` | Open |
 | 76 | [core-fieldtype-zero-dims-constructible](core-fieldtype-zero-dims-constructible.md) | murk-core | `FieldType::Vector { dims: 0 }` constructible; `FieldDef.bounds` no min<=max validation | Open |
@@ -63,7 +60,7 @@ Updated 2026-02-20 with wave-4 deep audit findings (#54-#94).
 | 87 | [python-batched-vecenv-missing-spaces](python-batched-vecenv-missing-spaces.md) | murk-python | `BatchedVecEnv` missing `observation_space`/`action_space`; breaks SB3 compat | Open |
 | 88 | [space-regionplan-public-fields](space-regionplan-public-fields.md) | murk-space | `RegionPlan` fields all pub; `ProductMetric::Weighted` panics in library code | Open |
 
-### Low (10 open)
+### Low (9 open)
 
 | # | Ticket | Crate | Summary | Status |
 |---|--------|-------|---------|--------|
@@ -75,15 +72,18 @@ Updated 2026-02-20 with wave-4 deep audit findings (#54-#94).
 | 90 | [workspace-unused-indexmap-deps](workspace-unused-indexmap-deps.md) | murk-core, murk-replay | `indexmap` dependency compiled but never used in either crate | Open |
 | 91 | [workspace-missing-must-use](workspace-missing-must-use.md) | murk-core, murk-arena, murk-propagator | Missing `#[must_use]` on set operations, ID generators, guards | Open |
 | 92 | [workspace-error-types-missing-partialeq](workspace-error-types-missing-partialeq.md) | murk-core, murk-engine, murk-space, murk-propagator | Error types missing `PartialEq`/`Eq`; forces `matches!()` in tests | Open |
-| 93 | [replay-writer-no-flush-on-drop](replay-writer-no-flush-on-drop.md) | murk-replay | `ReplayWriter` has no `Drop` impl to flush; buffered data silently lost | Open |
 | 94 | [propagators-performance-hotspots](propagators-performance-hotspots.md) | murk-propagators | Per-cell BFS alloc, O(n) agent scan, wasted Box-Muller samples | Open |
 
-## Closed Bugs (45 fixed)
+## Closed Bugs (49 fixed)
 
 Tickets moved to [closed/](closed/).
 
 | # | Ticket | Crate | Summary | Fix Commit |
 |---|--------|-------|---------|------------|
+| 35 | [replay-codec-unbounded-alloc-from-wire](closed/replay-codec-unbounded-alloc-from-wire.md) | murk-replay | Decode limits added; rejects oversized strings, blobs, and command counts | (this session) |
+| 72 | [replay-write-path-u32-truncation](closed/replay-write-path-u32-truncation.md) | murk-replay | All `as u32` casts replaced with `u32::try_from()`; returns `DataTooLarge` error | (this session) |
+| 73 | [replay-expires-arrival-seq-not-serialized](closed/replay-expires-arrival-seq-not-serialized.md) | murk-replay | FORMAT_VERSION bumped to 3; `expires_after_tick` and `arrival_seq` now serialized per command | (this session) |
+| 93 | [replay-writer-no-flush-on-drop](closed/replay-writer-no-flush-on-drop.md) | murk-replay | `Drop` impl added; flushes on drop via `Option<W>` pattern | (this session) |
 | 54 | [arena-publish-no-state-guard](closed/arena-publish-no-state-guard.md) | murk-arena | `publish()` guarded by `tick_in_progress` flag; uses `next_generation` from `begin_tick()` | (this session) |
 | 56 | [arena-segment-panics-in-library-code](closed/arena-segment-panics-in-library-code.md) | murk-arena | `Segment::slice`/`slice_mut` return `Option`; `SegmentList` bounds-checked | (this session) |
 | 84 | [arena-cell-count-components-overflow](closed/arena-cell-count-components-overflow.md) | murk-arena | `from_field_defs` returns `Result`; `checked_mul` on `cell_count * components` | (this session) |
@@ -141,7 +141,7 @@ Tickets moved to [closed/](closed/).
 | murk-propagator | 0 | 0 | 1 | 0 | 1 |
 | murk-propagators | 0 | 1 | 1 | 1 | 3 |
 | murk-obs | 0 | 0 | 1 | 1 | 2 |
-| murk-replay | 0 | 0 | 3 | 1 | 4 |
+| murk-replay | 0 | 0 | 0 | 0 | 0 |
 | murk-space | 0 | 1 | 3 | 0 | 4 |
 | murk-core | 0 | 0 | 1 | 1 | 2 |
 | murk-bench | 0 | 1 | 0 | 1 | 2 |
@@ -149,7 +149,7 @@ Tickets moved to [closed/](closed/).
 | examples | 0 | 0 | 1 | 0 | 1 |
 | scripts | 0 | 0 | 0 | 1 | 1 |
 | workspace (cross-crate) | 0 | 0 | 0 | 3 | 3 |
-| **Total** | **0** | **9** | **31** | **10** | **50** |
+| **Total** | **0** | **9** | **28** | **9** | **46** |
 
 Note: Workspace-wide tickets (#90-#92) affect multiple crates and are counted once under "workspace".
 

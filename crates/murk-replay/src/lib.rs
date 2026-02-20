@@ -45,9 +45,25 @@ pub use writer::ReplayWriter;
 /// Magic bytes at the start of every replay file.
 pub const MAGIC: [u8; 4] = *b"MURK";
 
+/// Maximum allowed byte length for a decoded string (1 MiB).
+///
+/// Prevents OOM from crafted replay files declaring multi-gigabyte strings.
+pub const MAX_STRING_LEN: usize = 1 << 20;
+
+/// Maximum allowed byte length for a decoded byte array (64 MiB).
+///
+/// Prevents OOM from crafted replay files declaring multi-gigabyte blobs.
+pub const MAX_BLOB_LEN: usize = 1 << 26;
+
+/// Maximum number of commands per frame on decode (1 million).
+///
+/// Prevents OOM from crafted replay files declaring billions of commands.
+pub const MAX_COMMANDS_PER_FRAME: usize = 1_000_000;
+
 /// Current binary format version.
 ///
 /// History:
 /// - v1: source_id and source_seq encoded as bare u64 (0 = not set)
 /// - v2: source_id and source_seq use presence-flag encoding (u8 flag + optional u64)
-pub const FORMAT_VERSION: u8 = 2;
+/// - v3: expires_after_tick (u64) and arrival_seq (u64) appended per command
+pub const FORMAT_VERSION: u8 = 3;

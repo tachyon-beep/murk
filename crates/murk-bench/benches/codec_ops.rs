@@ -25,6 +25,8 @@ fn make_frame(n: usize) -> Frame {
                 priority_class: 1,
                 source_id: Some(i as u64),
                 source_seq: Some(i as u64),
+                expires_after_tick: u64::MAX,
+                arrival_seq: i as u64,
             }
         })
         .collect();
