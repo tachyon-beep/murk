@@ -7,98 +7,17 @@
 use std::sync::Mutex;
 
 use murk_core::command::Command;
-use murk_core::id::FieldId;
 use murk_engine::batched::BatchedEngine;
 use murk_engine::config::{BackoffConfig, WorldConfig};
-use murk_obs::spec::{ObsDtype, ObsEntry, ObsRegion, ObsSpec, ObsTransform, PoolConfig, PoolKernel};
-use murk_space::RegionSpec;
-use smallvec::SmallVec;
+use murk_obs::spec::ObsSpec;
 
 use crate::command::{convert_command, MurkCommand};
 use crate::config::configs;
 use crate::handle::HandleTable;
-use crate::obs::MurkObsEntry;
+use crate::obs::{convert_obs_entry, MurkObsEntry};
 use crate::status::MurkStatus;
 
 static BATCHED: Mutex<HandleTable<BatchedEngine>> = Mutex::new(HandleTable::new());
-
-// ── Helpers ─────────────────────────────────────────────────────
-
-/// Convert a C `MurkObsEntry` to a Rust `ObsEntry`.
-/// Returns `None` on invalid parameters.
-fn convert_obs_entry(e: &MurkObsEntry) -> Option<ObsEntry> {
-    let region = match e.region_type {
-        0 => ObsRegion::Fixed(RegionSpec::All),
-        5 => {
-            if e.n_region_params < 1 {
-                return None;
-            }
-            if e.region_params[0] < 0 {
-                return None;
-            }
-            ObsRegion::AgentDisk {
-                radius: e.region_params[0] as u32,
-            }
-        }
-        6 => {
-            let n = e.n_region_params as usize;
-            if n == 0 || n > 8 {
-                return None;
-            }
-            if e.region_params[..n].iter().any(|&v| v < 0) {
-                return None;
-            }
-            let half_extent: SmallVec<[u32; 4]> =
-                e.region_params[..n].iter().map(|&v| v as u32).collect();
-            ObsRegion::AgentRect { half_extent }
-        }
-        _ => return None,
-    };
-
-    let transform = match e.transform_type {
-        0 => ObsTransform::Identity,
-        1 => ObsTransform::Normalize {
-            min: e.normalize_min as f64,
-            max: e.normalize_max as f64,
-        },
-        _ => return None,
-    };
-
-    let dtype = match e.dtype {
-        0 => ObsDtype::F32,
-        _ => return None,
-    };
-
-    let pool = match e.pool_kernel {
-        0 => None,
-        k @ 1..=4 => {
-            let kernel = match k {
-                1 => PoolKernel::Mean,
-                2 => PoolKernel::Max,
-                3 => PoolKernel::Min,
-                4 => PoolKernel::Sum,
-                _ => unreachable!(),
-            };
-            if e.pool_kernel_size <= 0 || e.pool_stride <= 0 {
-                return None;
-            }
-            Some(PoolConfig {
-                kernel,
-                kernel_size: e.pool_kernel_size as usize,
-                stride: e.pool_stride as usize,
-            })
-        }
-        _ => return None,
-    };
-
-    Some(ObsEntry {
-        field_id: FieldId(e.field_id),
-        region,
-        pool,
-        transform,
-        dtype,
-    })
-}
 
 // ── FFI functions ───────────────────────────────────────────────
 

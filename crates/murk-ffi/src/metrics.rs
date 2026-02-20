@@ -15,10 +15,16 @@ pub struct MurkStepMetrics {
     /// Time spent publishing the snapshot, in microseconds.
     pub snapshot_publish_us: u64,
     /// Memory usage of the arena after the tick, in bytes.
-    pub memory_bytes: usize,
+    /// Fixed-width `u64` for ABI portability (not `usize`).
+    pub memory_bytes: u64,
     /// Number of propagators executed.
     pub n_propagators: u32,
 }
+
+// Compile-time layout assertions for ABI stability.
+// 3×u64 + 1×u64 + 1×u32 + 4 bytes padding = 40 bytes, align 8.
+const _: () = assert!(std::mem::size_of::<MurkStepMetrics>() == 40);
+const _: () = assert!(std::mem::align_of::<MurkStepMetrics>() == 8);
 
 impl MurkStepMetrics {
     pub(crate) fn from_rust(m: &murk_engine::StepMetrics) -> Self {
@@ -26,7 +32,7 @@ impl MurkStepMetrics {
             total_us: m.total_us,
             command_processing_us: m.command_processing_us,
             snapshot_publish_us: m.snapshot_publish_us,
-            memory_bytes: m.memory_bytes,
+            memory_bytes: m.memory_bytes as u64,
             n_propagators: m.propagator_us.len() as u32,
         }
     }

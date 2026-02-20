@@ -38,15 +38,17 @@ pub(crate) fn worlds() -> &'static Mutex<HandleTable<WorldArc>> {
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_lockstep_create(config_handle: u64, world_out: *mut u64) -> i32 {
-    if world_out.is_null() {
-        return MurkStatus::InvalidArgument as i32;
-    }
-
-    // Remove config from table (consumes it).
+    // Remove config from table FIRST (consumes it unconditionally).
+    // This ensures the "config is always consumed" contract holds even
+    // if we return early due to null world_out or validation errors.
     let builder = match configs().lock().unwrap().remove(config_handle) {
         Some(b) => b,
         None => return MurkStatus::InvalidHandle as i32,
     };
+
+    if world_out.is_null() {
+        return MurkStatus::InvalidArgument as i32;
+    }
 
     // Validate: space and fields must be set.
     let space = match builder.space {
@@ -576,9 +578,12 @@ mod tests {
             murk_lockstep_create(cfg_h, std::ptr::null_mut()),
             MurkStatus::InvalidArgument as i32
         );
-        // Config was not consumed because we returned early.
-        // Clean it up manually.
-        crate::config::murk_config_destroy(cfg_h);
+        // Config IS consumed even on null world_out (documented contract).
+        // Double-destroy should return InvalidHandle.
+        assert_eq!(
+            crate::config::murk_config_destroy(cfg_h),
+            MurkStatus::InvalidHandle as i32
+        );
     }
 
     #[test]

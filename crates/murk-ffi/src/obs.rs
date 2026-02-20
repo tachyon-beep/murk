@@ -18,7 +18,91 @@ use crate::handle::HandleTable;
 use crate::status::MurkStatus;
 use crate::world::worlds;
 
+// Compile-time layout assertions for ABI stability.
+const _: () = assert!(std::mem::align_of::<MurkObsEntry>() == 4);
+const _: () = assert!(std::mem::align_of::<MurkObsResult>() == 8);
+const _: () = assert!(std::mem::size_of::<MurkObsResult>() == 16);
+
 static OBS_PLANS: Mutex<HandleTable<ObsPlanState>> = Mutex::new(HandleTable::new());
+
+/// Convert a C `MurkObsEntry` to a Rust `ObsEntry`.
+/// Returns `None` on invalid parameters.
+///
+/// Shared by both `obs.rs` (single-world obs plans) and `batched.rs`
+/// (batched engine obs specs) to avoid divergence.
+pub(crate) fn convert_obs_entry(e: &MurkObsEntry) -> Option<ObsEntry> {
+    let region = match e.region_type {
+        0 => ObsRegion::Fixed(RegionSpec::All),
+        5 => {
+            if e.n_region_params < 1 {
+                return None;
+            }
+            if e.region_params[0] < 0 {
+                return None;
+            }
+            ObsRegion::AgentDisk {
+                radius: e.region_params[0] as u32,
+            }
+        }
+        6 => {
+            let n = e.n_region_params as usize;
+            if n == 0 || n > 8 {
+                return None;
+            }
+            if e.region_params[..n].iter().any(|&v| v < 0) {
+                return None;
+            }
+            let half_extent: SmallVec<[u32; 4]> =
+                e.region_params[..n].iter().map(|&v| v as u32).collect();
+            ObsRegion::AgentRect { half_extent }
+        }
+        _ => return None,
+    };
+
+    let transform = match e.transform_type {
+        0 => ObsTransform::Identity,
+        1 => ObsTransform::Normalize {
+            min: e.normalize_min as f64,
+            max: e.normalize_max as f64,
+        },
+        _ => return None,
+    };
+
+    let dtype = match e.dtype {
+        0 => ObsDtype::F32,
+        _ => return None,
+    };
+
+    let pool = match e.pool_kernel {
+        0 => None,
+        k @ 1..=4 => {
+            let kernel = match k {
+                1 => PoolKernel::Mean,
+                2 => PoolKernel::Max,
+                3 => PoolKernel::Min,
+                4 => PoolKernel::Sum,
+                _ => unreachable!(),
+            };
+            if e.pool_kernel_size <= 0 || e.pool_stride <= 0 {
+                return None;
+            }
+            Some(PoolConfig {
+                kernel,
+                kernel_size: e.pool_kernel_size as usize,
+                stride: e.pool_stride as usize,
+            })
+        }
+        _ => return None,
+    };
+
+    Some(ObsEntry {
+        field_id: FieldId(e.field_id),
+        region,
+        pool,
+        transform,
+        dtype,
+    })
+}
 
 struct ObsPlanState {
     cache: ObsPlanCache,
@@ -96,81 +180,13 @@ pub extern "C" fn murk_obsplan_compile(
     // SAFETY: entries points to n_entries valid MurkObsEntry structs.
     let entry_slice = unsafe { std::slice::from_raw_parts(entries, n_entries) };
 
-    // Convert C entries to Rust ObsSpec.
+    // Convert C entries to Rust ObsSpec using shared conversion function.
     let mut obs_entries = Vec::with_capacity(n_entries);
     for e in entry_slice {
-        let region = match e.region_type {
-            0 => ObsRegion::Fixed(RegionSpec::All),
-            5 => {
-                // AgentDisk: radius in region_params[0].
-                if e.n_region_params < 1 {
-                    return MurkStatus::InvalidArgument as i32;
-                }
-                if e.region_params[0] < 0 {
-                    return MurkStatus::InvalidArgument as i32;
-                }
-                ObsRegion::AgentDisk {
-                    radius: e.region_params[0] as u32,
-                }
-            }
-            6 => {
-                // AgentRect: half-extents in region_params[0..n].
-                let n = e.n_region_params as usize;
-                if n == 0 || n > 8 {
-                    return MurkStatus::InvalidArgument as i32;
-                }
-                if e.region_params[..n].iter().any(|&v| v < 0) {
-                    return MurkStatus::InvalidArgument as i32;
-                }
-                let half_extent: SmallVec<[u32; 4]> =
-                    e.region_params[..n].iter().map(|&v| v as u32).collect();
-                ObsRegion::AgentRect { half_extent }
-            }
-            _ => return MurkStatus::InvalidArgument as i32,
-        };
-
-        let transform = match e.transform_type {
-            0 => ObsTransform::Identity,
-            1 => ObsTransform::Normalize {
-                min: e.normalize_min as f64,
-                max: e.normalize_max as f64,
-            },
-            _ => return MurkStatus::InvalidArgument as i32,
-        };
-        let dtype = match e.dtype {
-            0 => ObsDtype::F32,
-            _ => return MurkStatus::InvalidArgument as i32,
-        };
-
-        let pool = match e.pool_kernel {
-            0 => None,
-            k @ 1..=4 => {
-                let kernel = match k {
-                    1 => PoolKernel::Mean,
-                    2 => PoolKernel::Max,
-                    3 => PoolKernel::Min,
-                    4 => PoolKernel::Sum,
-                    _ => unreachable!(),
-                };
-                if e.pool_kernel_size <= 0 || e.pool_stride <= 0 {
-                    return MurkStatus::InvalidArgument as i32;
-                }
-                Some(PoolConfig {
-                    kernel,
-                    kernel_size: e.pool_kernel_size as usize,
-                    stride: e.pool_stride as usize,
-                })
-            }
-            _ => return MurkStatus::InvalidArgument as i32,
-        };
-
-        obs_entries.push(ObsEntry {
-            field_id: FieldId(e.field_id),
-            region,
-            pool,
-            transform,
-            dtype,
-        });
+        match convert_obs_entry(e) {
+            Some(entry) => obs_entries.push(entry),
+            None => return MurkStatus::InvalidArgument as i32,
+        }
     }
     let spec = ObsSpec {
         entries: obs_entries,

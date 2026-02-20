@@ -95,7 +95,7 @@ impl StepMetrics {
             total_us: m.total_us,
             command_processing_us: m.command_processing_us,
             snapshot_publish_us: m.snapshot_publish_us,
-            memory_bytes: m.memory_bytes,
+            memory_bytes: m.memory_bytes as usize,
             propagator_us,
         }
     }
