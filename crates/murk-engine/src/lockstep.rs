@@ -46,12 +46,11 @@ const _: () = {
 pub struct StepResult<'w> {
     /// Read-only snapshot of world state after this tick.
     pub snapshot: Snapshot<'w>,
-    /// Per-command receipts from tick execution (applied, expired, rolled back).
+    /// Per-command receipts from both submission and tick execution.
     ///
-    /// Does **not** include submission-rejected receipts (e.g. `QueueFull`).
+    /// Includes submission-rejected receipts (e.g. `QueueFull`, `TickDisabled`)
+    /// followed by tick execution receipts (applied, expired, rolled back).
     /// In lockstep mode the queue is drained every tick, so rejection is rare.
-    /// If you need submission receipts, use the lower-level
-    /// [`TickEngine`] API directly.
     pub receipts: Vec<Receipt>,
     /// Performance metrics for this tick.
     pub metrics: StepMetrics,

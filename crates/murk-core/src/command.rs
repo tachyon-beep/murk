@@ -6,8 +6,8 @@ use crate::id::{Coord, FieldId, ParameterKey, TickId};
 /// A command submitted to the simulation via the ingress pipeline.
 ///
 /// Commands are ordered by `priority_class` (lower = higher priority),
-/// then by `source_id` for disambiguation, then by `arrival_seq` as
-/// a final tiebreaker.
+/// then by `source_id` for disambiguation, then by `source_seq` for
+/// per-source sequencing, then by `arrival_seq` as a final tiebreaker.
 ///
 /// # Examples
 ///

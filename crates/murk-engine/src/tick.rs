@@ -109,14 +109,22 @@ impl TickEngine {
             murk_propagator::validate_pipeline(&config.propagators, &defined_fields, config.dt)?;
 
         // Build arena field defs.
+        // Safety: validate() already checked fields.len() fits in u32.
         let arena_field_defs: Vec<(FieldId, murk_core::FieldDef)> = config
             .fields
             .iter()
             .enumerate()
-            .map(|(i, def)| (FieldId(i as u32), def.clone()))
+            .map(|(i, def)| {
+                (
+                    FieldId(u32::try_from(i).expect("field count validated")),
+                    def.clone(),
+                )
+            })
             .collect();
 
-        let cell_count = config.space.cell_count() as u32;
+        // Safety: validate() already checked cell_count fits in u32.
+        let cell_count =
+            u32::try_from(config.space.cell_count()).expect("cell count validated");
         let arena_config = ArenaConfig::new(cell_count);
 
         // Build static arena for any Static fields.

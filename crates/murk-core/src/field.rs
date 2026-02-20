@@ -149,6 +149,45 @@ pub struct FieldDef {
     pub boundary_behavior: BoundaryBehavior,
 }
 
+impl FieldDef {
+    /// Validate this field definition for structural correctness.
+    ///
+    /// Returns `Ok(())` if valid, or an error description if any invariant
+    /// is violated. Checks:
+    /// - `Vector { dims: 0 }` is rejected (zero components is meaningless).
+    /// - `Categorical { n_values: 0 }` is rejected (zero categories is meaningless).
+    /// - If `bounds` is `Some((min, max))`, requires `min <= max` and both finite.
+    pub fn validate(&self) -> Result<(), String> {
+        match self.field_type {
+            FieldType::Vector { dims } if dims == 0 => {
+                return Err(format!("field '{}': Vector dims must be > 0", self.name));
+            }
+            FieldType::Categorical { n_values } if n_values == 0 => {
+                return Err(format!(
+                    "field '{}': Categorical n_values must be > 0",
+                    self.name
+                ));
+            }
+            _ => {}
+        }
+        if let Some((min, max)) = self.bounds {
+            if !min.is_finite() || !max.is_finite() {
+                return Err(format!(
+                    "field '{}': bounds must be finite, got ({}, {})",
+                    self.name, min, max
+                ));
+            }
+            if min > max {
+                return Err(format!(
+                    "field '{}': bounds min ({}) must be <= max ({})",
+                    self.name, min, max
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
 /// A set of field IDs implemented as a dynamically-sized bitset.
 ///
 /// Used by propagators to declare which fields they read and write,

@@ -5,7 +5,7 @@ use murk_core::{ParameterVersion, TickId, WorldGenerationId};
 /// Metadata accompanying an observation extraction.
 ///
 /// Populated by [`ObsPlan::execute`](crate::ObsPlan::execute) from the
-/// snapshot being observed. All six fields are guaranteed to be set.
+/// snapshot being observed. All five fields are guaranteed to be set.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ObsMetadata {
     /// Tick at which the observed snapshot was produced.

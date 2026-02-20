@@ -3,7 +3,7 @@
 Generated 2026-02-17 from static analysis triage of 110 source reports.
 Updated 2026-02-20 with wave-4 deep audit findings (#54-#94).
 
-**Status (updated 2026-02-20):** 49 fixed, 0 partially fixed, 46 open.
+**Status (updated 2026-02-20):** 55 fixed, 0 partially fixed, 40 open.
 
 ## Open Bugs
 
@@ -27,11 +27,10 @@ Updated 2026-02-20 with wave-4 deep audit findings (#54-#94).
 | 65 | [umbrella-snapshot-not-importable](umbrella-snapshot-not-importable.md) | murk | `Snapshot` in return types but not importable through facade crate | Open |
 | 66 | [ffi-callback-propagator-missing-sync](ffi-callback-propagator-missing-sync.md) | murk-ffi | `CallbackPropagator` has `Send` but not `Sync`; unsound if design changes | Open |
 
-### Medium (28 open)
+### Medium (24 open)
 
 | # | Ticket | Crate | Summary | Status |
 |---|--------|-------|---------|--------|
-| 26 | [engine-stepresult-receipts-doc-mismatch](engine-stepresult-receipts-doc-mismatch.md) | murk-engine | StepResult.receipts doc says no rejections but code includes them | Open |
 | 27 | [engine-quickstart-setfield-noop](engine-quickstart-setfield-noop.md) | murk-engine | Quickstart example's SetField injection overwritten by diffusion propagator | Open |
 | 29 | [arena-sparse-segment-memory-leak](arena-sparse-segment-memory-leak.md) | murk-arena | Sparse CoW bump-allocates but never reclaims dead segment memory | Open |
 | 30 | [propagator-agent-movement-tick0-actions](propagator-agent-movement-tick0-actions.md) | murk-propagators | Actions processed on tick 0 alongside initialization | Open |
@@ -44,10 +43,8 @@ Updated 2026-02-20 with wave-4 deep audit findings (#54-#94).
 | 43 | [example-warmup-ticks-shorten-episode-length](example-warmup-ticks-shorten-episode-length.md) | examples | Warmup ticks consume global tick budget; episodes 27-31% shorter than MAX_STEPS | Open |
 | 45 | [space-hex2d-disk-overflow](space-hex2d-disk-overflow.md) | murk-space | compile_hex_disk i64 overflow when radius near i32::MAX | Open |
 | 46 | [space-compliance-ordering-membership](space-compliance-ordering-membership.md) | murk-space | Compliance test checks cardinality/uniqueness but not cell membership | Open |
-| 67 | [engine-cell-count-u32-truncation](engine-cell-count-u32-truncation.md) | murk-engine | `cell_count as u32` silent truncation; 65536x65536 grid overflows to 0 | Open |
 | 74 | [python-cstr-from-ptr-potential-ub](python-cstr-from-ptr-potential-ub.md) | murk-python | `CStr::from_ptr` on stack buffer; UB if FFI writes exactly 256 bytes | Open |
 | 75 | [python-reset-all-no-seeds-validation](python-reset-all-no-seeds-validation.md) | murk-python | `BatchedWorld::reset_all()` doesn't validate `seeds.len() == num_worlds` | Open |
-| 76 | [core-fieldtype-zero-dims-constructible](core-fieldtype-zero-dims-constructible.md) | murk-core | `FieldType::Vector { dims: 0 }` constructible; `FieldDef.bounds` no min<=max validation | Open |
 | 77 | [arena-descriptor-clone-per-tick](arena-descriptor-clone-per-tick.md) | murk-arena | `publish()` clones `FieldDescriptor` (String per field) every tick | Open |
 | 78 | [ffi-config-not-consumed-on-null](ffi-config-not-consumed-on-null.md) | murk-ffi | `murk_lockstep_create` leaks config handle on null `world_out`; contradicts docs | Open |
 | 79 | [ffi-inconsistent-mutex-poisoning](ffi-inconsistent-mutex-poisoning.md) | murk-ffi | `batched.rs` handles poisoning gracefully; `world.rs`/`config.rs`/`obs.rs` panic | Open |
@@ -55,17 +52,14 @@ Updated 2026-02-20 with wave-4 deep audit findings (#54-#94).
 | 81 | [ffi-obs-conversion-duplicated](ffi-obs-conversion-duplicated.md) | murk-ffi | ObsEntry conversion logic duplicated between `obs.rs` and `batched.rs` | Open |
 | 82 | [ffi-obsplan-lock-ordering](ffi-obsplan-lock-ordering.md) | murk-ffi | `OBS_PLANS` held during full observation execution; undocumented lock ordering | Open |
 | 83 | [obs-per-agent-scratch-allocation](obs-per-agent-scratch-allocation.md) | murk-obs | Per-agent Vec alloc in pooled gather; fixed entries re-gathered per agent | Open |
-| 85 | [propagator-scratch-bytes-slots-mismatch](propagator-scratch-bytes-slots-mismatch.md) | murk-propagator | `scratch_bytes()` returns bytes but `ScratchRegion::new()` takes f32 slot count | Open |
 | 86 | [python-close-skips-obsplan-destroy](python-close-skips-obsplan-destroy.md) | murk-python | `MurkEnv.close()` destroys World but not ObsPlan; `BatchedVecEnv` no double-close guard | Open |
 | 87 | [python-batched-vecenv-missing-spaces](python-batched-vecenv-missing-spaces.md) | murk-python | `BatchedVecEnv` missing `observation_space`/`action_space`; breaks SB3 compat | Open |
 | 88 | [space-regionplan-public-fields](space-regionplan-public-fields.md) | murk-space | `RegionPlan` fields all pub; `ProductMetric::Weighted` panics in library code | Open |
 
-### Low (9 open)
+### Low (7 open)
 
 | # | Ticket | Crate | Summary | Status |
 |---|--------|-------|---------|--------|
-| 48 | [obs-metadata-doc-says-six-fields](obs-metadata-doc-says-six-fields.md) | murk-obs | Doc says "six fields" but struct has five | Open |
-| 50 | [core-command-ordering-doc-missing-source-seq](core-command-ordering-doc-missing-source-seq.md) | murk-core | Command ordering doc omits source_seq from sort key description | Open |
 | 51 | [bench-space-ops-degenerate-q-distribution](bench-space-ops-degenerate-q-distribution.md) | murk-bench | LCG multiplier not coprime to modulus; only 4/20 q values exercised | Open |
 | 52 | [script-organize-by-priority-basename-collision](script-organize-by-priority-basename-collision.md) | scripts | --organize-by-priority flattens paths; duplicate basenames overwrite | Open |
 | 53 | [ffi-cbindgen-missing-c-header](ffi-cbindgen-missing-c-header.md) | murk-ffi | No generated C header; C consumers must hand-write 28+ extern declarations | Open |
@@ -74,12 +68,18 @@ Updated 2026-02-20 with wave-4 deep audit findings (#54-#94).
 | 92 | [workspace-error-types-missing-partialeq](workspace-error-types-missing-partialeq.md) | murk-core, murk-engine, murk-space, murk-propagator | Error types missing `PartialEq`/`Eq`; forces `matches!()` in tests | Open |
 | 94 | [propagators-performance-hotspots](propagators-performance-hotspots.md) | murk-propagators | Per-cell BFS alloc, O(n) agent scan, wasted Box-Muller samples | Open |
 
-## Closed Bugs (49 fixed)
+## Closed Bugs (55 fixed)
 
 Tickets moved to [closed/](closed/).
 
 | # | Ticket | Crate | Summary | Fix Commit |
 |---|--------|-------|---------|------------|
+| 26 | [engine-stepresult-receipts-doc-mismatch](closed/engine-stepresult-receipts-doc-mismatch.md) | murk-engine | Doc updated: StepResult.receipts includes submission-rejected receipts | (this session) |
+| 48 | [obs-metadata-doc-says-six-fields](closed/obs-metadata-doc-says-six-fields.md) | murk-obs | Doc fixed: "six fields" → "five fields" | (this session) |
+| 50 | [core-command-ordering-doc-missing-source-seq](closed/core-command-ordering-doc-missing-source-seq.md) | murk-core | Doc updated: sort key includes `source_seq` as third component | (this session) |
+| 67 | [engine-cell-count-u32-truncation](closed/engine-cell-count-u32-truncation.md) | murk-engine | `as u32` casts replaced with `try_from()`; `ConfigError::CellCountOverflow` added | (this session) |
+| 76 | [core-fieldtype-zero-dims-constructible](closed/core-fieldtype-zero-dims-constructible.md) | murk-core | `FieldDef::validate()` rejects zero dims/n_values, inverted/NaN bounds | (this session) |
+| 85 | [propagator-scratch-bytes-slots-mismatch](closed/propagator-scratch-bytes-slots-mismatch.md) | murk-propagator | Doc clarified: `scratch_bytes()` returns bytes, `ScratchRegion::new()` takes slots | (this session) |
 | 35 | [replay-codec-unbounded-alloc-from-wire](closed/replay-codec-unbounded-alloc-from-wire.md) | murk-replay | Decode limits added; rejects oversized strings, blobs, and command counts | (this session) |
 | 72 | [replay-write-path-u32-truncation](closed/replay-write-path-u32-truncation.md) | murk-replay | All `as u32` casts replaced with `u32::try_from()`; returns `DataTooLarge` error | (this session) |
 | 73 | [replay-expires-arrival-seq-not-serialized](closed/replay-expires-arrival-seq-not-serialized.md) | murk-replay | FORMAT_VERSION bumped to 3; `expires_after_tick` and `arrival_seq` now serialized per command | (this session) |
@@ -134,22 +134,22 @@ Tickets moved to [closed/](closed/).
 
 | Crate | Critical | High | Medium | Low | Total Open |
 |-------|----------|------|--------|-----|------------|
-| murk-engine | 0 | 0 | 3 | 0 | 3 |
+| murk-engine | 0 | 0 | 1 | 0 | 1 |
 | murk-arena | 0 | 0 | 2 | 0 | 2 |
 | murk-ffi | 0 | 2 | 7 | 1 | 10 |
 | murk-python | 0 | 3 | 8 | 0 | 11 |
-| murk-propagator | 0 | 0 | 1 | 0 | 1 |
+| murk-propagator | 0 | 0 | 0 | 0 | 0 |
 | murk-propagators | 0 | 1 | 1 | 1 | 3 |
-| murk-obs | 0 | 0 | 1 | 1 | 2 |
+| murk-obs | 0 | 0 | 1 | 0 | 1 |
 | murk-replay | 0 | 0 | 0 | 0 | 0 |
 | murk-space | 0 | 1 | 3 | 0 | 4 |
-| murk-core | 0 | 0 | 1 | 1 | 2 |
+| murk-core | 0 | 0 | 0 | 0 | 0 |
 | murk-bench | 0 | 1 | 0 | 1 | 2 |
 | murk (umbrella) | 0 | 1 | 0 | 0 | 1 |
 | examples | 0 | 0 | 1 | 0 | 1 |
 | scripts | 0 | 0 | 0 | 1 | 1 |
 | workspace (cross-crate) | 0 | 0 | 0 | 3 | 3 |
-| **Total** | **0** | **9** | **28** | **9** | **46** |
+| **Total** | **0** | **9** | **24** | **7** | **40** |
 
 Note: Workspace-wide tickets (#90-#92) affect multiple crates and are counted once under "workspace".
 

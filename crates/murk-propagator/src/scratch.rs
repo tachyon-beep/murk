@@ -14,7 +14,11 @@ pub struct ScratchRegion {
 }
 
 impl ScratchRegion {
-    /// Create a new scratch region with the given capacity in f32 slots.
+    /// Create a new scratch region with the given capacity **in f32 slots**
+    /// (not bytes).
+    ///
+    /// If you have a byte count (e.g., from [`Propagator::scratch_bytes()`]),
+    /// use [`with_byte_capacity()`](Self::with_byte_capacity) instead.
     pub fn new(capacity: usize) -> Self {
         Self {
             buf: vec![0.0; capacity],
@@ -22,7 +26,10 @@ impl ScratchRegion {
         }
     }
 
-    /// Create from a byte capacity (rounded up to whole f32 slots).
+    /// Create from a **byte** capacity (rounded up to whole f32 slots).
+    ///
+    /// This is the correct constructor when using the value from
+    /// [`Propagator::scratch_bytes()`](crate::Propagator::scratch_bytes).
     pub fn with_byte_capacity(bytes: usize) -> Self {
         let slot_size = std::mem::size_of::<f32>();
         // Overflow-safe ceiling division (avoids bytes + slot_size - 1 wrapping).

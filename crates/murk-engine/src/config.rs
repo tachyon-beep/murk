@@ -123,6 +123,16 @@ pub enum ConfigError {
         /// Description of which invariant was violated.
         reason: String,
     },
+    /// Cell count or field count exceeds `u32::MAX`.
+    CellCountOverflow {
+        /// The value that overflowed.
+        value: usize,
+    },
+    /// A field definition failed validation.
+    InvalidField {
+        /// Description of the validation failure.
+        reason: String,
+    },
     /// Engine could not be recovered from tick thread (e.g. thread panicked).
     EngineRecoveryFailed,
 }
@@ -143,6 +153,12 @@ impl fmt::Display for ConfigError {
             }
             Self::InvalidBackoff { reason } => {
                 write!(f, "invalid backoff config: {reason}")
+            }
+            Self::CellCountOverflow { value } => {
+                write!(f, "cell count {value} exceeds u32::MAX")
+            }
+            Self::InvalidField { reason } => {
+                write!(f, "invalid field: {reason}")
             }
             Self::EngineRecoveryFailed => {
                 write!(f, "engine could not be recovered from tick thread")
@@ -215,6 +231,23 @@ impl WorldConfig {
         if self.fields.is_empty() {
             return Err(ConfigError::NoFields);
         }
+        // 2a. Each field must pass structural validation.
+        for field in &self.fields {
+            field
+                .validate()
+                .map_err(|reason| ConfigError::InvalidField { reason })?;
+        }
+        // 2b. Cell count must fit in u32 (arena uses u32 internally).
+        let cell_count = self.space.cell_count();
+        if u32::try_from(cell_count).is_err() {
+            return Err(ConfigError::CellCountOverflow { value: cell_count });
+        }
+        // 2c. Field count must fit in u32 (FieldId is u32).
+        if u32::try_from(self.fields.len()).is_err() {
+            return Err(ConfigError::CellCountOverflow {
+                value: self.fields.len(),
+            });
+        }
         // 3. Ring buffer >= 2.
         if self.ring_buffer_size < 2 {
             return Err(ConfigError::RingBufferTooSmall {
@@ -274,8 +307,15 @@ impl WorldConfig {
     }
 
     /// Build a [`FieldSet`] from the configured field definitions.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the number of fields exceeds `u32::MAX`. This is
+    /// unreachable in practice since `validate()` is called first.
     pub(crate) fn defined_field_set(&self) -> FieldSet {
-        (0..self.fields.len()).map(|i| FieldId(i as u32)).collect()
+        (0..self.fields.len())
+            .map(|i| FieldId(u32::try_from(i).expect("field count validated")))
+            .collect()
     }
 }
 
