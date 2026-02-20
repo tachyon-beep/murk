@@ -61,8 +61,9 @@ fn error_detail(code: i32) -> (&'static str, &'static str, &'static str) {
         -4 => (
             "snapshot not available (evicted from ring buffer)",
             "The snapshot was consumed before you read it. \
-             Increase ring_buffer_size in your config, or read observations \
-             more promptly after each step().",
+             Read observations promptly after each step(). In RL loops, \
+             ensure no slow work (rendering, logging) happens between \
+             step() and observation extraction.",
             "obserror",
         ),
         -5 => (
@@ -75,8 +76,8 @@ fn error_detail(code: i32) -> (&'static str, &'static str, &'static str) {
         -6 => (
             "command queue full",
             "You're submitting commands faster than the tick engine drains them. \
-             Reduce the number of commands per step, or increase \
-             config.set_max_ingress_queue(). Default is 1024.",
+             Reduce the number of commands per step(). The default queue \
+             capacity is 1024 commands.",
             "ingresserror",
         ),
         -7 => (
@@ -114,7 +115,7 @@ fn error_detail(code: i32) -> (&'static str, &'static str, &'static str) {
             "observation execution failed",
             "ObsPlan.execute() failed mid-extraction. The snapshot may \
              have been reclaimed during execution. Retry with a fresh \
-             step(), or increase ring_buffer_size.",
+             step() and call execute() immediately afterwards.",
             "obserror",
         ),
         -12 => (
@@ -137,7 +138,8 @@ fn error_detail(code: i32) -> (&'static str, &'static str, &'static str) {
             "egress worker stalled (exceeded max_epoch_hold)",
             "An observation worker held its epoch pin too long (>100ms), \
              blocking arena garbage collection. Simplify the observation \
-             spec or increase max_epoch_hold_ms in your AsyncConfig.",
+             spec (fewer entries, smaller regions) to reduce extraction \
+             time. This error only occurs in RealtimeAsync mode.",
             "obserror",
         ),
         -15 => (

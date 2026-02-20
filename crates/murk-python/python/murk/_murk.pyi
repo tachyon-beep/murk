@@ -315,3 +315,109 @@ def add_propagator(
     reads_previous: list[int] = ...,
     writes: list[tuple[int, WriteMode]] = ...,
 ) -> None: ...
+
+# ---------------------------------------------------------------------------
+# Library Propagators
+# ---------------------------------------------------------------------------
+
+class ScalarDiffusion:
+    """Native diffusion propagator with optional gradient output and clamping."""
+    def __init__(
+        self,
+        input_field: int,
+        output_field: int,
+        coefficient: float = ...,
+        decay: float = ...,
+        sources: list[tuple[int, float]] = ...,
+        clamp_min: float | None = ...,
+        clamp_max: float | None = ...,
+        gradient_field: int | None = ...,
+    ) -> None: ...
+    def register(self, config: Config) -> None: ...
+    def __repr__(self) -> str: ...
+
+class GradientCompute:
+    """Computes discrete spatial gradient from a scalar field."""
+    def __init__(self, input_field: int, output_field: int) -> None: ...
+    def register(self, config: Config) -> None: ...
+    def __repr__(self) -> str: ...
+
+class IdentityCopy:
+    """Copies a field's previous-generation values into the current generation."""
+    def __init__(self, field: int) -> None: ...
+    def register(self, config: Config) -> None: ...
+    def __repr__(self) -> str: ...
+
+class FlowField:
+    """Computes a flow (velocity) field from a potential field's gradient."""
+    def __init__(
+        self,
+        potential_field: int,
+        flow_field: int,
+        normalize: bool = ...,
+    ) -> None: ...
+    def register(self, config: Config) -> None: ...
+    def __repr__(self) -> str: ...
+
+class AgentEmission:
+    """Emits values into a field at agent locations."""
+    def __init__(
+        self,
+        presence_field: int,
+        emission_field: int,
+        intensity: float = ...,
+        additive: bool = ...,
+    ) -> None: ...
+    def register(self, config: Config) -> None: ...
+    def __repr__(self) -> str: ...
+
+class ResourceField:
+    """Consumable/regrowing resource field driven by agent presence."""
+    def __init__(
+        self,
+        field: int,
+        presence_field: int,
+        consumption_rate: float = ...,
+        regrowth_rate: float = ...,
+        capacity: float = ...,
+        logistic: bool = ...,
+    ) -> None: ...
+    def register(self, config: Config) -> None: ...
+    def __repr__(self) -> str: ...
+
+class MorphologicalOp:
+    """Binary morphological dilation or erosion on a scalar field."""
+    def __init__(
+        self,
+        input_field: int,
+        output_field: int,
+        dilate: bool = ...,
+        radius: int = ...,
+        threshold: float = ...,
+    ) -> None: ...
+    def register(self, config: Config) -> None: ...
+    def __repr__(self) -> str: ...
+
+class WavePropagation:
+    """Wave equation propagator with displacement and velocity fields."""
+    def __init__(
+        self,
+        displacement_field: int,
+        velocity_field: int,
+        wave_speed: float = ...,
+        damping: float = ...,
+    ) -> None: ...
+    def register(self, config: Config) -> None: ...
+    def __repr__(self) -> str: ...
+
+class NoiseInjection:
+    """Injects stochastic noise into a field each tick."""
+    def __init__(
+        self,
+        field: int,
+        noise_type: str = ...,
+        scale: float = ...,
+        seed_offset: int = ...,
+    ) -> None: ...
+    def register(self, config: Config) -> None: ...
+    def __repr__(self) -> str: ...

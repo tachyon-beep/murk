@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 import numpy as np
+from gymnasium import spaces
 
 from murk._murk import BatchedWorld, Config, ObsEntry
 
@@ -15,7 +16,13 @@ class BatchedVecEnv:
     Steps all worlds and extracts observations in a single Rust call with
     one GIL release, eliminating the per-world FFI overhead of MurkVecEnv.
 
+    Follows **Gymnasium** vectorized-env conventions:
+
+    - ``reset()`` returns ``(obs, infos)``
+    - ``step()`` returns ``(obs, rewards, terminateds, truncateds, infos)``
+
     Subclass and override the hook methods to customize for your RL task:
+
     - ``_actions_to_commands``: convert action array to per-world command lists
     - ``_compute_rewards``: compute per-world rewards from observations
     - ``_check_terminated``: check per-world termination conditions
@@ -26,6 +33,11 @@ class BatchedVecEnv:
             a Config. Called ``num_envs`` times to build independent configs.
         obs_entries: List of ObsEntry describing the observation spec.
         num_envs: Number of parallel environments.
+        observation_space: Gymnasium observation space. If ``None``, a
+            ``Box(-inf, inf, shape=(obs_output_len,), dtype=float32)`` is
+            created automatically from the observation spec.
+        action_space: Gymnasium action space. Required for SB3 integration;
+            defaults to ``None`` (set it for your task).
     """
 
     def __init__(
@@ -33,6 +45,9 @@ class BatchedVecEnv:
         config_factory: Callable[[int], Config],
         obs_entries: list[ObsEntry],
         num_envs: int,
+        *,
+        observation_space: spaces.Space | None = None,
+        action_space: spaces.Space | None = None,
     ):
         assert num_envs > 0, "num_envs must be >= 1"
 
@@ -42,6 +57,14 @@ class BatchedVecEnv:
         self.num_envs = self._engine.num_worlds
         self._obs_per_world = self._engine.obs_output_len
         self._mask_per_world = self._engine.obs_mask_len
+
+        self.observation_space: spaces.Space = observation_space or spaces.Box(
+            low=-np.inf,
+            high=np.inf,
+            shape=(self._obs_per_world,),
+            dtype=np.float32,
+        )
+        self.action_space: spaces.Space | None = action_space
 
         total_obs = self.num_envs * self._obs_per_world
         total_mask = self.num_envs * self._mask_per_world
