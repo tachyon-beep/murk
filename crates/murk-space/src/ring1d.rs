@@ -178,7 +178,7 @@ mod tests {
     fn compile_region_all() {
         let s = Ring1D::new(8).unwrap();
         let plan = s.compile_region(&RegionSpec::All).unwrap();
-        assert_eq!(plan.cell_count, 8);
+        assert_eq!(plan.cell_count(), 8);
         assert_eq!(plan.valid_ratio(), 1.0);
     }
 

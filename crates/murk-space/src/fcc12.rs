@@ -212,7 +212,6 @@ impl Fcc12 {
         let valid_mask = vec![1u8; cell_count];
 
         RegionPlan {
-            cell_count,
             coords: result,
             tensor_indices,
             valid_mask,
@@ -268,7 +267,6 @@ impl Space for Fcc12 {
                 let tensor_indices: Vec<usize> = (0..cell_count).collect();
                 let valid_mask = vec![1u8; cell_count];
                 Ok(RegionPlan {
-                    cell_count,
                     coords,
                     tensor_indices,
                     valid_mask,
@@ -313,7 +311,6 @@ impl Space for Fcc12 {
                 let tensor_indices: Vec<usize> = (0..cell_count).collect();
                 let valid_mask = vec![1u8; cell_count];
                 Ok(RegionPlan {
-                    cell_count,
                     coords,
                     tensor_indices,
                     valid_mask,
@@ -332,7 +329,6 @@ impl Space for Fcc12 {
                 let tensor_indices: Vec<usize> = (0..cell_count).collect();
                 let valid_mask = vec![1u8; cell_count];
                 Ok(RegionPlan {
-                    cell_count,
                     coords: sorted,
                     tensor_indices,
                     valid_mask,
@@ -812,7 +808,7 @@ mod tests {
     fn compile_region_all() {
         let s = Fcc12::new(4, 4, 4, EdgeBehavior::Absorb).unwrap();
         let plan = s.compile_region(&RegionSpec::All).unwrap();
-        assert_eq!(plan.cell_count, 32);
+        assert_eq!(plan.cell_count(), 32);
         assert_eq!(plan.valid_ratio(), 1.0);
     }
 
@@ -826,7 +822,7 @@ mod tests {
                 radius: 1,
             })
             .unwrap();
-        assert_eq!(plan.cell_count, 13);
+        assert_eq!(plan.cell_count(), 13);
     }
 
     #[test]
@@ -843,7 +839,7 @@ mod tests {
         // Each r=1 neighbour has 12 neighbours, but many overlap.
         // Verified via BFS: should be 55 cells for interior r=2 on FCC.
         assert!(
-            plan.cell_count > 13,
+            plan.cell_count() > 13,
             "r=2 disk should have more than 13 cells"
         );
     }
@@ -858,8 +854,8 @@ mod tests {
                 radius: 2,
             })
             .unwrap();
-        assert!(plan.cell_count < 55, "boundary disk should be truncated");
-        assert!(plan.cell_count >= 1);
+        assert!(plan.cell_count() < 55, "boundary disk should be truncated");
+        assert!(plan.cell_count() >= 1);
     }
 
     #[test]
@@ -872,7 +868,7 @@ mod tests {
                 radius: u32::MAX,
             })
             .unwrap();
-        assert_eq!(plan.cell_count, s.cell_count());
+        assert_eq!(plan.cell_count(), s.cell_count());
     }
 
     #[test]
@@ -889,7 +885,7 @@ mod tests {
         // z=1: (1,0,1),(0,1,1),(2,1,1),(1,2,1) = 4
         // z=2: (0,0,2),(2,0,2),(1,1,2),(0,2,2),(2,2,2) = 5
         // Total = 14
-        assert_eq!(plan.cell_count, 14);
+        assert_eq!(plan.cell_count(), 14);
     }
 
     #[test]

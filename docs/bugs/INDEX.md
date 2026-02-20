@@ -3,7 +3,7 @@
 Generated 2026-02-17 from static analysis triage of 110 source reports.
 Updated 2026-02-20 with wave-4 deep audit findings (#54-#94).
 
-**Status (updated 2026-02-20):** 60 fixed, 0 partially fixed, 35 open.
+**Status (updated 2026-02-20):** 63 fixed, 0 partially fixed, 32 open.
 
 ## Open Bugs
 
@@ -25,7 +25,7 @@ Updated 2026-02-20 with wave-4 deep audit findings (#54-#94).
 | 64 | [bench-missing-black-box](bench-missing-black-box.md) | murk-bench | Missing `black_box` + arena benchmark TickId/generation divergence | Open |
 | 66 | [ffi-callback-propagator-missing-sync](ffi-callback-propagator-missing-sync.md) | murk-ffi | `CallbackPropagator` has `Send` but not `Sync`; unsound if design changes | Open |
 
-### Medium (24 open)
+### Medium (21 open)
 
 | # | Ticket | Crate | Summary | Status |
 |---|--------|-------|---------|--------|
@@ -39,8 +39,6 @@ Updated 2026-02-20 with wave-4 deep audit findings (#54-#94).
 | 41 | [python-command-docstring-expiry-default-mismatch](python-command-docstring-expiry-default-mismatch.md) | murk-python | Docstring says "0 = never" but default is u64::MAX; 0 means immediate expiry | Open |
 | 42 | [python-error-hints-reference-unexposed-config](python-error-hints-reference-unexposed-config.md) | murk-python | Error hints reference config knobs not exposed in Python API | Open |
 | 43 | [example-warmup-ticks-shorten-episode-length](example-warmup-ticks-shorten-episode-length.md) | examples | Warmup ticks consume global tick budget; episodes 27-31% shorter than MAX_STEPS | Open |
-| 45 | [space-hex2d-disk-overflow](space-hex2d-disk-overflow.md) | murk-space | compile_hex_disk i64 overflow when radius near i32::MAX | Open |
-| 46 | [space-compliance-ordering-membership](space-compliance-ordering-membership.md) | murk-space | Compliance test checks cardinality/uniqueness but not cell membership | Open |
 | 74 | [python-cstr-from-ptr-potential-ub](python-cstr-from-ptr-potential-ub.md) | murk-python | `CStr::from_ptr` on stack buffer; UB if FFI writes exactly 256 bytes | Open |
 | 75 | [python-reset-all-no-seeds-validation](python-reset-all-no-seeds-validation.md) | murk-python | `BatchedWorld::reset_all()` doesn't validate `seeds.len() == num_worlds` | Open |
 | 77 | [arena-descriptor-clone-per-tick](arena-descriptor-clone-per-tick.md) | murk-arena | `publish()` clones `FieldDescriptor` (String per field) every tick | Open |
@@ -52,7 +50,6 @@ Updated 2026-02-20 with wave-4 deep audit findings (#54-#94).
 | 83 | [obs-per-agent-scratch-allocation](obs-per-agent-scratch-allocation.md) | murk-obs | Per-agent Vec alloc in pooled gather; fixed entries re-gathered per agent | Open |
 | 86 | [python-close-skips-obsplan-destroy](python-close-skips-obsplan-destroy.md) | murk-python | `MurkEnv.close()` destroys World but not ObsPlan; `BatchedVecEnv` no double-close guard | Open |
 | 87 | [python-batched-vecenv-missing-spaces](python-batched-vecenv-missing-spaces.md) | murk-python | `BatchedVecEnv` missing `observation_space`/`action_space`; breaks SB3 compat | Open |
-| 88 | [space-regionplan-public-fields](space-regionplan-public-fields.md) | murk-space | `RegionPlan` fields all pub; `ProductMetric::Weighted` panics in library code | Open |
 
 ### Low (4 open)
 
@@ -63,12 +60,15 @@ Updated 2026-02-20 with wave-4 deep audit findings (#54-#94).
 | 53 | [ffi-cbindgen-missing-c-header](ffi-cbindgen-missing-c-header.md) | murk-ffi | No generated C header; C consumers must hand-write 28+ extern declarations | Open |
 | 94 | [propagators-performance-hotspots](propagators-performance-hotspots.md) | murk-propagators | Per-cell BFS alloc, O(n) agent scan, wasted Box-Muller samples | Open |
 
-## Closed Bugs (60 fixed)
+## Closed Bugs (63 fixed)
 
 Tickets moved to [closed/](closed/).
 
 | # | Ticket | Crate | Summary | Fix Commit |
 |---|--------|-------|---------|------------|
+| 45 | [space-hex2d-disk-overflow](closed/space-hex2d-disk-overflow.md) | murk-space | `compile_hex_disk` uses `checked_mul` for bounding area; returns `InvalidRegion` on overflow | (this session) |
+| 46 | [space-compliance-ordering-membership](closed/space-compliance-ordering-membership.md) | murk-space | Compliance suite cross-validates `canonical_ordering()` against `compile_region(All)` coords | (this session) |
+| 88 | [space-regionplan-public-fields](closed/space-regionplan-public-fields.md) | murk-space | `RegionPlan` fields `pub(crate)` with accessors; `cell_count` derived; `metric_distance` returns `Result` | (this session) |
 | 26 | [engine-stepresult-receipts-doc-mismatch](closed/engine-stepresult-receipts-doc-mismatch.md) | murk-engine | Doc updated: StepResult.receipts includes submission-rejected receipts | (this session) |
 | 48 | [obs-metadata-doc-says-six-fields](closed/obs-metadata-doc-says-six-fields.md) | murk-obs | Doc fixed: "six fields" → "five fields" | (this session) |
 | 50 | [core-command-ordering-doc-missing-source-seq](closed/core-command-ordering-doc-missing-source-seq.md) | murk-core | Doc updated: sort key includes `source_seq` as third component | (this session) |
@@ -142,14 +142,14 @@ Tickets moved to [closed/](closed/).
 | murk-propagators | 0 | 1 | 1 | 1 | 3 |
 | murk-obs | 0 | 0 | 1 | 0 | 1 |
 | murk-replay | 0 | 0 | 0 | 0 | 0 |
-| murk-space | 0 | 0 | 3 | 0 | 3 |
+| murk-space | 0 | 0 | 0 | 0 | 0 |
 | murk-core | 0 | 0 | 0 | 0 | 0 |
 | murk-bench | 0 | 1 | 0 | 1 | 2 |
 | murk (umbrella) | 0 | 0 | 0 | 0 | 0 |
 | examples | 0 | 0 | 1 | 0 | 1 |
 | scripts | 0 | 0 | 0 | 1 | 1 |
 | workspace (cross-crate) | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **0** | **7** | **24** | **4** | **35** |
+| **Total** | **0** | **7** | **21** | **4** | **32** |
 
 Note: Workspace-wide tickets (#90-#92) affect multiple crates and are counted once under "workspace".
 

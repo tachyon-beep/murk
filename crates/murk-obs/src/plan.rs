@@ -235,7 +235,7 @@ impl ObsPlan {
                 });
             }
 
-            let region_plan =
+            let mut region_plan =
                 space
                     .compile_region(fixed_region)
                     .map_err(|e| ObsError::InvalidObsSpec {
@@ -256,23 +256,23 @@ impl ObsPlan {
                 );
             }
 
-            let mut gather_ops = Vec::with_capacity(region_plan.coords.len());
-            for (coord_idx, coord) in region_plan.coords.iter().enumerate() {
+            let mut gather_ops = Vec::with_capacity(region_plan.coords().len());
+            for (coord_idx, coord) in region_plan.coords().iter().enumerate() {
                 let field_data_idx =
                     *coord_to_field_idx
                         .get(coord)
                         .ok_or_else(|| ObsError::InvalidObsSpec {
                             reason: format!("entry {i}: coord {coord:?} not in canonical ordering"),
                         })?;
-                let tensor_idx = region_plan.tensor_indices[coord_idx];
+                let tensor_idx = region_plan.tensor_indices()[coord_idx];
                 gather_ops.push(GatherOp {
                     field_data_idx,
                     tensor_idx,
                 });
             }
 
-            let element_count = region_plan.bounding_shape.total_elements();
-            let shape = match &region_plan.bounding_shape {
+            let element_count = region_plan.bounding_shape().total_elements();
+            let shape = match region_plan.bounding_shape() {
                 murk_space::BoundingShape::Rect(dims) => dims.clone(),
             };
             entry_shapes.push(shape);
@@ -285,7 +285,7 @@ impl ObsPlan {
                 mask_offset,
                 element_count,
                 gather_ops,
-                valid_mask: region_plan.valid_mask,
+                valid_mask: region_plan.take_valid_mask(),
                 valid_ratio: ratio,
             });
 
@@ -338,7 +338,7 @@ impl ObsPlan {
                         });
                     }
 
-                    let region_plan = space.compile_region(region_spec).map_err(|e| {
+                    let mut region_plan = space.compile_region(region_spec).map_err(|e| {
                         ObsError::InvalidObsSpec {
                             reason: format!("entry {i}: region compile failed: {e}"),
                         }
@@ -353,8 +353,8 @@ impl ObsPlan {
                         });
                     }
 
-                    let mut gather_ops = Vec::with_capacity(region_plan.coords.len());
-                    for (coord_idx, coord) in region_plan.coords.iter().enumerate() {
+                    let mut gather_ops = Vec::with_capacity(region_plan.coords().len());
+                    for (coord_idx, coord) in region_plan.coords().iter().enumerate() {
                         let field_data_idx = *coord_to_field_idx.get(coord).ok_or_else(|| {
                             ObsError::InvalidObsSpec {
                                 reason: format!(
@@ -362,15 +362,15 @@ impl ObsPlan {
                                 ),
                             }
                         })?;
-                        let tensor_idx = region_plan.tensor_indices[coord_idx];
+                        let tensor_idx = region_plan.tensor_indices()[coord_idx];
                         gather_ops.push(GatherOp {
                             field_data_idx,
                             tensor_idx,
                         });
                     }
 
-                    let element_count = region_plan.bounding_shape.total_elements();
-                    let shape = match &region_plan.bounding_shape {
+                    let element_count = region_plan.bounding_shape().total_elements();
+                    let shape = match region_plan.bounding_shape() {
                         murk_space::BoundingShape::Rect(dims) => dims.clone(),
                     };
                     entry_shapes.push(shape);
@@ -383,7 +383,7 @@ impl ObsPlan {
                         mask_offset,
                         element_count,
                         gather_ops,
-                        valid_mask: region_plan.valid_mask,
+                        valid_mask: region_plan.take_valid_mask(),
                         valid_ratio: ratio,
                     });
 

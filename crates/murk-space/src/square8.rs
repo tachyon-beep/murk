@@ -242,7 +242,7 @@ mod tests {
     fn compile_region_all() {
         let s = Square8::new(5, 5, EdgeBehavior::Absorb).unwrap();
         let plan = s.compile_region(&RegionSpec::All).unwrap();
-        assert_eq!(plan.cell_count, 25);
+        assert_eq!(plan.cell_count(), 25);
         assert_eq!(plan.valid_ratio(), 1.0);
     }
 
@@ -257,7 +257,7 @@ mod tests {
             })
             .unwrap();
         // Chebyshev ball of radius 2: 5×5 = 25 cells
-        assert_eq!(plan.cell_count, 25);
+        assert_eq!(plan.cell_count(), 25);
     }
 
     #[test]
@@ -269,7 +269,7 @@ mod tests {
                 max: c(4, 6),
             })
             .unwrap();
-        assert_eq!(plan.cell_count, 12); // 3 rows * 4 cols
+        assert_eq!(plan.cell_count(), 12); // 3 rows * 4 cols
     }
 
     // ── Constructor tests ───────────────────────────────────────
