@@ -91,7 +91,7 @@ impl<'a> WriteArena<'a> {
                 // (can't have &segments and &mut segments simultaneously).
                 let old_data: Vec<f32> = self
                     .sparse_segments
-                    .slice(old_seg, old_handle.offset, old_handle.len())
+                    .slice(old_seg, old_handle.offset, old_handle.len())?
                     .to_vec();
 
                 if let FieldLocation::Sparse {
@@ -100,7 +100,7 @@ impl<'a> WriteArena<'a> {
                 {
                     let new_data =
                         self.sparse_segments
-                            .slice_mut(new_seg, handle.offset, handle.len());
+                            .slice_mut(new_seg, handle.offset, handle.len())?;
                     let copy_len = old_data.len().min(new_data.len());
                     new_data[..copy_len].copy_from_slice(&old_data[..copy_len]);
                 }
@@ -112,10 +112,8 @@ impl<'a> WriteArena<'a> {
 
         // Return mutable slice to the new allocation.
         if let FieldLocation::Sparse { segment_index } = handle.location() {
-            Some(
-                self.sparse_segments
-                    .slice_mut(segment_index, handle.offset, handle.len()),
-            )
+            self.sparse_segments
+                .slice_mut(segment_index, handle.offset, handle.len())
         } else {
             None
         }
@@ -126,16 +124,16 @@ impl<'a> WriteArena<'a> {
         let entry = self.descriptor.get(field)?;
         let handle = &entry.handle;
         match handle.location() {
-            FieldLocation::PerTick { segment_index } => Some(self.per_tick_segments.slice(
+            FieldLocation::PerTick { segment_index } => self.per_tick_segments.slice(
                 segment_index,
                 handle.offset,
                 handle.len(),
-            )),
-            FieldLocation::Sparse { segment_index } => Some(self.sparse_segments.slice(
+            ),
+            FieldLocation::Sparse { segment_index } => self.sparse_segments.slice(
                 segment_index,
                 handle.offset,
                 handle.len(),
-            )),
+            ),
             FieldLocation::Static { .. } => {
                 // Static fields are read from the StaticArena, not through WriteArena.
                 None
@@ -155,11 +153,11 @@ impl FieldWriter for WriteArena<'_> {
                 // PerTick fields were pre-allocated at begin_tick().
                 // Just return a mutable slice to the pre-allocated region.
                 if let FieldLocation::PerTick { segment_index } = handle.location() {
-                    Some(self.per_tick_segments.slice_mut(
+                    self.per_tick_segments.slice_mut(
                         segment_index,
                         handle.offset,
                         handle.len(),
-                    ))
+                    )
                 } else {
                     None
                 }
@@ -170,11 +168,11 @@ impl FieldWriter for WriteArena<'_> {
                 if handle.generation() == self.generation {
                     // Already written this tick — return existing allocation.
                     if let FieldLocation::Sparse { segment_index } = handle.location() {
-                        Some(self.sparse_segments.slice_mut(
+                        self.sparse_segments.slice_mut(
                             segment_index,
                             handle.offset,
                             handle.len(),
-                        ))
+                        )
                     } else {
                         None
                     }
@@ -243,7 +241,7 @@ mod tests {
         generation: u32,
     ) -> (SegmentList, SegmentList, SparseSlab, FieldDescriptor) {
         let defs = make_defs();
-        let mut desc = FieldDescriptor::from_field_defs(&defs, cell_count);
+        let mut desc = FieldDescriptor::from_field_defs(&defs, cell_count).unwrap();
         let mut per_tick = SegmentList::new(4096, 4);
         let sparse_segs = SegmentList::new(4096, 4);
         let slab = SparseSlab::new();

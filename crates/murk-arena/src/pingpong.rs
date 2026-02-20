@@ -73,6 +73,10 @@ pub struct PingPongArena {
     published_descriptor: FieldDescriptor,
     /// Current arena generation (incremented on publish).
     generation: u32,
+    /// Generation computed by `begin_tick()`, consumed by `publish()`.
+    next_generation: u32,
+    /// Whether a tick is in progress (`begin_tick()` called, `publish()` not yet called).
+    tick_in_progress: bool,
     /// Which buffer is currently staging (false = A staging, true = B staging).
     b_is_staging: bool,
     /// Scratch region for temporary allocations.
@@ -126,7 +130,7 @@ impl PingPongArena {
             });
         }
 
-        let descriptor = FieldDescriptor::from_field_defs(&field_defs, config.cell_count);
+        let descriptor = FieldDescriptor::from_field_defs(&field_defs, config.cell_count)?;
 
         // Compute per-pool segment budgets that respect the global limit.
         // Three pools share max_segments: buffer_a, buffer_b, sparse.
@@ -199,6 +203,8 @@ impl PingPongArena {
             staging_descriptor,
             published_descriptor,
             generation: 0,
+            next_generation: 0,
+            tick_in_progress: false,
             b_is_staging: false,
             scratch: ScratchRegion::new(config.cell_count as usize * 4),
             config,
@@ -265,6 +271,8 @@ impl PingPongArena {
         }
 
         self.scratch.reset();
+        self.tick_in_progress = true;
+        self.next_generation = next_gen;
 
         // Construct TickGuard via helper to get clean split borrows.
         let guard = Self::make_tick_guard(
@@ -306,13 +314,23 @@ impl PingPongArena {
 
     /// Publish the staging buffer, making it the new published generation.
     ///
+    /// Returns `Err` if `begin_tick()` was not called first or if
+    /// `publish()` is called twice without an intervening `begin_tick()`.
+    ///
     /// After this call:
     /// - The staging descriptor becomes the published descriptor
     /// - The staging buffer becomes the published buffer
     /// - The old published buffer will be reset on the next `begin_tick()`
-    /// - The generation counter is incremented
-    pub fn publish(&mut self, tick_id: TickId, param_version: ParameterVersion) {
-        self.generation += 1;
+    /// - The generation counter advances to the value computed by `begin_tick()`
+    pub fn publish(&mut self, tick_id: TickId, param_version: ParameterVersion) -> Result<(), ArenaError> {
+        if !self.tick_in_progress {
+            return Err(ArenaError::InvalidConfig {
+                reason: "publish() called without a preceding begin_tick()".into(),
+            });
+        }
+
+        self.generation = self.next_generation;
+        self.tick_in_progress = false;
 
         // Swap descriptors.
         std::mem::swap(&mut self.staging_descriptor, &mut self.published_descriptor);
@@ -327,6 +345,7 @@ impl PingPongArena {
 
         self.last_tick_id = tick_id;
         self.last_param_version = param_version;
+        Ok(())
     }
 
     /// Get a read-only snapshot of the published generation.
@@ -391,7 +410,7 @@ impl PingPongArena {
         self.sparse_slab = SparseSlab::new();
 
         // Rebuild descriptors from field defs.
-        let descriptor = FieldDescriptor::from_field_defs(&self.field_defs, self.config.cell_count);
+        let descriptor = FieldDescriptor::from_field_defs(&self.field_defs, self.config.cell_count)?;
         self.staging_descriptor = descriptor.clone();
         self.published_descriptor = descriptor;
 
@@ -442,6 +461,8 @@ impl PingPongArena {
         }
 
         self.generation = 0;
+        self.next_generation = 0;
+        self.tick_in_progress = false;
         self.b_is_staging = false;
         self.last_tick_id = TickId(0);
         self.last_param_version = ParameterVersion(0);
@@ -574,7 +595,7 @@ mod tests {
         let _guard = arena.begin_tick().unwrap();
         // Let _guard go out of scope (it doesn't implement Drop).
         let _ = _guard;
-        arena.publish(TickId(1), ParameterVersion(0));
+        arena.publish(TickId(1), ParameterVersion(0)).unwrap();
         assert_eq!(arena.generation(), 1);
     }
 
@@ -589,7 +610,7 @@ mod tests {
             data[0] = 42.0;
             data[99] = 99.0;
         }
-        arena.publish(TickId(1), ParameterVersion(0));
+        arena.publish(TickId(1), ParameterVersion(0)).unwrap();
 
         // Read snapshot.
         let snap = arena.snapshot();
@@ -607,7 +628,7 @@ mod tests {
         {
             let _guard = arena.begin_tick().unwrap();
         }
-        arena.publish(TickId(1), ParameterVersion(0));
+        arena.publish(TickId(1), ParameterVersion(0)).unwrap();
 
         let snap = arena.snapshot();
         let terrain = snap.read_field(FieldId(2)).unwrap();
@@ -622,7 +643,7 @@ mod tests {
         {
             let _guard = arena.begin_tick().unwrap();
         }
-        arena.publish(TickId(5), ParameterVersion(3));
+        arena.publish(TickId(5), ParameterVersion(3)).unwrap();
 
         let snap = arena.snapshot();
         assert_eq!(snap.tick_id(), TickId(5));
@@ -639,7 +660,7 @@ mod tests {
             let data = guard.writer.write(FieldId(0)).unwrap();
             data[0] = 1.0;
         }
-        arena.publish(TickId(1), ParameterVersion(0));
+        arena.publish(TickId(1), ParameterVersion(0)).unwrap();
 
         // Verify tick 1 data in snapshot.
         assert_eq!(arena.snapshot().read(FieldId(0)).unwrap()[0], 1.0);
@@ -652,7 +673,7 @@ mod tests {
             assert_eq!(data[0], 0.0);
             data[0] = 2.0;
         }
-        arena.publish(TickId(2), ParameterVersion(0));
+        arena.publish(TickId(2), ParameterVersion(0)).unwrap();
 
         // Verify tick 2 data in snapshot.
         assert_eq!(arena.snapshot().read(FieldId(0)).unwrap()[0], 2.0);
@@ -677,7 +698,7 @@ mod tests {
             guard.scratch.alloc(50).unwrap();
             assert_eq!(guard.scratch.used(), 50);
         }
-        arena.publish(TickId(1), ParameterVersion(0));
+        arena.publish(TickId(1), ParameterVersion(0)).unwrap();
 
         // Next tick: scratch should be reset.
         {
@@ -697,7 +718,7 @@ mod tests {
                 let data = guard.writer.write(FieldId(0)).unwrap();
                 data[0] = i as f32;
             }
-            arena.publish(TickId(i), ParameterVersion(0));
+            arena.publish(TickId(i), ParameterVersion(0)).unwrap();
         }
         assert_eq!(arena.generation(), 5);
 
@@ -721,7 +742,7 @@ mod tests {
                 let data = guard.writer.write(FieldId(0)).unwrap();
                 data[0] = tick as f32;
             }
-            arena.publish(TickId(tick), ParameterVersion(0));
+            arena.publish(TickId(tick), ParameterVersion(0)).unwrap();
 
             let snap = arena.snapshot();
             assert_eq!(snap.read(FieldId(0)).unwrap()[0], tick as f32);
@@ -739,13 +760,13 @@ mod tests {
             let data = guard.writer.write(FieldId(3)).unwrap();
             data[0] = 77.0;
         }
-        arena.publish(TickId(1), ParameterVersion(0));
+        arena.publish(TickId(1), ParameterVersion(0)).unwrap();
 
         // Tick 2: don't write sparse field — it should persist.
         {
             let _guard = arena.begin_tick().unwrap();
         }
-        arena.publish(TickId(2), ParameterVersion(0));
+        arena.publish(TickId(2), ParameterVersion(0)).unwrap();
 
         let snap = arena.snapshot();
         let data = snap.read(FieldId(3)).unwrap();
@@ -868,7 +889,7 @@ mod tests {
             data[0] = 42.0;
             data[99] = 99.0;
         }
-        arena.publish(TickId(1), ParameterVersion(0));
+        arena.publish(TickId(1), ParameterVersion(0)).unwrap();
 
         let owned = arena.owned_snapshot();
         let data = owned.read_field(FieldId(0)).unwrap();
@@ -893,7 +914,7 @@ mod tests {
             let data = guard.writer.write(FieldId(0)).unwrap();
             data[0] = 42.0;
         }
-        arena.publish(TickId(1), ParameterVersion(0));
+        arena.publish(TickId(1), ParameterVersion(0)).unwrap();
 
         let owned = arena.owned_snapshot();
 
@@ -903,7 +924,7 @@ mod tests {
             let data = guard.writer.write(FieldId(0)).unwrap();
             data[0] = 999.0;
         }
-        arena.publish(TickId(2), ParameterVersion(0));
+        arena.publish(TickId(2), ParameterVersion(0)).unwrap();
 
         // OwnedSnapshot from tick 1 should be unaffected.
         assert_eq!(owned.read_field(FieldId(0)).unwrap()[0], 42.0);
@@ -992,5 +1013,26 @@ mod tests {
         };
         let static_arena = StaticArena::new(&[]).into_shared();
         assert!(PingPongArena::new(config, vec![], static_arena).is_ok());
+    }
+
+    // ── publish state guard (#54) ──────────────────────────────
+
+    #[test]
+    fn publish_without_begin_tick_returns_error() {
+        let mut arena = make_arena();
+        let result = arena.publish(TickId(1), ParameterVersion(0));
+        assert!(matches!(result, Err(ArenaError::InvalidConfig { .. })));
+    }
+
+    #[test]
+    fn double_publish_returns_error() {
+        let mut arena = make_arena();
+        {
+            let _guard = arena.begin_tick().unwrap();
+        }
+        arena.publish(TickId(1), ParameterVersion(0)).unwrap();
+        // Second publish without begin_tick should fail.
+        let result = arena.publish(TickId(2), ParameterVersion(0));
+        assert!(matches!(result, Err(ArenaError::InvalidConfig { .. })));
     }
 }

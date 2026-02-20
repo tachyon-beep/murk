@@ -194,7 +194,7 @@ impl ScalarDiffusion {
                 let count = nbs.len() as u32;
                 if count > 0 {
                     let sum: f32 = nbs.iter().map(|&ni| prev[ni]).sum();
-                    let alpha = (self.coefficient * dt * count as f64) as f32;
+                    let alpha = (self.coefficient * dt * count as f64).min(1.0) as f32;
                     let mean = sum / count as f32;
                     out[i] = (1.0 - alpha) * prev[i] + alpha * mean;
                 } else {
@@ -278,7 +278,7 @@ impl ScalarDiffusion {
             let count = nbs.len() as u32;
             if count > 0 {
                 let sum: f32 = nbs.iter().map(|&r| prev[r]).sum();
-                let alpha = (self.coefficient * dt * count as f64) as f32;
+                let alpha = (self.coefficient * dt * count as f64).min(1.0) as f32;
                 let mean = sum / count as f32;
                 out_buf[i] = (1.0 - alpha) * prev[i] + alpha * mean;
             } else {
@@ -427,14 +427,17 @@ impl ScalarDiffusionBuilder {
             .output_field
             .ok_or_else(|| "output_field is required".to_string())?;
 
-        if self.coefficient < 0.0 {
+        if !(self.coefficient >= 0.0) || !self.coefficient.is_finite() {
             return Err(format!(
-                "coefficient must be >= 0, got {}",
+                "coefficient must be finite and >= 0, got {}",
                 self.coefficient
             ));
         }
-        if self.decay < 0.0 {
-            return Err(format!("decay must be >= 0, got {}", self.decay));
+        if !(self.decay >= 0.0) || !self.decay.is_finite() {
+            return Err(format!(
+                "decay must be finite and >= 0, got {}",
+                self.decay
+            ));
         }
         if let (Some(lo), Some(hi)) = (self.clamp_min, self.clamp_max) {
             if lo > hi {
@@ -597,6 +600,50 @@ mod tests {
             .build();
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("clamp_min"));
+    }
+
+    #[test]
+    fn builder_rejects_nan_coefficient() {
+        let result = ScalarDiffusion::builder()
+            .input_field(F_HEAT)
+            .output_field(F_OUT)
+            .coefficient(f64::NAN)
+            .build();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("coefficient"));
+    }
+
+    #[test]
+    fn builder_rejects_infinite_coefficient() {
+        let result = ScalarDiffusion::builder()
+            .input_field(F_HEAT)
+            .output_field(F_OUT)
+            .coefficient(f64::INFINITY)
+            .build();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("coefficient"));
+    }
+
+    #[test]
+    fn builder_rejects_nan_decay() {
+        let result = ScalarDiffusion::builder()
+            .input_field(F_HEAT)
+            .output_field(F_OUT)
+            .decay(f64::NAN)
+            .build();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("decay"));
+    }
+
+    #[test]
+    fn builder_rejects_infinite_decay() {
+        let result = ScalarDiffusion::builder()
+            .input_field(F_HEAT)
+            .output_field(F_OUT)
+            .decay(f64::INFINITY)
+            .build();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("decay"));
     }
 
     // ---------------------------------------------------------------

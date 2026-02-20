@@ -51,34 +51,26 @@ impl Segment {
 
     /// Get a shared slice at the given offset and length.
     ///
-    /// # Panics
-    ///
-    /// Panics if `offset + len` exceeds the segment's allocated region.
-    pub fn slice(&self, offset: u32, len: u32) -> &[f32] {
+    /// Returns `None` if `offset + len` exceeds the segment's allocated region.
+    pub fn slice(&self, offset: u32, len: u32) -> Option<&[f32]> {
         let start = offset as usize;
-        let end = start + len as usize;
-        assert!(
-            end <= self.cursor,
-            "slice end ({end}) exceeds allocated region ({cursor})",
-            cursor = self.cursor,
-        );
-        &self.data[start..end]
+        let end = start.checked_add(len as usize)?;
+        if end > self.cursor {
+            return None;
+        }
+        Some(&self.data[start..end])
     }
 
     /// Get a mutable slice at the given offset and length.
     ///
-    /// # Panics
-    ///
-    /// Panics if `offset + len` exceeds the segment's allocated region.
-    pub fn slice_mut(&mut self, offset: u32, len: u32) -> &mut [f32] {
+    /// Returns `None` if `offset + len` exceeds the segment's allocated region.
+    pub fn slice_mut(&mut self, offset: u32, len: u32) -> Option<&mut [f32]> {
         let start = offset as usize;
-        let end = start + len as usize;
-        assert!(
-            end <= self.cursor,
-            "slice end ({end}) exceeds allocated region ({cursor})",
-            cursor = self.cursor,
-        );
-        &mut self.data[start..end]
+        let end = start.checked_add(len as usize)?;
+        if end > self.cursor {
+            return None;
+        }
+        Some(&mut self.data[start..end])
     }
 
     /// Reset the bump pointer to zero without deallocating.
@@ -184,13 +176,19 @@ impl SegmentList {
     }
 
     /// Get a shared slice from the given segment at the given offset and length.
-    pub fn slice(&self, segment_index: u16, offset: u32, len: u32) -> &[f32] {
-        self.segments[segment_index as usize].slice(offset, len)
+    ///
+    /// Returns `None` if `segment_index` is out of bounds or the slice
+    /// exceeds the segment's allocated region.
+    pub fn slice(&self, segment_index: u16, offset: u32, len: u32) -> Option<&[f32]> {
+        self.segments.get(segment_index as usize)?.slice(offset, len)
     }
 
     /// Get a mutable slice from the given segment at the given offset and length.
-    pub fn slice_mut(&mut self, segment_index: u16, offset: u32, len: u32) -> &mut [f32] {
-        self.segments[segment_index as usize].slice_mut(offset, len)
+    ///
+    /// Returns `None` if `segment_index` is out of bounds or the slice
+    /// exceeds the segment's allocated region.
+    pub fn slice_mut(&mut self, segment_index: u16, offset: u32, len: u32) -> Option<&mut [f32]> {
+        self.segments.get_mut(segment_index as usize)?.slice_mut(offset, len)
     }
 
     /// Reset all segments' bump pointers without deallocating.
@@ -280,7 +278,7 @@ mod tests {
         data[0] = 1.0;
         data[4] = 5.0;
 
-        let read = seg.slice(offset, 5);
+        let read = seg.slice(offset, 5).unwrap();
         assert_eq!(read[0], 1.0);
         assert_eq!(read[4], 5.0);
     }
@@ -330,10 +328,10 @@ mod tests {
         let mut list = SegmentList::new(1024, 4);
         let (seg, off) = list.alloc(5).unwrap();
         {
-            let s = list.slice_mut(seg, off, 5);
+            let s = list.slice_mut(seg, off, 5).unwrap();
             s[0] = 42.0;
         }
-        let read = list.slice(seg, off, 5);
+        let read = list.slice(seg, off, 5).unwrap();
         assert_eq!(read[0], 42.0);
     }
 
@@ -360,7 +358,7 @@ mod tests {
         data[4] = 5.0;
 
         let cloned = seg.clone();
-        let read = cloned.slice(offset, 5);
+        let read = cloned.slice(offset, 5).unwrap();
         assert_eq!(read[0], 1.0);
         assert_eq!(read[4], 5.0);
         assert_eq!(cloned.used(), 5);
@@ -375,72 +373,69 @@ mod tests {
 
         let mut cloned = seg.clone();
         // Mutate original — clone should be unaffected.
-        let data = seg.slice_mut(0, 5);
+        let data = seg.slice_mut(0, 5).unwrap();
         data[0] = 99.0;
-        assert_eq!(cloned.slice(0, 5)[0], 1.0);
+        assert_eq!(cloned.slice(0, 5).unwrap()[0], 1.0);
 
         // Mutate clone — original should be unaffected.
-        let cdata = cloned.slice_mut(0, 5);
+        let cdata = cloned.slice_mut(0, 5).unwrap();
         cdata[0] = 77.0;
-        assert_eq!(seg.slice(0, 5)[0], 99.0);
+        assert_eq!(seg.slice(0, 5).unwrap()[0], 99.0);
     }
 
     #[test]
     fn test_segment_list_clone_preserves_slices() {
         let mut list = SegmentList::new(100, 4);
         let (seg0, off0) = list.alloc(80).unwrap();
-        list.slice_mut(seg0, off0, 80)[0] = 42.0;
+        list.slice_mut(seg0, off0, 80).unwrap()[0] = 42.0;
         let (seg1, off1) = list.alloc(80).unwrap(); // overflows to segment 1
-        list.slice_mut(seg1, off1, 80)[0] = 99.0;
+        list.slice_mut(seg1, off1, 80).unwrap()[0] = 99.0;
 
         let cloned = list.clone();
         assert_eq!(cloned.segment_count(), 2);
-        assert_eq!(cloned.slice(seg0, off0, 80)[0], 42.0);
-        assert_eq!(cloned.slice(seg1, off1, 80)[0], 99.0);
+        assert_eq!(cloned.slice(seg0, off0, 80).unwrap()[0], 42.0);
+        assert_eq!(cloned.slice(seg1, off1, 80).unwrap()[0], 99.0);
     }
 
     #[test]
     fn test_segment_list_clone_independent() {
         let mut list = SegmentList::new(100, 4);
         let (seg, off) = list.alloc(10).unwrap();
-        list.slice_mut(seg, off, 10)[0] = 42.0;
+        list.slice_mut(seg, off, 10).unwrap()[0] = 42.0;
 
         let cloned = list.clone();
         // Mutate original.
-        list.slice_mut(seg, off, 10)[0] = 0.0;
+        list.slice_mut(seg, off, 10).unwrap()[0] = 0.0;
         // Clone is unaffected.
-        assert_eq!(cloned.slice(seg, off, 10)[0], 42.0);
+        assert_eq!(cloned.slice(seg, off, 10).unwrap()[0], 42.0);
     }
 
     // ── BUG-028: slice must respect cursor, not capacity ──────
 
     #[test]
-    #[should_panic(expected = "exceeds allocated region")]
-    fn segment_slice_panics_after_reset() {
+    fn segment_slice_returns_none_after_reset() {
         let mut seg = Segment::new(1024);
         let (_, data) = seg.alloc(100).unwrap();
         data[0] = 42.0;
         seg.reset();
         // cursor is now 0 — no allocated region
-        let _ = seg.slice(0, 100); // must panic
+        assert!(seg.slice(0, 100).is_none());
     }
 
     #[test]
-    #[should_panic(expected = "exceeds allocated region")]
-    fn segment_slice_mut_panics_after_reset() {
+    fn segment_slice_mut_returns_none_after_reset() {
         let mut seg = Segment::new(1024);
         seg.alloc(100).unwrap();
         seg.reset();
-        let _ = seg.slice_mut(0, 100); // must panic
+        assert!(seg.slice_mut(0, 100).is_none());
     }
 
     #[test]
-    #[should_panic(expected = "exceeds allocated region")]
-    fn segment_slice_panics_beyond_cursor() {
+    fn segment_slice_returns_none_beyond_cursor() {
         let mut seg = Segment::new(1024);
         seg.alloc(50).unwrap();
         // cursor is 50, but capacity is 1024
-        let _ = seg.slice(0, 100); // must panic
+        assert!(seg.slice(0, 100).is_none());
     }
 
     #[test]
@@ -448,17 +443,16 @@ mod tests {
         let mut seg = Segment::new(1024);
         seg.alloc(100).unwrap();
         // Should succeed — 100 <= cursor (100)
-        let data = seg.slice(0, 100);
+        let data = seg.slice(0, 100).unwrap();
         assert_eq!(data.len(), 100);
     }
 
     #[test]
-    #[should_panic(expected = "exceeds allocated region")]
-    fn segment_list_slice_panics_after_reset() {
+    fn segment_list_slice_returns_none_after_reset() {
         let mut list = SegmentList::new(1024, 4);
         let (seg, off) = list.alloc(100).unwrap();
-        list.slice_mut(seg, off, 100)[0] = 42.0;
+        list.slice_mut(seg, off, 100).unwrap()[0] = 42.0;
         list.reset();
-        let _ = list.slice(seg, off, 100); // must panic
+        assert!(list.slice(seg, off, 100).is_none());
     }
 }

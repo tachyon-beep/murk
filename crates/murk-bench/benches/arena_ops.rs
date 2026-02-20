@@ -97,7 +97,7 @@ fn bench_arena_write_10k(c: &mut Criterion) {
     {
         let _guard = arena.begin_tick().unwrap();
     }
-    arena.publish(TickId(1), ParameterVersion(0));
+    arena.publish(TickId(1), ParameterVersion(0)).unwrap();
 
     c.bench_function("arena_write_10k", |b| {
         b.iter(|| {
@@ -107,7 +107,7 @@ fn bench_arena_write_10k(c: &mut Criterion) {
                 *val = i as f32;
             }
             black_box(data[0]);
-            arena.publish(TickId(2), ParameterVersion(0));
+            arena.publish(TickId(2), ParameterVersion(0)).unwrap();
         });
     });
 }
@@ -125,7 +125,7 @@ fn bench_arena_snapshot(c: &mut Criterion) {
                 data[0] = 42.0;
             }
             // Publish.
-            arena.publish(TickId(1), ParameterVersion(0));
+            arena.publish(TickId(1), ParameterVersion(0)).unwrap();
             // Take snapshot and read field.
             let snap = arena.snapshot();
             let data = snap.read_field(FieldId(0)).unwrap();

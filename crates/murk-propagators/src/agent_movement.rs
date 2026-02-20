@@ -90,6 +90,10 @@ impl Propagator for AgentMovementPropagator {
         FieldSet::empty()
     }
 
+    fn reads_previous(&self) -> FieldSet {
+        [AGENT_PRESENCE].into_iter().collect()
+    }
+
     fn writes(&self) -> Vec<(FieldId, WriteMode)> {
         vec![(AGENT_PRESENCE, WriteMode::Incremental)]
     }
@@ -426,5 +430,16 @@ mod tests {
         prop.step(&mut ctx).unwrap();
 
         assert!(ab.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn reads_previous_declares_agent_presence() {
+        let ab = new_action_buffer();
+        let prop = AgentMovementPropagator::new(ab, vec![(0, 0)]);
+        let rp = prop.reads_previous();
+        assert!(
+            rp.contains(AGENT_PRESENCE),
+            "reads_previous() must declare AGENT_PRESENCE for Incremental write mode"
+        );
     }
 }

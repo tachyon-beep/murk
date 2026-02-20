@@ -123,6 +123,8 @@ pub enum ConfigError {
         /// Description of which invariant was violated.
         reason: String,
     },
+    /// Engine could not be recovered from tick thread (e.g. thread panicked).
+    EngineRecoveryFailed,
 }
 
 impl fmt::Display for ConfigError {
@@ -141,6 +143,9 @@ impl fmt::Display for ConfigError {
             }
             Self::InvalidBackoff { reason } => {
                 write!(f, "invalid backoff config: {reason}")
+            }
+            Self::EngineRecoveryFailed => {
+                write!(f, "engine could not be recovered from tick thread")
             }
         }
     }

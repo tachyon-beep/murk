@@ -209,7 +209,7 @@ mod tests {
             let data = guard.writer.write(FieldId(0)).unwrap();
             data.fill(tick as f32);
         }
-        arena.publish(TickId(tick), ParameterVersion(0));
+        arena.publish(TickId(tick), ParameterVersion(0)).unwrap();
         arena.owned_snapshot()
     }
 

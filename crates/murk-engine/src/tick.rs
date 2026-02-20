@@ -318,7 +318,10 @@ impl TickEngine {
 
         // 6. Publish.
         let publish_start = Instant::now();
-        self.arena.publish(next_tick, self.param_version);
+        self.arena.publish(next_tick, self.param_version).map_err(|_| TickError {
+            kind: StepError::AllocationFailed,
+            receipts: vec![],
+        })?;
         let snapshot_publish_us = publish_start.elapsed().as_micros() as u64;
 
         // 7. Update state.

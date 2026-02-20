@@ -43,7 +43,7 @@ pub fn reference_fields() -> Vec<FieldDef> {
             field_type: FieldType::Scalar,
             mutability: FieldMutability::PerTick,
             units: None,
-            bounds: Some((0.0, 1.0)),
+            bounds: None,
             boundary_behavior: BoundaryBehavior::Clamp,
         },
         FieldDef {
@@ -86,5 +86,19 @@ mod tests {
         let fields = reference_fields();
         let total: u32 = fields.iter().map(|f| f.field_type.components()).sum();
         assert_eq!(total, 7); // 1 + 2 + 1 + 2 + 1
+    }
+
+    #[test]
+    fn agent_presence_bounds_accommodate_marker_values() {
+        // AgentMovementPropagator writes (agent_id as f32) + 1.0 as markers.
+        // Bounds must not restrict these values.
+        let fields = reference_fields();
+        let ap = &fields[2];
+        assert_eq!(ap.name, "agent_presence");
+        assert!(
+            ap.bounds.is_none(),
+            "agent_presence bounds should be None (markers exceed [0,1]), got {:?}",
+            ap.bounds
+        );
     }
 }

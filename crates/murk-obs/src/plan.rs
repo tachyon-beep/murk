@@ -170,6 +170,26 @@ impl ObsPlan {
             });
         }
 
+        // Validate transform parameters.
+        for (i, entry) in spec.entries.iter().enumerate() {
+            if let ObsTransform::Normalize { min, max } = &entry.transform {
+                if !min.is_finite() || !max.is_finite() {
+                    return Err(ObsError::InvalidObsSpec {
+                        reason: format!(
+                            "entry {i}: Normalize min/max must be finite, got min={min}, max={max}"
+                        ),
+                    });
+                }
+                if min > max {
+                    return Err(ObsError::InvalidObsSpec {
+                        reason: format!(
+                            "entry {i}: Normalize min ({min}) must be <= max ({max})"
+                        ),
+                    });
+                }
+            }
+        }
+
         let has_agent = spec.entries.iter().any(|e| {
             matches!(
                 e.region,
@@ -2406,5 +2426,42 @@ mod tests {
         // Chebyshev distance <= 1 covers full 3x3 = 9 cells (all corners included).
         let valid_count = mask.iter().filter(|&&v| v == 1).count();
         assert_eq!(valid_count, 9, "Chebyshev disk radius=1 = full 3x3");
+    }
+
+    #[test]
+    fn compile_rejects_inverted_normalize_range() {
+        let space = square4_space();
+        let spec = ObsSpec {
+            entries: vec![ObsEntry {
+                field_id: FieldId(0),
+                region: ObsRegion::Fixed(RegionSpec::All),
+                pool: None,
+                transform: ObsTransform::Normalize {
+                    min: 10.0,
+                    max: 5.0,
+                },
+                dtype: ObsDtype::F32,
+            }],
+        };
+        let err = ObsPlan::compile(&spec, &space).unwrap_err();
+        assert!(matches!(err, ObsError::InvalidObsSpec { .. }));
+    }
+
+    #[test]
+    fn compile_rejects_nan_normalize() {
+        let space = square4_space();
+        let spec = ObsSpec {
+            entries: vec![ObsEntry {
+                field_id: FieldId(0),
+                region: ObsRegion::Fixed(RegionSpec::All),
+                pool: None,
+                transform: ObsTransform::Normalize {
+                    min: f64::NAN,
+                    max: 1.0,
+                },
+                dtype: ObsDtype::F32,
+            }],
+        };
+        assert!(ObsPlan::compile(&spec, &space).is_err());
     }
 }

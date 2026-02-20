@@ -24,7 +24,15 @@ pub struct DiffusionPropagator {
 
 impl DiffusionPropagator {
     /// Create a new diffusion propagator with the given diffusivity coefficient.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `diffusivity` is negative, NaN, or infinite.
     pub fn new(diffusivity: f64) -> Self {
+        assert!(
+            diffusivity >= 0.0 && diffusivity.is_finite(),
+            "diffusivity must be finite and >= 0, got {diffusivity}"
+        );
         Self { diffusivity }
     }
 
@@ -103,7 +111,7 @@ impl DiffusionPropagator {
                 let count = nbs.len() as u32;
                 if count > 0 {
                     let sum: f32 = nbs.iter().map(|&ni| heat_prev[ni]).sum();
-                    let alpha = (self.diffusivity * dt * count as f64) as f32;
+                    let alpha = (self.diffusivity * dt * count as f64).min(1.0) as f32;
                     let mean = sum / count as f32;
                     heat_out[i] = (1.0 - alpha) * heat_prev[i] + alpha * mean;
                 } else {
@@ -128,7 +136,7 @@ impl DiffusionPropagator {
                     let idx = i * 2 + comp;
                     if count > 0 {
                         let sum: f32 = nbs.iter().map(|&ni| vel_prev[ni * 2 + comp]).sum();
-                        let alpha = (self.diffusivity * dt * count as f64) as f32;
+                        let alpha = (self.diffusivity * dt * count as f64).min(1.0) as f32;
                         let mean = sum / count as f32;
                         vel_out[idx] = (1.0 - alpha) * vel_prev[idx] + alpha * mean;
                     } else {
@@ -237,7 +245,7 @@ impl DiffusionPropagator {
             let count = nbs.len() as u32;
             if count > 0 {
                 let sum: f32 = nbs.iter().map(|&r| heat_prev[r]).sum();
-                let alpha = (self.diffusivity * dt * count as f64) as f32;
+                let alpha = (self.diffusivity * dt * count as f64).min(1.0) as f32;
                 let mean = sum / count as f32;
                 heat_new[i] = (1.0 - alpha) * heat_prev[i] + alpha * mean;
             } else {
@@ -248,7 +256,7 @@ impl DiffusionPropagator {
                 let idx = i * 2 + comp;
                 if count > 0 {
                     let sum: f32 = nbs.iter().map(|&r| vel_prev[r * 2 + comp]).sum();
-                    let alpha = (self.diffusivity * dt * count as f64) as f32;
+                    let alpha = (self.diffusivity * dt * count as f64).min(1.0) as f32;
                     let mean = sum / count as f32;
                     vel_new[idx] = (1.0 - alpha) * vel_prev[idx] + alpha * mean;
                 } else {
@@ -327,10 +335,14 @@ impl Propagator for DiffusionPropagator {
     }
 
     fn max_dt(&self) -> Option<f64> {
-        // CFL stability constraint: dt <= 1 / (max_degree * D)
-        // Use 12 (Fcc12) as worst-case to be safe for all space topologies.
-        // Square4=4, Hex2D=6, Fcc12=12.
-        Some(1.0 / (12.0 * self.diffusivity))
+        if self.diffusivity > 0.0 {
+            // CFL stability constraint: dt <= 1 / (max_degree * D)
+            // Use 12 (Fcc12) as worst-case to be safe for all space topologies.
+            // Square4=4, Hex2D=6, Fcc12=12.
+            Some(1.0 / (12.0 * self.diffusivity))
+        } else {
+            None
+        }
     }
 
     fn step(&self, ctx: &mut StepContext<'_>) -> Result<(), PropagatorError> {
@@ -874,5 +886,70 @@ mod tests {
             "wrap grad_x at (0,0) should be -10, got {}",
             grad[0]
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "diffusivity must be finite")]
+    fn rejects_negative_diffusivity() {
+        DiffusionPropagator::new(-1.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "diffusivity must be finite")]
+    fn rejects_nan_diffusivity() {
+        DiffusionPropagator::new(f64::NAN);
+    }
+
+    #[test]
+    #[should_panic(expected = "diffusivity must be finite")]
+    fn rejects_infinite_diffusivity() {
+        DiffusionPropagator::new(f64::INFINITY);
+    }
+
+    #[test]
+    fn zero_diffusivity_max_dt_is_none() {
+        let prop = DiffusionPropagator::new(0.0);
+        assert!(
+            prop.max_dt().is_none(),
+            "zero diffusivity should give max_dt=None, got {:?}",
+            prop.max_dt()
+        );
+    }
+
+    #[test]
+    fn alpha_clamped_prevents_sign_inversion() {
+        // Even if dt is larger than CFL allows (simulating a bypass),
+        // alpha should be clamped so values don't go negative.
+        let grid = Square4::new(3, 3, EdgeBehavior::Absorb).unwrap();
+        let n = grid.cell_count();
+        let prop = DiffusionPropagator::new(10.0); // very high diffusivity
+
+        let mut heat = vec![0.0f32; n];
+        heat[4] = 100.0; // center of 3x3
+
+        let mut reader = MockFieldReader::new();
+        reader.set_field(HEAT, heat);
+        reader.set_field(VELOCITY, vec![0.0; n * 2]);
+
+        let mut writer = MockFieldWriter::new();
+        writer.add_field(HEAT, n);
+        writer.add_field(VELOCITY, n * 2);
+        writer.add_field(HEAT_GRADIENT, n * 2);
+
+        let mut scratch = ScratchRegion::new(0);
+        // dt=1.0 with diffusivity=10.0: alpha = 10*1*4 = 40 >> 1
+        let mut ctx = make_ctx(&reader, &mut writer, &mut scratch, &grid, 1.0);
+
+        prop.step(&mut ctx).unwrap();
+
+        let result = writer.get_field(HEAT).unwrap();
+        // With alpha clamped to 1.0, center becomes the mean of neighbours = 0.0
+        // Without clamping: (1-40)*100 + 40*0 = -3900 (catastrophic!)
+        for (i, &v) in result.iter().enumerate() {
+            assert!(
+                v >= 0.0,
+                "cell {i} went negative ({v}): alpha clamp failed"
+            );
+        }
     }
 }

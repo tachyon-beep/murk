@@ -3,27 +3,22 @@
 Generated 2026-02-17 from static analysis triage of 110 source reports.
 Updated 2026-02-20 with wave-4 deep audit findings (#54-#94).
 
-**Status (updated 2026-02-20):** 31 fixed, 0 partially fixed, 64 open.
+**Status (updated 2026-02-20):** 45 fixed, 0 partially fixed, 50 open.
 
 ## Open Bugs
 
-### Critical (2 open)
+### Critical (0 open)
 
 | # | Ticket | Crate | Summary | Status |
 |---|--------|-------|---------|--------|
-| 54 | [arena-publish-no-state-guard](arena-publish-no-state-guard.md) | murk-arena | `publish()` callable without `begin_tick()`; generation `+=1` not `checked_add` | Open |
-| 55 | [propagators-diffusion-alpha-unbounded](propagators-diffusion-alpha-unbounded.md) | murk-propagators | Alpha > 1.0 causes sign inversion; zero/negative diffusivity yields max_dt=Infinity | Open |
+| — | (none) | — | — | — |
 
-### High (13 open)
+### High (9 open)
 
 | # | Ticket | Crate | Summary | Status |
 |---|--------|-------|---------|--------|
 | 20 | [ffi-mutex-poisoning-panic-in-extern-c](ffi-mutex-poisoning-panic-in-extern-c.md) | murk-ffi | 43+ `lock().unwrap()` calls in extern "C" functions; poisoned mutex = UB | Open |
 | 23 | [python-propagator-trampoline-leak-on-cstring-error](python-propagator-trampoline-leak-on-cstring-error.md) | murk-python | TrampolineData leaks on CString/add_propagator_handle error paths | Open |
-| 56 | [arena-segment-panics-in-library-code](arena-segment-panics-in-library-code.md) | murk-arena | `Segment::slice` uses `assert!`; `SegmentList` unchecked index; reachable from public API | Open |
-| 57 | [obs-flatbuf-signed-unsigned-cast-corruption](obs-flatbuf-signed-unsigned-cast-corruption.md) | murk-obs | Negative i32 → u32 via `as u32` in flatbuf deserialization silently corrupts data | Open |
-| 58 | [propagators-agent-presence-issues](propagators-agent-presence-issues.md) | murk-propagators | Field bounds (0,1) vs actual markers (1.0,2.0,...); missing `reads_previous` declaration | Open |
-| 59 | [propagators-nan-infinity-validation-gaps](propagators-nan-infinity-validation-gaps.md) | murk-propagators | Coefficient/decay validation uses `< 0.0` which doesn't catch NaN/Infinity | Open |
 | 60 | [propagators-resolve-axis-duplicated](propagators-resolve-axis-duplicated.md) | murk-propagators | `resolve_axis`/`neighbours_flat` copy-pasted across 5 files | Open |
 | 61 | [space-is-multiple-of-msrv-compat](space-is-multiple-of-msrv-compat.md) | murk-space, murk-obs | `u32::is_multiple_of(2)` not stable at MSRV 1.87 (stabilized 1.88) | Open |
 | 62 | [python-trampoline-panic-across-ffi](python-trampoline-panic-across-ffi.md) | murk-python | `python_trampoline` has no `catch_unwind`; panic = UB across extern "C" | Open |
@@ -32,11 +27,10 @@ Updated 2026-02-20 with wave-4 deep audit findings (#54-#94).
 | 65 | [umbrella-snapshot-not-importable](umbrella-snapshot-not-importable.md) | murk | `Snapshot` in return types but not importable through facade crate | Open |
 | 66 | [ffi-callback-propagator-missing-sync](ffi-callback-propagator-missing-sync.md) | murk-ffi | `CallbackPropagator` has `Send` but not `Sync`; unsound if design changes | Open |
 
-### Medium (38 open)
+### Medium (31 open)
 
 | # | Ticket | Crate | Summary | Status |
 |---|--------|-------|---------|--------|
-| 25 | [engine-egress-double-epoch-read](engine-egress-double-epoch-read.md) | murk-engine | Double epoch read allows age_ticks overstated by 1+ | Open |
 | 26 | [engine-stepresult-receipts-doc-mismatch](engine-stepresult-receipts-doc-mismatch.md) | murk-engine | StepResult.receipts doc says no rejections but code includes them | Open |
 | 27 | [engine-quickstart-setfield-noop](engine-quickstart-setfield-noop.md) | murk-engine | Quickstart example's SetField injection overwritten by diffusion propagator | Open |
 | 29 | [arena-sparse-segment-memory-leak](arena-sparse-segment-memory-leak.md) | murk-arena | Sparse CoW bump-allocates but never reclaims dead segment memory | Open |
@@ -52,10 +46,6 @@ Updated 2026-02-20 with wave-4 deep audit findings (#54-#94).
 | 45 | [space-hex2d-disk-overflow](space-hex2d-disk-overflow.md) | murk-space | compile_hex_disk i64 overflow when radius near i32::MAX | Open |
 | 46 | [space-compliance-ordering-membership](space-compliance-ordering-membership.md) | murk-space | Compliance test checks cardinality/uniqueness but not cell membership | Open |
 | 67 | [engine-cell-count-u32-truncation](engine-cell-count-u32-truncation.md) | murk-engine | `cell_count as u32` silent truncation; 65536x65536 grid overflows to 0 | Open |
-| 68 | [engine-egress-epoch-tick-mismatch](engine-egress-epoch-tick-mismatch.md) | murk-engine | Egress uses `epoch_counter.current()` not `snapshot.tick_id()` for metadata | Open |
-| 69 | [engine-observe-buffer-bounds](engine-observe-buffer-bounds.md) | murk-engine | `observe()` panics on oversized return; `observe_agents()` silently truncates | Open |
-| 70 | [engine-reset-wrong-error-variant](engine-reset-wrong-error-variant.md) | murk-engine | Reset returns `InvalidTickRate { value: 0.0 }` when engine recovery fails | Open |
-| 71 | [obs-normalize-inverted-range](obs-normalize-inverted-range.md) | murk-obs | `Normalize { min > max }` silently collapses all data to {0.0, 1.0} | Open |
 | 72 | [replay-write-path-u32-truncation](replay-write-path-u32-truncation.md) | murk-replay | 7 `as u32` casts on write path without overflow check; silent data corruption | Open |
 | 73 | [replay-expires-arrival-seq-not-serialized](replay-expires-arrival-seq-not-serialized.md) | murk-replay | `expires_after_tick` and `arrival_seq` silently discarded; replay may diverge | Open |
 | 74 | [python-cstr-from-ptr-potential-ub](python-cstr-from-ptr-potential-ub.md) | murk-python | `CStr::from_ptr` on stack buffer; UB if FFI writes exactly 256 bytes | Open |
@@ -68,18 +58,15 @@ Updated 2026-02-20 with wave-4 deep audit findings (#54-#94).
 | 81 | [ffi-obs-conversion-duplicated](ffi-obs-conversion-duplicated.md) | murk-ffi | ObsEntry conversion logic duplicated between `obs.rs` and `batched.rs` | Open |
 | 82 | [ffi-obsplan-lock-ordering](ffi-obsplan-lock-ordering.md) | murk-ffi | `OBS_PLANS` held during full observation execution; undocumented lock ordering | Open |
 | 83 | [obs-per-agent-scratch-allocation](obs-per-agent-scratch-allocation.md) | murk-obs | Per-agent Vec alloc in pooled gather; fixed entries re-gathered per agent | Open |
-| 84 | [arena-cell-count-components-overflow](arena-cell-count-components-overflow.md) | murk-arena | `cell_count * components` can overflow u32 silently in descriptor | Open |
 | 85 | [propagator-scratch-bytes-slots-mismatch](propagator-scratch-bytes-slots-mismatch.md) | murk-propagator | `scratch_bytes()` returns bytes but `ScratchRegion::new()` takes f32 slot count | Open |
 | 86 | [python-close-skips-obsplan-destroy](python-close-skips-obsplan-destroy.md) | murk-python | `MurkEnv.close()` destroys World but not ObsPlan; `BatchedVecEnv` no double-close guard | Open |
 | 87 | [python-batched-vecenv-missing-spaces](python-batched-vecenv-missing-spaces.md) | murk-python | `BatchedVecEnv` missing `observation_space`/`action_space`; breaks SB3 compat | Open |
 | 88 | [space-regionplan-public-fields](space-regionplan-public-fields.md) | murk-space | `RegionPlan` fields all pub; `ProductMetric::Weighted` panics in library code | Open |
-| 89 | [obs-canonical-rank-negative-coord](obs-canonical-rank-negative-coord.md) | murk-obs | Negative coord wraps via `as usize`; may read wrong field offset | Open |
 
-### Low (11 open)
+### Low (10 open)
 
 | # | Ticket | Crate | Summary | Status |
 |---|--------|-------|---------|--------|
-| 47 | [arena-scratch-alloc-overflow](arena-scratch-alloc-overflow.md) | murk-arena | Unchecked `*2` growth can overflow usize (practically unreachable on 64-bit) | Open |
 | 48 | [obs-metadata-doc-says-six-fields](obs-metadata-doc-says-six-fields.md) | murk-obs | Doc says "six fields" but struct has five | Open |
 | 50 | [core-command-ordering-doc-missing-source-seq](core-command-ordering-doc-missing-source-seq.md) | murk-core | Command ordering doc omits source_seq from sort key description | Open |
 | 51 | [bench-space-ops-degenerate-q-distribution](bench-space-ops-degenerate-q-distribution.md) | murk-bench | LCG multiplier not coprime to modulus; only 4/20 q values exercised | Open |
@@ -91,12 +78,26 @@ Updated 2026-02-20 with wave-4 deep audit findings (#54-#94).
 | 93 | [replay-writer-no-flush-on-drop](replay-writer-no-flush-on-drop.md) | murk-replay | `ReplayWriter` has no `Drop` impl to flush; buffered data silently lost | Open |
 | 94 | [propagators-performance-hotspots](propagators-performance-hotspots.md) | murk-propagators | Per-cell BFS alloc, O(n) agent scan, wasted Box-Muller samples | Open |
 
-## Closed Bugs (31 fixed)
+## Closed Bugs (45 fixed)
 
 Tickets moved to [closed/](closed/).
 
 | # | Ticket | Crate | Summary | Fix Commit |
 |---|--------|-------|---------|------------|
+| 54 | [arena-publish-no-state-guard](closed/arena-publish-no-state-guard.md) | murk-arena | `publish()` guarded by `tick_in_progress` flag; uses `next_generation` from `begin_tick()` | (this session) |
+| 56 | [arena-segment-panics-in-library-code](closed/arena-segment-panics-in-library-code.md) | murk-arena | `Segment::slice`/`slice_mut` return `Option`; `SegmentList` bounds-checked | (this session) |
+| 84 | [arena-cell-count-components-overflow](closed/arena-cell-count-components-overflow.md) | murk-arena | `from_field_defs` returns `Result`; `checked_mul` on `cell_count * components` | (this session) |
+| 47 | [arena-scratch-alloc-overflow](closed/arena-scratch-alloc-overflow.md) | murk-arena | Growth factor uses `checked_mul(2).unwrap_or(new_cursor)` | (this session) |
+| 25 | [engine-egress-double-epoch-read](closed/engine-egress-double-epoch-read.md) | murk-engine | Use snapshot.tick_id() instead of second epoch_counter.current() call | (this session) |
+| 57 | [obs-flatbuf-signed-unsigned-cast-corruption](closed/obs-flatbuf-signed-unsigned-cast-corruption.md) | murk-obs | i32↔u32 casts use try_from; rejects negative/overflow on both ser/deser | (this session) |
+| 71 | [obs-normalize-inverted-range](closed/obs-normalize-inverted-range.md) | murk-obs | compile() validates min <= max and finite for Normalize transform | (this session) |
+| 89 | [obs-canonical-rank-negative-coord](closed/obs-canonical-rank-negative-coord.md) | murk-obs | debug_assert guards negative coords in canonical_rank | (this session) |
+| 55 | [propagators-diffusion-alpha-unbounded](closed/propagators-diffusion-alpha-unbounded.md) | murk-propagators | Alpha clamped to [0,1]; constructor validates; max_dt returns None for zero | (this session) |
+| 58 | [propagators-agent-presence-issues](closed/propagators-agent-presence-issues.md) | murk-propagators | Bounds removed; reads_previous declares AGENT_PRESENCE | (this session) |
+| 59 | [propagators-nan-infinity-validation-gaps](closed/propagators-nan-infinity-validation-gaps.md) | murk-propagators | Validation uses `!(x >= 0.0) \|\| !x.is_finite()` pattern | (this session) |
+| 68 | [engine-egress-epoch-tick-mismatch](closed/engine-egress-epoch-tick-mismatch.md) | murk-engine | Same fix as #25; snapshot carries its own tick ID | (this session) |
+| 69 | [engine-observe-buffer-bounds](closed/engine-observe-buffer-bounds.md) | murk-engine | Both observe methods now return Err on buffer size mismatch | (this session) |
+| 70 | [engine-reset-wrong-error-variant](closed/engine-reset-wrong-error-variant.md) | murk-engine | New ConfigError::EngineRecoveryFailed variant replaces misleading InvalidTickRate | (this session) |
 | 1 | [python-world-step-receipt-buffer-oob](closed/python-world-step-receipt-buffer-oob.md) | murk-python | `World::step` panics on OOB slice when FFI reports more receipts than buffer capacity | 02c12f3 |
 | 2 | [engine-tick-non-setfield-commands-silently-accepted](closed/engine-tick-non-setfield-commands-silently-accepted.md) | murk-engine | Non-SetField commands silently accepted with success receipt but never executed | dd52604 |
 | 3 | [engine-ingress-anonymous-command-misordering](closed/engine-ingress-anonymous-command-misordering.md) | murk-engine | Anonymous commands misordered when `source_id=None` but `source_seq=Some(_)` | c0f5d55 |
@@ -133,13 +134,13 @@ Tickets moved to [closed/](closed/).
 
 | Crate | Critical | High | Medium | Low | Total Open |
 |-------|----------|------|--------|-----|------------|
-| murk-engine | 0 | 0 | 7 | 0 | 7 |
-| murk-arena | 1 | 1 | 3 | 1 | 6 |
+| murk-engine | 0 | 0 | 3 | 0 | 3 |
+| murk-arena | 0 | 0 | 2 | 0 | 2 |
 | murk-ffi | 0 | 2 | 7 | 1 | 10 |
 | murk-python | 0 | 3 | 8 | 0 | 11 |
 | murk-propagator | 0 | 0 | 1 | 0 | 1 |
-| murk-propagators | 1 | 3 | 1 | 1 | 6 |
-| murk-obs | 0 | 1 | 3 | 1 | 5 |
+| murk-propagators | 0 | 1 | 1 | 1 | 3 |
+| murk-obs | 0 | 0 | 1 | 1 | 2 |
 | murk-replay | 0 | 0 | 3 | 1 | 4 |
 | murk-space | 0 | 1 | 3 | 0 | 4 |
 | murk-core | 0 | 0 | 1 | 1 | 2 |
@@ -148,7 +149,7 @@ Tickets moved to [closed/](closed/).
 | examples | 0 | 0 | 1 | 0 | 1 |
 | scripts | 0 | 0 | 0 | 1 | 1 |
 | workspace (cross-crate) | 0 | 0 | 0 | 3 | 3 |
-| **Total** | **2** | **13** | **38** | **11** | **64** |
+| **Total** | **0** | **9** | **31** | **10** | **50** |
 
 Note: Workspace-wide tickets (#90-#92) affect multiple crates and are counted once under "workspace".
 

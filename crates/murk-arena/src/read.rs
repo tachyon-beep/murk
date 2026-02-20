@@ -71,16 +71,16 @@ impl<'a> Snapshot<'a> {
         let handle = &entry.handle;
 
         match handle.location() {
-            FieldLocation::PerTick { segment_index } => Some(self.per_tick_segments.slice(
+            FieldLocation::PerTick { segment_index } => self.per_tick_segments.slice(
                 segment_index,
                 handle.offset,
                 handle.len(),
-            )),
-            FieldLocation::Sparse { segment_index } => Some(self.sparse_segments.slice(
+            ),
+            FieldLocation::Sparse { segment_index } => self.sparse_segments.slice(
                 segment_index,
                 handle.offset,
                 handle.len(),
-            )),
+            ),
             FieldLocation::Static { .. } => self.static_arena.read_field(field),
         }
     }
@@ -170,16 +170,16 @@ impl OwnedSnapshot {
         let handle = &entry.handle;
 
         match handle.location() {
-            FieldLocation::PerTick { segment_index } => Some(self.per_tick_segments.slice(
+            FieldLocation::PerTick { segment_index } => self.per_tick_segments.slice(
                 segment_index,
                 handle.offset,
                 handle.len(),
-            )),
-            FieldLocation::Sparse { segment_index } => Some(self.sparse_segments.slice(
+            ),
+            FieldLocation::Sparse { segment_index } => self.sparse_segments.slice(
                 segment_index,
                 handle.offset,
                 handle.len(),
-            )),
+            ),
             FieldLocation::Static { .. } => self.static_arena.read_field(field),
         }
     }
@@ -245,13 +245,13 @@ mod tests {
         ];
 
         let cell_count = 10u32;
-        let mut desc = FieldDescriptor::from_field_defs(&defs, cell_count);
+        let mut desc = FieldDescriptor::from_field_defs(&defs, cell_count).unwrap();
 
         // Set up per-tick segments with data.
         let mut per_tick = SegmentList::new(4096, 4);
         let (seg_idx, offset) = per_tick.alloc(cell_count).unwrap();
         {
-            let data = per_tick.slice_mut(seg_idx, offset, cell_count);
+            let data = per_tick.slice_mut(seg_idx, offset, cell_count).unwrap();
             data[0] = 1.0;
             data[9] = 10.0;
         }
@@ -433,7 +433,7 @@ mod tests {
         );
 
         // Mutate the original segments.
-        let data = per_tick.slice_mut(0, 0, 10);
+        let data = per_tick.slice_mut(0, 0, 10).unwrap();
         data[0] = 999.0;
 
         // OwnedSnapshot should be unaffected.

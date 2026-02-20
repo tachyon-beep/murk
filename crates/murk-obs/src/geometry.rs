@@ -94,6 +94,10 @@ impl GridGeometry {
     /// `rank = a * strides[0] + b * strides[1]`.
     pub fn canonical_rank(&self, coord: &[i32]) -> usize {
         debug_assert_eq!(coord.len(), self.ndim);
+        debug_assert!(
+            coord.iter().all(|c| *c >= 0),
+            "canonical_rank called with negative coord: {coord:?}"
+        );
         let mut rank = 0usize;
         for (c, &stride) in coord.iter().zip(&self.coord_strides) {
             rank += *c as usize * stride;
@@ -347,6 +351,16 @@ mod tests {
         // radius > i32::MAX should never be interior on a finite grid.
         assert!(!geo.is_interior(&[10, 10], u32::MAX));
         assert!(!geo.is_interior(&[10, 10], i32::MAX as u32 + 1));
+    }
+
+    #[test]
+    fn canonical_rank_rejects_negative_coords() {
+        let s = Square4::new(10, 8, EdgeBehavior::Absorb).unwrap();
+        let geo = GridGeometry::from_space(&s).unwrap();
+        // Negative coords should not silently produce a bogus rank.
+        // in_bounds returns false, so callers should check first.
+        assert!(!geo.in_bounds(&[-1, 3]));
+        assert!(!geo.in_bounds(&[3, -1]));
     }
 
     #[test]

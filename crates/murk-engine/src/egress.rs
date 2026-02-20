@@ -16,6 +16,7 @@ use crossbeam_channel::Receiver;
 use crate::epoch::{EpochCounter, WorkerEpoch};
 use crate::ring::SnapshotRing;
 
+use murk_core::traits::SnapshotAccess;
 use murk_core::Coord;
 use murk_obs::{ObsMetadata, ObsPlan};
 use murk_space::Space;
@@ -124,8 +125,9 @@ fn worker_loop_inner(
         let epoch = epoch_counter.current();
         worker_epoch.pin(epoch);
 
-        // Execute the plan. Always unpin, even on error.
-        let result = execute_task(&task, &*snapshot, epoch_counter.current());
+        // Execute the plan using the snapshot's own tick ID (not epoch_counter,
+        // which may have advanced since we obtained the snapshot).
+        let result = execute_task(&task, &*snapshot, snapshot.tick_id().0);
         worker_epoch.unpin();
 
         // Send result back.
@@ -240,7 +242,7 @@ mod tests {
             let data = guard.writer.write(FieldId(0)).unwrap();
             data.fill(value);
         }
-        arena.publish(TickId(tick), ParameterVersion(0));
+        arena.publish(TickId(tick), ParameterVersion(0)).unwrap();
         arena.owned_snapshot()
     }
 

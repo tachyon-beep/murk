@@ -300,6 +300,17 @@ impl RealtimeAsyncWorld {
                 output: buf,
                 mask: mbuf,
             } => {
+                if buf.len() > output.len() || mbuf.len() > mask.len() {
+                    return Err(ObsError::ExecutionFailed {
+                        reason: format!(
+                            "output buffer too small: need ({}, {}) got ({}, {})",
+                            buf.len(),
+                            mbuf.len(),
+                            output.len(),
+                            mask.len()
+                        ),
+                    });
+                }
                 output[..buf.len()].copy_from_slice(&buf);
                 mask[..mbuf.len()].copy_from_slice(&mbuf);
                 Ok(metadata)
@@ -365,10 +376,19 @@ impl RealtimeAsyncWorld {
                 output: buf,
                 mask: mbuf,
             } => {
-                let copy_out = buf.len().min(output.len());
-                output[..copy_out].copy_from_slice(&buf[..copy_out]);
-                let copy_mask = mbuf.len().min(mask.len());
-                mask[..copy_mask].copy_from_slice(&mbuf[..copy_mask]);
+                if buf.len() > output.len() || mbuf.len() > mask.len() {
+                    return Err(ObsError::ExecutionFailed {
+                        reason: format!(
+                            "output buffer too small: need ({}, {}) got ({}, {})",
+                            buf.len(),
+                            mbuf.len(),
+                            output.len(),
+                            mask.len()
+                        ),
+                    });
+                }
+                output[..buf.len()].copy_from_slice(&buf);
+                mask[..mbuf.len()].copy_from_slice(&mbuf);
                 Ok(metadata)
             }
             ObsResult::Error(e) => Err(e),
@@ -527,7 +547,7 @@ impl RealtimeAsyncWorld {
             .lock()
             .unwrap()
             .take()
-            .ok_or(ConfigError::InvalidTickRate { value: 0.0 })?;
+            .ok_or(ConfigError::EngineRecoveryFailed)?;
 
         // Reset the engine (clears arena, ingress, tick counter).
         // If reset fails, restore the engine so a subsequent reset can retry.

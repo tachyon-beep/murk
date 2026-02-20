@@ -86,7 +86,7 @@ fn write_entry(buf: &mut Vec<u8>, entry: &ObsEntry) -> Result<(), ObsError> {
     buf.extend_from_slice(&entry.field_id.0.to_le_bytes());
 
     // Region
-    let (region_tag, region_params) = encode_region(&entry.region);
+    let (region_tag, region_params) = encode_region(&entry.region)?;
     buf.push(region_tag);
     let n_params = u16::try_from(region_params.len()).map_err(|_| ObsError::InvalidObsSpec {
         reason: format!(
@@ -141,23 +141,29 @@ fn write_entry(buf: &mut Vec<u8>, entry: &ObsEntry) -> Result<(), ObsError> {
     Ok(())
 }
 
-fn encode_region(region: &ObsRegion) -> (u8, Vec<i32>) {
+fn encode_region(region: &ObsRegion) -> Result<(u8, Vec<i32>), ObsError> {
     match region {
-        ObsRegion::Fixed(RegionSpec::All) => (REGION_ALL, vec![]),
+        ObsRegion::Fixed(RegionSpec::All) => Ok((REGION_ALL, vec![])),
         ObsRegion::Fixed(RegionSpec::Disk { center, radius }) => {
             let mut params: Vec<i32> = center.iter().copied().collect();
-            params.push(*radius as i32);
-            (REGION_DISK, params)
+            let r = i32::try_from(*radius).map_err(|_| ObsError::InvalidObsSpec {
+                reason: format!("Disk radius {radius} exceeds i32::MAX"),
+            })?;
+            params.push(r);
+            Ok((REGION_DISK, params))
         }
         ObsRegion::Fixed(RegionSpec::Rect { min, max }) => {
             let mut params: Vec<i32> = min.iter().copied().collect();
             params.extend(max.iter().copied());
-            (REGION_RECT, params)
+            Ok((REGION_RECT, params))
         }
         ObsRegion::Fixed(RegionSpec::Neighbours { center, depth }) => {
             let mut params: Vec<i32> = center.iter().copied().collect();
-            params.push(*depth as i32);
-            (REGION_NEIGHBOURS, params)
+            let d = i32::try_from(*depth).map_err(|_| ObsError::InvalidObsSpec {
+                reason: format!("Neighbours depth {depth} exceeds i32::MAX"),
+            })?;
+            params.push(d);
+            Ok((REGION_NEIGHBOURS, params))
         }
         ObsRegion::Fixed(RegionSpec::Coords(coords)) => {
             let ndim = coords.first().map(|c| c.len()).unwrap_or(0) as i32;
@@ -166,12 +172,24 @@ fn encode_region(region: &ObsRegion) -> (u8, Vec<i32>) {
             for c in coords {
                 params.extend(c.iter().copied());
             }
-            (REGION_COORDS, params)
+            Ok((REGION_COORDS, params))
         }
-        ObsRegion::AgentDisk { radius } => (REGION_AGENT_DISK, vec![*radius as i32]),
+        ObsRegion::AgentDisk { radius } => {
+            let r = i32::try_from(*radius).map_err(|_| ObsError::InvalidObsSpec {
+                reason: format!("AgentDisk radius {radius} exceeds i32::MAX"),
+            })?;
+            Ok((REGION_AGENT_DISK, vec![r]))
+        }
         ObsRegion::AgentRect { half_extent } => {
-            let params: Vec<i32> = half_extent.iter().map(|&h| h as i32).collect();
-            (REGION_AGENT_RECT, params)
+            let params: Vec<i32> = half_extent
+                .iter()
+                .map(|&h| {
+                    i32::try_from(h).map_err(|_| ObsError::InvalidObsSpec {
+                        reason: format!("AgentRect half_extent {h} exceeds i32::MAX"),
+                    })
+                })
+                .collect::<Result<_, _>>()?;
+            Ok((REGION_AGENT_RECT, params))
         }
     }
 }
@@ -308,7 +326,9 @@ fn decode_region(tag: u8, params: &[i32], idx: usize) -> Result<ObsRegion, ObsEr
             }
             let ndim = params.len() - 1;
             let center: SmallVec<[i32; 4]> = params[..ndim].iter().copied().collect();
-            let radius = params[ndim] as u32;
+            let radius = u32::try_from(params[ndim]).map_err(|_| ObsError::InvalidObsSpec {
+                reason: format!("entry {idx}: negative Disk radius {}", params[ndim]),
+            })?;
             Ok(ObsRegion::Fixed(RegionSpec::Disk { center, radius }))
         }
         REGION_RECT => {
@@ -330,7 +350,9 @@ fn decode_region(tag: u8, params: &[i32], idx: usize) -> Result<ObsRegion, ObsEr
             }
             let ndim = params.len() - 1;
             let center: SmallVec<[i32; 4]> = params[..ndim].iter().copied().collect();
-            let depth = params[ndim] as u32;
+            let depth = u32::try_from(params[ndim]).map_err(|_| ObsError::InvalidObsSpec {
+                reason: format!("entry {idx}: negative Neighbours depth {}", params[ndim]),
+            })?;
             Ok(ObsRegion::Fixed(RegionSpec::Neighbours { center, depth }))
         }
         REGION_COORDS => {
@@ -363,9 +385,10 @@ fn decode_region(tag: u8, params: &[i32], idx: usize) -> Result<ObsRegion, ObsEr
                     reason: format!("entry {idx}: AgentDisk needs exactly 1 param (radius)"),
                 });
             }
-            Ok(ObsRegion::AgentDisk {
-                radius: params[0] as u32,
-            })
+            let radius = u32::try_from(params[0]).map_err(|_| ObsError::InvalidObsSpec {
+                reason: format!("entry {idx}: negative AgentDisk radius {}", params[0]),
+            })?;
+            Ok(ObsRegion::AgentDisk { radius })
         }
         REGION_AGENT_RECT => {
             if params.is_empty() {
@@ -373,7 +396,14 @@ fn decode_region(tag: u8, params: &[i32], idx: usize) -> Result<ObsRegion, ObsEr
                     reason: format!("entry {idx}: AgentRect needs at least 1 param"),
                 });
             }
-            let half_extent: SmallVec<[u32; 4]> = params.iter().map(|&p| p as u32).collect();
+            let half_extent: SmallVec<[u32; 4]> = params
+                .iter()
+                .map(|&p| {
+                    u32::try_from(p).map_err(|_| ObsError::InvalidObsSpec {
+                        reason: format!("entry {idx}: negative AgentRect half_extent {p}"),
+                    })
+                })
+                .collect::<Result<_, _>>()?;
             Ok(ObsRegion::AgentRect { half_extent })
         }
         other => Err(ObsError::InvalidObsSpec {
@@ -720,5 +750,86 @@ mod tests {
         let bytes = b"BAD!\x01\x00\x00\x00";
         let err = deserialize(bytes).unwrap_err();
         assert!(format!("{err:?}").contains("invalid magic"));
+    }
+
+    #[test]
+    fn serialize_rejects_negative_disk_radius_via_overflow() {
+        // A radius of u32::MAX (> i32::MAX) should fail serialization.
+        let spec = ObsSpec {
+            entries: vec![ObsEntry {
+                field_id: FieldId(0),
+                region: ObsRegion::Fixed(RegionSpec::Disk {
+                    center: smallvec![3, 4],
+                    radius: u32::MAX,
+                }),
+                pool: None,
+                transform: ObsTransform::Identity,
+                dtype: ObsDtype::F32,
+            }],
+        };
+        assert!(serialize(&spec).is_err());
+    }
+
+    #[test]
+    fn deserialize_rejects_negative_region_params() {
+        // Manually craft bytes with a negative i32 for Disk radius.
+        // This should be rejected on deserialization.
+        let spec = ObsSpec {
+            entries: vec![ObsEntry {
+                field_id: FieldId(0),
+                region: ObsRegion::Fixed(RegionSpec::Disk {
+                    center: smallvec![3, 4],
+                    radius: 5,
+                }),
+                pool: None,
+                transform: ObsTransform::Identity,
+                dtype: ObsDtype::F32,
+            }],
+        };
+        let mut bytes = serialize(&spec).unwrap();
+        // The Disk region params are: [center0, center1, radius] as i32 LE.
+        // Find the radius param and overwrite with -1.
+        // Header: 4 magic + 2 version + 2 n_entries = 8
+        // Entry: 4 field_id + 1 region_tag + 2 n_params = 7
+        // Params: 4*2 (center) = 8, then 4 (radius) at offset 8+7+8 = 23
+        let radius_offset = 8 + 4 + 1 + 2 + 4 + 4; // 23
+        bytes[radius_offset..radius_offset + 4].copy_from_slice(&(-1i32).to_le_bytes());
+        let err = deserialize(&bytes).unwrap_err();
+        assert!(
+            format!("{err:?}").contains("negative"),
+            "expected 'negative' in error, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn serialize_rejects_overflow_agent_disk_radius() {
+        let spec = ObsSpec {
+            entries: vec![ObsEntry {
+                field_id: FieldId(0),
+                region: ObsRegion::AgentDisk {
+                    radius: i32::MAX as u32 + 1,
+                },
+                pool: None,
+                transform: ObsTransform::Identity,
+                dtype: ObsDtype::F32,
+            }],
+        };
+        assert!(serialize(&spec).is_err());
+    }
+
+    #[test]
+    fn serialize_rejects_overflow_agent_rect_half_extent() {
+        let spec = ObsSpec {
+            entries: vec![ObsEntry {
+                field_id: FieldId(0),
+                region: ObsRegion::AgentRect {
+                    half_extent: smallvec![u32::MAX],
+                },
+                pool: None,
+                transform: ObsTransform::Identity,
+                dtype: ObsDtype::F32,
+            }],
+        };
+        assert!(serialize(&spec).is_err());
     }
 }

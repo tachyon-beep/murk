@@ -9,6 +9,7 @@
 use indexmap::IndexMap;
 use murk_core::{FieldDef, FieldId, FieldMutability};
 
+use crate::error::ArenaError;
 use crate::handle::{FieldHandle, FieldLocation};
 
 /// Metadata about a field's type and allocation requirements.
@@ -54,11 +55,16 @@ impl FieldDescriptor {
     /// All handles are initialised with generation 0 and placeholder locations.
     /// The caller (PingPongArena) must call [`FieldDescriptor::update_handle`] after allocating
     /// actual storage.
-    pub fn from_field_defs(field_defs: &[(FieldId, FieldDef)], cell_count: u32) -> Self {
+    pub fn from_field_defs(field_defs: &[(FieldId, FieldDef)], cell_count: u32) -> Result<Self, ArenaError> {
         let mut entries = IndexMap::with_capacity(field_defs.len());
         for (id, def) in field_defs {
             let components = def.field_type.components();
-            let total_len = cell_count * components;
+            let total_len = cell_count.checked_mul(components).ok_or(ArenaError::InvalidConfig {
+                reason: format!(
+                    "cell_count ({cell_count}) * components ({components}) overflows u32 for field '{}'",
+                    def.name,
+                ),
+            })?;
             let meta = FieldMeta {
                 components,
                 mutability: def.mutability,
@@ -69,7 +75,7 @@ impl FieldDescriptor {
                 FieldHandle::new(0, 0, total_len, FieldLocation::PerTick { segment_index: 0 });
             entries.insert(*id, FieldEntry { handle, meta });
         }
-        Self { entries }
+        Ok(Self { entries })
     }
 
     /// Look up a field's entry.
@@ -172,14 +178,14 @@ mod tests {
     #[test]
     fn from_field_defs_creates_entries() {
         let defs = make_field_defs();
-        let desc = FieldDescriptor::from_field_defs(&defs, 100);
+        let desc = FieldDescriptor::from_field_defs(&defs, 100).unwrap();
         assert_eq!(desc.len(), 4);
     }
 
     #[test]
     fn total_len_is_cell_count_times_components() {
         let defs = make_field_defs();
-        let desc = FieldDescriptor::from_field_defs(&defs, 100);
+        let desc = FieldDescriptor::from_field_defs(&defs, 100).unwrap();
 
         // Scalar: 100 * 1 = 100
         assert_eq!(desc.get(FieldId(0)).unwrap().meta.total_len, 100);
@@ -192,7 +198,7 @@ mod tests {
     #[test]
     fn update_handle_changes_handle() {
         let defs = make_field_defs();
-        let mut desc = FieldDescriptor::from_field_defs(&defs, 100);
+        let mut desc = FieldDescriptor::from_field_defs(&defs, 100).unwrap();
 
         let new_handle =
             FieldHandle::new(5, 1024, 100, FieldLocation::PerTick { segment_index: 2 });
@@ -209,7 +215,7 @@ mod tests {
     #[test]
     fn fields_by_mutability_filters() {
         let defs = make_field_defs();
-        let desc = FieldDescriptor::from_field_defs(&defs, 100);
+        let desc = FieldDescriptor::from_field_defs(&defs, 100).unwrap();
 
         let per_tick: Vec<_> = desc
             .fields_by_mutability(FieldMutability::PerTick)
@@ -226,8 +232,25 @@ mod tests {
     #[test]
     fn unknown_field_returns_none() {
         let defs = make_field_defs();
-        let desc = FieldDescriptor::from_field_defs(&defs, 100);
+        let desc = FieldDescriptor::from_field_defs(&defs, 100).unwrap();
         assert!(desc.get(FieldId(99)).is_none());
+    }
+
+    #[test]
+    fn overflow_cell_count_times_components_returns_error() {
+        let defs = vec![(
+            FieldId(0),
+            FieldDef {
+                name: "huge".to_string(),
+                field_type: FieldType::Vector { dims: u32::MAX },
+                mutability: FieldMutability::PerTick,
+                units: None,
+                bounds: None,
+                boundary_behavior: BoundaryBehavior::Clamp,
+            },
+        )];
+        let result = FieldDescriptor::from_field_defs(&defs, u32::MAX);
+        assert!(matches!(result, Err(ArenaError::InvalidConfig { .. })));
     }
 
     #[cfg(not(miri))]
@@ -262,7 +285,7 @@ mod tests {
                         boundary_behavior: BoundaryBehavior::Clamp,
                     },
                 )];
-                let desc = FieldDescriptor::from_field_defs(&defs, cell_count);
+                let desc = FieldDescriptor::from_field_defs(&defs, cell_count).unwrap();
                 let entry = desc.get(FieldId(0)).unwrap();
                 prop_assert_eq!(
                     entry.meta.total_len,
@@ -287,7 +310,7 @@ mod tests {
                         },
                     ))
                     .collect();
-                let desc = FieldDescriptor::from_field_defs(&defs, 100);
+                let desc = FieldDescriptor::from_field_defs(&defs, 100).unwrap();
                 prop_assert_eq!(desc.len(), n_fields);
                 prop_assert_eq!(desc.is_empty(), n_fields == 0);
             }
