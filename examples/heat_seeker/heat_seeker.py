@@ -193,6 +193,7 @@ class HeatSeekerEnv(murk.MurkEnv):
         tick_id, age_ticks = self._obs_plan.execute(
             self._world, self._obs_buf, self._mask_buf
         )
+        self._episode_start_tick = tick_id
         obs = self._obs_buf.copy()
         return obs, {"tick_id": tick_id, "age_ticks": age_ticks}
 

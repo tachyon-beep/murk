@@ -7,6 +7,12 @@
 //!   4. Building a WorldConfig and LockstepWorld
 //!   5. Stepping, reading snapshots, injecting commands, and resetting
 //!
+//! Key pattern: the `HEAT_SOURCE` field is a "command-only" field — no
+//! propagator writes to it, so SetField commands persist in the published
+//! snapshot. The propagator reads `HEAT_SOURCE` from the previous tick
+//! and incorporates non-zero values as external heat sources. This is
+//! the canonical way to inject external values into a simulation.
+//!
 //! Run with:
 //!   cargo run --example quickstart
 
@@ -22,6 +28,7 @@ use smallvec::smallvec;
 // ─── Field IDs ──────────────────────────────────────────────────
 
 const HEAT: FieldId = FieldId(0);
+const HEAT_SOURCE: FieldId = FieldId(1);
 
 // ─── Grid parameters ────────────────────────────────────────────
 
@@ -55,7 +62,11 @@ impl Propagator for DiffusionPropagator {
     fn reads_previous(&self) -> FieldSet {
         // Jacobi read: always sees the frozen tick-start values,
         // regardless of what other propagators write this tick.
-        [HEAT].into_iter().collect()
+        //
+        // HEAT_SOURCE is a "command-only" field — no propagator writes
+        // it. SetField commands persist in the published snapshot, so
+        // reads_previous sees them one tick later.
+        [HEAT, HEAT_SOURCE].into_iter().collect()
     }
 
     fn writes(&self) -> Vec<(FieldId, WriteMode)> {
@@ -75,9 +86,20 @@ impl Propagator for DiffusionPropagator {
                     reason: "heat field not readable".into(),
                 })?;
 
-        // Copy into a local buffer — we need random access while
+        // HEAT_SOURCE is a command-only field: no propagator writes it,
+        // so SetField values persist in the published snapshot. We read
+        // the previous tick's values here (one-tick delay by design).
+        let heat_source =
+            ctx.reads_previous()
+                .read(HEAT_SOURCE)
+                .ok_or_else(|| PropagatorError::ExecutionFailed {
+                    reason: "heat_source field not readable".into(),
+                })?;
+
+        // Copy into local buffers — we need random access while
         // holding the mutable write buffer (split-borrow limitation).
         let prev: Vec<f32> = prev_heat.to_vec();
+        let source: Vec<f32> = heat_source.to_vec();
         let dt = ctx.dt();
 
         let out = ctx
@@ -91,9 +113,17 @@ impl Propagator for DiffusionPropagator {
             for c in 0..COLS as usize {
                 let idx = r * COLS as usize + c;
 
-                // Pin the heat source to a constant temperature.
+                // Pin the fixed heat source to a constant temperature.
                 if r == SOURCE_R && c == SOURCE_C {
                     out[idx] = 10.0;
+                    continue;
+                }
+
+                // Pin cells with externally-injected heat sources.
+                // These come from SetField commands on HEAT_SOURCE,
+                // visible here one tick after injection.
+                if source[idx] > 0.0 {
+                    out[idx] = source[idx];
                     continue;
                 }
 
@@ -145,15 +175,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // 2. Define fields.
-    let fields = vec![FieldDef {
-        name: "heat".into(),
-        field_type: FieldType::Scalar,
-        mutability: FieldMutability::PerTick,
-        units: Some("kelvin".into()),
-        bounds: None,
-        boundary_behavior: BoundaryBehavior::Clamp,
-    }];
-    println!("Fields: heat (PerTick)");
+    //    HEAT is written by the diffusion propagator every tick.
+    //    HEAT_SOURCE is a "command-only" field: no propagator writes it,
+    //    so SetField commands persist in the published snapshot and are
+    //    visible to the propagator on the following tick.
+    let fields = vec![
+        FieldDef {
+            name: "heat".into(),
+            field_type: FieldType::Scalar,
+            mutability: FieldMutability::PerTick,
+            units: Some("kelvin".into()),
+            bounds: None,
+            boundary_behavior: BoundaryBehavior::Clamp,
+        },
+        FieldDef {
+            name: "heat_source".into(),
+            field_type: FieldType::Scalar,
+            mutability: FieldMutability::PerTick,
+            units: Some("kelvin".into()),
+            bounds: None,
+            boundary_behavior: BoundaryBehavior::Clamp,
+        },
+    ];
+    println!("Fields: heat (PerTick), heat_source (PerTick, command-only)");
 
     // 3. Build config.
     let config = WorldConfig {
@@ -192,12 +236,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // 6. Inject a command: set a second heat spot at (1, 1).
-    println!("\nInjecting SetField command at (1, 1)...");
+    // 6. Inject a command: set a second heat source at (1, 1).
+    //
+    //    We target HEAT_SOURCE, not HEAT. Since no propagator writes
+    //    HEAT_SOURCE, the SetField value persists in the published
+    //    snapshot. The propagator reads it on the NEXT tick (one-tick
+    //    delay) and pins (1,1) as a heat source for that tick.
+    //
+    //    After one tick, HEAT_SOURCE resets to zero (PerTick fields are
+    //    zero-filled each tick), so the injection acts as a one-shot
+    //    perturbation that then diffuses naturally.
+    println!("\nInjecting SetField command on HEAT_SOURCE at (1, 1)...");
     let cmd = Command {
         payload: CommandPayload::SetField {
             coord: smallvec![1, 1],
-            field_id: HEAT,
+            field_id: HEAT_SOURCE,
             value: 10.0,
         },
         expires_after_tick: TickId(u64::MAX),
@@ -215,8 +268,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // 7. Run 20 more ticks to see the perturbation spread.
-    for _ in 0..20 {
-        world.step_sync(vec![])?;
+    //    Tick 52 incorporates the injection; ticks 53+ let it diffuse.
+    for i in 0..20 {
+        let result = world.step_sync(vec![])?;
+        let tick = result.snapshot.tick_id().0;
+        if i == 0 {
+            // First tick after injection: the propagator should now
+            // see the HEAT_SOURCE value and pin (1,1) = 10.0.
+            let heat = result.snapshot.read(HEAT).unwrap();
+            let injected_val = heat[1 * COLS as usize + 1];
+            println!(
+                "  tick {:>3}: heat at (1,1) = {:.2} (injection visible!)",
+                tick, injected_val,
+            );
+        }
     }
 
     // 8. Read the final heat map and display it.
