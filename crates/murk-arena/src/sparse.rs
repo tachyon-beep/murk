@@ -11,6 +11,18 @@ use crate::segment::SegmentList;
 
 use murk_core::FieldId;
 
+/// A segment range that has been freed and is available for reuse.
+///
+/// Field sizes are fixed for the arena's lifetime (sealed at `Config` time),
+/// so reuse is exact-size: `alloc()` searches for a `RetiredRange` whose `len`
+/// matches the requested allocation. This eliminates fragmentation by design.
+#[derive(Clone, Copy, Debug)]
+struct RetiredRange {
+    segment_index: u16,
+    offset: u32,
+    len: u32,
+}
+
 /// A single sparse allocation slot.
 #[derive(Clone, Debug)]
 pub struct SparseSlot {
@@ -63,9 +75,9 @@ pub struct SparseSlab {
     ///
     /// If dynamic schema support is ever added, `retired_ranges` must be cleared
     /// on field resize or replaced with a best-fit allocator.
-    retired_ranges: Vec<(u16, u32, u32)>,
+    retired_ranges: Vec<RetiredRange>,
     /// Segment ranges freed during the current tick (not yet safe to reuse).
-    pending_retired: Vec<(u16, u32, u32)>,
+    pending_retired: Vec<RetiredRange>,
 }
 
 impl SparseSlab {
@@ -97,10 +109,10 @@ impl SparseSlab {
         let (segment_index, offset) = if let Some(pos) = self
             .retired_ranges
             .iter()
-            .position(|&(_, _, rlen)| rlen == len)
+            .position(|r| r.len == len)
         {
-            let (seg, off, _) = self.retired_ranges.swap_remove(pos);
-            (seg, off)
+            let r = self.retired_ranges.swap_remove(pos);
+            (r.segment_index, r.offset)
         } else {
             segments.alloc(len)?
         };
@@ -108,8 +120,11 @@ impl SparseSlab {
         // Mark old allocation as dead if it exists.
         if let Some(&old_idx) = self.live_map.get(&field) {
             let old = &self.slots[old_idx];
-            self.pending_retired
-                .push((old.segment_index, old.offset, old.len));
+            self.pending_retired.push(RetiredRange {
+                segment_index: old.segment_index,
+                offset: old.offset,
+                len: old.len,
+            });
             self.slots[old_idx].live = false;
             self.free_list.push(old_idx);
         }
