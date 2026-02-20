@@ -224,7 +224,8 @@ pub extern "C" fn murk_snapshot_read_field(
 
 /// Current tick ID for a world (0 after construction or reset).
 ///
-/// Returns 0 for invalid handles or poisoned mutex.
+/// **Ambiguity warning:** returns 0 for both "tick 0" and "invalid handle."
+/// Prefer [`murk_current_tick_get`] for unambiguous error detection.
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_current_tick(world_handle: u64) -> u64 {
@@ -233,9 +234,29 @@ pub extern "C" fn murk_current_tick(world_handle: u64) -> u64 {
         .unwrap_or(0)
 }
 
+/// Current tick ID with explicit error reporting.
+///
+/// Writes the tick to `*out` and returns `MURK_OK`. Returns
+/// `InvalidHandle` or `InternalError` without writing to `out`.
+#[no_mangle]
+#[allow(unsafe_code)]
+pub extern "C" fn murk_current_tick_get(world_handle: u64, out: *mut u64) -> i32 {
+    if out.is_null() {
+        return MurkStatus::InvalidArgument as i32;
+    }
+    let world_arc = match get_world(world_handle) {
+        Some(arc) => arc,
+        None => return MurkStatus::InvalidHandle as i32,
+    };
+    let world = ffi_lock!(world_arc);
+    unsafe { *out = world.current_tick().0 };
+    MurkStatus::Ok as i32
+}
+
 /// Whether ticking is disabled due to consecutive rollbacks.
 ///
-/// Returns 0 for invalid handles or poisoned mutex.
+/// **Ambiguity warning:** returns 0 for both "not disabled" and "invalid handle."
+/// Prefer [`murk_is_tick_disabled_get`] for unambiguous error detection.
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_is_tick_disabled(world_handle: u64) -> u8 {
@@ -244,9 +265,29 @@ pub extern "C" fn murk_is_tick_disabled(world_handle: u64) -> u8 {
         .unwrap_or(0)
 }
 
+/// Tick-disabled state with explicit error reporting.
+///
+/// Writes 1 (disabled) or 0 (enabled) to `*out` and returns `MURK_OK`.
+/// Returns `InvalidHandle` or `InternalError` without writing to `out`.
+#[no_mangle]
+#[allow(unsafe_code)]
+pub extern "C" fn murk_is_tick_disabled_get(world_handle: u64, out: *mut u8) -> i32 {
+    if out.is_null() {
+        return MurkStatus::InvalidArgument as i32;
+    }
+    let world_arc = match get_world(world_handle) {
+        Some(arc) => arc,
+        None => return MurkStatus::InvalidHandle as i32,
+    };
+    let world = ffi_lock!(world_arc);
+    unsafe { *out = u8::from(world.is_tick_disabled()) };
+    MurkStatus::Ok as i32
+}
+
 /// Number of consecutive rollbacks since the last successful tick.
 ///
-/// Returns 0 for invalid handles or poisoned mutex.
+/// **Ambiguity warning:** returns 0 for both "zero rollbacks" and "invalid handle."
+/// Prefer [`murk_consecutive_rollbacks_get`] for unambiguous error detection.
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_consecutive_rollbacks(world_handle: u64) -> u32 {
@@ -255,15 +296,54 @@ pub extern "C" fn murk_consecutive_rollbacks(world_handle: u64) -> u32 {
         .unwrap_or(0)
 }
 
+/// Consecutive rollback count with explicit error reporting.
+///
+/// Writes the count to `*out` and returns `MURK_OK`. Returns
+/// `InvalidHandle` or `InternalError` without writing to `out`.
+#[no_mangle]
+#[allow(unsafe_code)]
+pub extern "C" fn murk_consecutive_rollbacks_get(world_handle: u64, out: *mut u32) -> i32 {
+    if out.is_null() {
+        return MurkStatus::InvalidArgument as i32;
+    }
+    let world_arc = match get_world(world_handle) {
+        Some(arc) => arc,
+        None => return MurkStatus::InvalidHandle as i32,
+    };
+    let world = ffi_lock!(world_arc);
+    unsafe { *out = world.consecutive_rollback_count() };
+    MurkStatus::Ok as i32
+}
+
 /// The world's current seed.
 ///
-/// Returns 0 for invalid handles or poisoned mutex.
+/// **Ambiguity warning:** returns 0 for both "seed 0" and "invalid handle."
+/// Prefer [`murk_seed_get`] for unambiguous error detection.
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_seed(world_handle: u64) -> u64 {
     get_world(world_handle)
         .and_then(|arc| arc.lock().ok().map(|w| w.seed()))
         .unwrap_or(0)
+}
+
+/// Seed with explicit error reporting.
+///
+/// Writes the seed to `*out` and returns `MURK_OK`. Returns
+/// `InvalidHandle` or `InternalError` without writing to `out`.
+#[no_mangle]
+#[allow(unsafe_code)]
+pub extern "C" fn murk_seed_get(world_handle: u64, out: *mut u64) -> i32 {
+    if out.is_null() {
+        return MurkStatus::InvalidArgument as i32;
+    }
+    let world_arc = match get_world(world_handle) {
+        Some(arc) => arc,
+        None => return MurkStatus::InvalidHandle as i32,
+    };
+    let world = ffi_lock!(world_arc);
+    unsafe { *out = world.seed() };
+    MurkStatus::Ok as i32
 }
 
 /// Step multiple worlds sequentially. v1: no parallelism.
@@ -761,5 +841,63 @@ mod tests {
         );
         // The one written receipt should be the first one.
         assert_eq!(buf[0].command_index, 0);
+    }
+
+    #[test]
+    fn accessor_get_variants_return_values() {
+        let world_h = create_test_world();
+
+        let mut tick: u64 = 999;
+        assert_eq!(murk_current_tick_get(world_h, &mut tick), MurkStatus::Ok as i32);
+        assert_eq!(tick, 0);
+
+        let mut disabled: u8 = 99;
+        assert_eq!(murk_is_tick_disabled_get(world_h, &mut disabled), MurkStatus::Ok as i32);
+        assert_eq!(disabled, 0);
+
+        let mut rollbacks: u32 = 99;
+        assert_eq!(murk_consecutive_rollbacks_get(world_h, &mut rollbacks), MurkStatus::Ok as i32);
+        assert_eq!(rollbacks, 0);
+
+        let mut seed: u64 = 0;
+        assert_eq!(murk_seed_get(world_h, &mut seed), MurkStatus::Ok as i32);
+        assert_eq!(seed, 42);
+
+        murk_lockstep_destroy(world_h);
+    }
+
+    #[test]
+    fn accessor_get_variants_detect_invalid_handle() {
+        let world_h = create_test_world();
+        murk_lockstep_destroy(world_h);
+
+        // All _get variants must return InvalidHandle for a destroyed world.
+        let mut tick: u64 = 999;
+        assert_eq!(murk_current_tick_get(world_h, &mut tick), MurkStatus::InvalidHandle as i32);
+        assert_eq!(tick, 999, "out must not be written on error");
+
+        let mut disabled: u8 = 99;
+        assert_eq!(murk_is_tick_disabled_get(world_h, &mut disabled), MurkStatus::InvalidHandle as i32);
+        assert_eq!(disabled, 99, "out must not be written on error");
+
+        let mut rollbacks: u32 = 99;
+        assert_eq!(murk_consecutive_rollbacks_get(world_h, &mut rollbacks), MurkStatus::InvalidHandle as i32);
+        assert_eq!(rollbacks, 99, "out must not be written on error");
+
+        let mut seed: u64 = 999;
+        assert_eq!(murk_seed_get(world_h, &mut seed), MurkStatus::InvalidHandle as i32);
+        assert_eq!(seed, 999, "out must not be written on error");
+    }
+
+    #[test]
+    fn accessor_get_variants_null_out_returns_invalid_argument() {
+        let world_h = create_test_world();
+
+        assert_eq!(murk_current_tick_get(world_h, std::ptr::null_mut()), MurkStatus::InvalidArgument as i32);
+        assert_eq!(murk_is_tick_disabled_get(world_h, std::ptr::null_mut()), MurkStatus::InvalidArgument as i32);
+        assert_eq!(murk_consecutive_rollbacks_get(world_h, std::ptr::null_mut()), MurkStatus::InvalidArgument as i32);
+        assert_eq!(murk_seed_get(world_h, std::ptr::null_mut()), MurkStatus::InvalidArgument as i32);
+
+        murk_lockstep_destroy(world_h);
     }
 }

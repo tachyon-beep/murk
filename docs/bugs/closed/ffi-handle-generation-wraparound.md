@@ -94,7 +94,5 @@ N/A - found via static analysis
 **Source report:** /home/john/murk/docs/bugs/generated/crates/murk-ffi/src/handle.rs.md
 **Verified lines:** handle.rs:19, handle.rs:42-55, handle.rs:60-67, handle.rs:85-95
 **Root cause:** `wrapping_add(1)` on a 32-bit generation counter with unconditional free-list reuse allows generation collision after 2^32 cycles.
-**Suggested fix:**
-1. In `remove()`, if the generation has reached `u32::MAX`, do NOT push the slot index onto `free_list` (retire the slot permanently). This sacrifices one slot (32 bytes) to guarantee the handle can never be resurrected.
-2. Alternatively, widen the generation to `u64` and pack handle differently (e.g., 24-bit slot + 40-bit generation), making wraparound infeasible.
-3. For defense in depth, add a `debug_assert!` or metric counter tracking how many slots have been retired due to generation exhaustion.
+**Fix applied:** Option 1 — `remove()` now checks if generation wrapped to 0 after incrementing. If so, the slot is permanently retired (not pushed to `free_list`). This sacrifices ~32 bytes per exhausted slot to guarantee no ABA. Test `generation_exhaustion_retires_slot` validates the fix by fast-forwarding a slot's generation to `u32::MAX` and verifying the slot is not recycled after the final remove.
+**Status:** Fixed.

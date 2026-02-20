@@ -3,7 +3,7 @@
 Generated 2026-02-17 from static analysis triage of 110 source reports.
 Updated 2026-02-21 with wave-4 deep audit findings (#54-#94).
 
-**Status (updated 2026-02-21):** 87 fixed, 0 partially fixed, 8 open.
+**Status (updated 2026-02-21):** 89 fixed, 0 partially fixed, 6 open.
 
 ## Open Bugs
 
@@ -19,13 +19,11 @@ Updated 2026-02-21 with wave-4 deep audit findings (#54-#94).
 |---|--------|-------|---------|--------|
 | — | (none) | — | — | — |
 
-### Medium (6 open)
+### Medium (4 open)
 
 | # | Ticket | Crate | Summary | Status |
 |---|--------|-------|---------|--------|
 | 29 | [arena-sparse-segment-memory-leak](arena-sparse-segment-memory-leak.md) | murk-arena | Sparse CoW bump-allocates but never reclaims dead segment memory | Open |
-| 37 | [ffi-accessor-ambiguous-zero-return](ffi-accessor-ambiguous-zero-return.md) | murk-ffi | World accessors return 0 for invalid handles, indistinguishable from valid state | Open |
-| 38 | [ffi-handle-generation-wraparound](ffi-handle-generation-wraparound.md) | murk-ffi | u32 generation wraps after 4B cycles; ABA handle resurrection | Open |
 | 39 | [python-metrics-race-between-step-and-propagator-query](python-metrics-race-between-step-and-propagator-query.md) | murk-python | Per-propagator timings fetched via separate FFI call; race with concurrent step | Open |
 | 77 | [arena-descriptor-clone-per-tick](arena-descriptor-clone-per-tick.md) | murk-arena | `publish()` clones `FieldDescriptor` (String per field) every tick | Open |
 | 83 | [obs-per-agent-scratch-allocation](obs-per-agent-scratch-allocation.md) | murk-obs | Per-agent Vec alloc in pooled gather; fixed entries re-gathered per agent | Open |
@@ -37,12 +35,14 @@ Updated 2026-02-21 with wave-4 deep audit findings (#54-#94).
 | 52 | [script-organize-by-priority-basename-collision](script-organize-by-priority-basename-collision.md) | scripts | --organize-by-priority flattens paths; duplicate basenames overwrite | Open |
 | 53 | [ffi-cbindgen-missing-c-header](ffi-cbindgen-missing-c-header.md) | murk-ffi | No generated C header; C consumers must hand-write 28+ extern declarations | Open |
 
-## Closed Bugs (87 fixed)
+## Closed Bugs (89 fixed)
 
 Tickets moved to [closed/](closed/).
 
 | # | Ticket | Crate | Summary | Fix Commit |
 |---|--------|-------|---------|------------|
+| 37 | [ffi-accessor-ambiguous-zero-return](closed/ffi-accessor-ambiguous-zero-return.md) | murk-ffi | Added `_get` status-returning accessor variants; old functions documented as ambiguous | (this session) |
+| 38 | [ffi-handle-generation-wraparound](closed/ffi-handle-generation-wraparound.md) | murk-ffi | Slots retired (not recycled) when generation wraps to 0; prevents ABA handle resurrection | (this session) |
 | 27 | [engine-quickstart-setfield-noop](closed/engine-quickstart-setfield-noop.md) | murk-engine | Added HEAT_SOURCE command-only field; propagator reads it via reads_previous and incorporates as external forcing | (this session) |
 | 43 | [example-warmup-ticks-shorten-episode-length](closed/example-warmup-ticks-shorten-episode-length.md) | examples, murk-python | `_episode_start_tick` tracking in base class; `_check_truncated` uses episode-relative ticks | (this session) |
 | 20 | [ffi-mutex-poisoning-panic-in-extern-c](closed/ffi-mutex-poisoning-panic-in-extern-c.md) | murk-ffi | `ffi_lock!` macro replaces 43+ `.lock().unwrap()` calls; poisoned mutex returns `InternalError` | (this session) |
@@ -137,7 +137,7 @@ Tickets moved to [closed/](closed/).
 |-------|----------|------|--------|-----|------------|
 | murk-engine | 0 | 0 | 0 | 0 | 0 |
 | murk-arena | 0 | 0 | 2 | 0 | 2 |
-| murk-ffi | 0 | 0 | 2 | 1 | 3 |
+| murk-ffi | 0 | 0 | 0 | 1 | 1 |
 | murk-python | 0 | 0 | 1 | 0 | 1 |
 | murk-propagator | 0 | 0 | 0 | 0 | 0 |
 | murk-propagators | 0 | 0 | 0 | 0 | 0 |
@@ -150,7 +150,7 @@ Tickets moved to [closed/](closed/).
 | examples | 0 | 0 | 0 | 0 | 0 |
 | scripts | 0 | 0 | 0 | 1 | 1 |
 | workspace (cross-crate) | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **0** | **0** | **6** | **2** | **8** |
+| **Total** | **0** | **0** | **4** | **2** | **6** |
 
 Note: Workspace-wide tickets (#90-#92) affect multiple crates and are counted once under "workspace".
 

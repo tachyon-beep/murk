@@ -99,14 +99,5 @@ fn demonstrate_ambiguity(world_h: u64) {
 **Source report:** /home/john/murk/docs/bugs/generated/crates/murk-ffi/src/world.rs.md
 **Verified lines:** world.rs:221-258
 **Root cause:** Scalar-returning accessor APIs have no out-of-band error channel. They use `0` as the error sentinel, but `0` is a valid value for all four quantities.
-**Suggested fix:**
-1. Add status-returning accessor variants that take an output pointer:
-   ```c
-   int murk_current_tick_get(uint64_t handle, uint64_t* out_tick);
-   int murk_is_tick_disabled_get(uint64_t handle, uint8_t* out_disabled);
-   int murk_consecutive_rollbacks_get(uint64_t handle, uint32_t* out_count);
-   int murk_seed_get(uint64_t handle, uint64_t* out_seed);
-   ```
-   These return `MurkStatus::InvalidHandle` on stale handles.
-2. Keep the existing functions for backward compatibility but document the ambiguity.
-3. In murk-python, prefer the status-returning variants and raise exceptions on invalid handles.
+**Fix applied:** Options 1 + 2 — Added four `_get` variants (`murk_current_tick_get`, `murk_is_tick_disabled_get`, `murk_consecutive_rollbacks_get`, `murk_seed_get`) that take output pointers and return `MurkStatus`. They return `InvalidHandle` for stale handles, `InvalidArgument` for null output pointers. Original functions retained for backward compatibility with ambiguity documented in their doc comments. Python side unchanged (already guarded by `require_handle()`).
+**Status:** Fixed.
