@@ -50,12 +50,12 @@ fn bench_distance_product_space(c: &mut Criterion) {
     let mut pairs = Vec::with_capacity(1000);
     for i in 0u64..1000 {
         // Deterministic pseudo-random coordinates within bounds.
-        let q_a = (i.wrapping_mul(6364136223846793005) % 20) as i32;
+        let q_a = (i.wrapping_mul(6364136223846793007) % 20) as i32;
         let r_a = (i.wrapping_mul(1442695040888963407) % 20) as i32;
         let l_a = (i.wrapping_mul(2862933555777941757) % 10) as i32;
 
         let j = i + 500;
-        let q_b = (j.wrapping_mul(6364136223846793005) % 20) as i32;
+        let q_b = (j.wrapping_mul(6364136223846793007) % 20) as i32;
         let r_b = (j.wrapping_mul(1442695040888963407) % 20) as i32;
         let l_b = (j.wrapping_mul(2862933555777941757) % 10) as i32;
 

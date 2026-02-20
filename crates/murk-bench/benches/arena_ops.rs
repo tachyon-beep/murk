@@ -99,6 +99,7 @@ fn bench_arena_write_10k(c: &mut Criterion) {
     }
     arena.publish(TickId(1), ParameterVersion(0)).unwrap();
 
+    let mut tick = 2u64;
     c.bench_function("arena_write_10k", |b| {
         b.iter(|| {
             let mut guard = arena.begin_tick().unwrap();
@@ -107,7 +108,8 @@ fn bench_arena_write_10k(c: &mut Criterion) {
                 *val = i as f32;
             }
             black_box(data[0]);
-            arena.publish(TickId(2), ParameterVersion(0)).unwrap();
+            arena.publish(TickId(tick), ParameterVersion(0)).unwrap();
+            tick += 1;
         });
     });
 }
@@ -116,6 +118,7 @@ fn bench_arena_write_10k(c: &mut Criterion) {
 fn bench_arena_snapshot(c: &mut Criterion) {
     let mut arena = make_arena_10k();
 
+    let mut snap_tick = 1u64;
     c.bench_function("arena_snapshot", |b| {
         b.iter(|| {
             // Begin tick and write something.
@@ -124,8 +127,9 @@ fn bench_arena_snapshot(c: &mut Criterion) {
                 let data = guard.writer.write(FieldId(0)).unwrap();
                 data[0] = 42.0;
             }
-            // Publish.
-            arena.publish(TickId(1), ParameterVersion(0)).unwrap();
+            // Publish with incrementing TickId to match internal generation.
+            arena.publish(TickId(snap_tick), ParameterVersion(0)).unwrap();
+            snap_tick += 1;
             // Take snapshot and read field.
             let snap = arena.snapshot();
             let data = snap.read_field(FieldId(0)).unwrap();

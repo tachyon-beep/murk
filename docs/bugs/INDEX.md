@@ -3,7 +3,7 @@
 Generated 2026-02-17 from static analysis triage of 110 source reports.
 Updated 2026-02-20 with wave-4 deep audit findings (#54-#94).
 
-**Status (updated 2026-02-20):** 72 fixed, 0 partially fixed, 23 open.
+**Status (updated 2026-02-20):** 74 fixed, 0 partially fixed, 21 open.
 
 ## Open Bugs
 
@@ -13,13 +13,12 @@ Updated 2026-02-20 with wave-4 deep audit findings (#54-#94).
 |---|--------|-------|---------|--------|
 | — | (none) | — | — | — |
 
-### High (4 open)
+### High (2 open)
 
 | # | Ticket | Crate | Summary | Status |
 |---|--------|-------|---------|--------|
 | 20 | [ffi-mutex-poisoning-panic-in-extern-c](ffi-mutex-poisoning-panic-in-extern-c.md) | murk-ffi | 43+ `lock().unwrap()` calls in extern "C" functions; poisoned mutex = UB | Open |
 | 63 | [python-missing-type-stubs-library-propagators](python-missing-type-stubs-library-propagators.md) | murk-python | `.pyi` stubs missing all 9 library propagator classes | Open |
-| 64 | [bench-missing-black-box](bench-missing-black-box.md) | murk-bench | Missing `black_box` + arena benchmark TickId/generation divergence | Open |
 | 66 | [ffi-callback-propagator-missing-sync](ffi-callback-propagator-missing-sync.md) | murk-ffi | `CallbackPropagator` has `Send` but not `Sync`; unsound if design changes | Open |
 
 ### Medium (16 open)
@@ -43,20 +42,21 @@ Updated 2026-02-20 with wave-4 deep audit findings (#54-#94).
 | 83 | [obs-per-agent-scratch-allocation](obs-per-agent-scratch-allocation.md) | murk-obs | Per-agent Vec alloc in pooled gather; fixed entries re-gathered per agent | Open |
 | 87 | [python-batched-vecenv-missing-spaces](python-batched-vecenv-missing-spaces.md) | murk-python | `BatchedVecEnv` missing `observation_space`/`action_space`; breaks SB3 compat | Open |
 
-### Low (3 open)
+### Low (2 open)
 
 | # | Ticket | Crate | Summary | Status |
 |---|--------|-------|---------|--------|
-| 51 | [bench-space-ops-degenerate-q-distribution](bench-space-ops-degenerate-q-distribution.md) | murk-bench | LCG multiplier not coprime to modulus; only 4/20 q values exercised | Open |
 | 52 | [script-organize-by-priority-basename-collision](script-organize-by-priority-basename-collision.md) | scripts | --organize-by-priority flattens paths; duplicate basenames overwrite | Open |
 | 53 | [ffi-cbindgen-missing-c-header](ffi-cbindgen-missing-c-header.md) | murk-ffi | No generated C header; C consumers must hand-write 28+ extern declarations | Open |
 
-## Closed Bugs (72 fixed)
+## Closed Bugs (74 fixed)
 
 Tickets moved to [closed/](closed/).
 
 | # | Ticket | Crate | Summary | Fix Commit |
 |---|--------|-------|---------|------------|
+| 64 | [bench-missing-black-box](closed/bench-missing-black-box.md) | murk-bench | `black_box` added to all `step_sync` results; arena benchmarks use incrementing TickId | (this session) |
+| 51 | [bench-space-ops-degenerate-q-distribution](closed/bench-space-ops-degenerate-q-distribution.md) | murk-bench | LCG q multiplier changed to coprime-to-20 value; all 20 q values now exercised | (this session) |
 | 62 | [python-trampoline-panic-across-ffi](closed/python-trampoline-panic-across-ffi.md) | murk-python | `catch_unwind` added to `python_trampoline`; panic no longer crosses extern "C" | (this session) |
 | 23 | [python-propagator-trampoline-leak-on-cstring-error](closed/python-propagator-trampoline-leak-on-cstring-error.md) | murk-python | `CString::new` moved before `Box::into_raw`; cleanup on `add_propagator_handle` failure | (this session) |
 | 74 | [python-cstr-from-ptr-potential-ub](closed/python-cstr-from-ptr-potential-ub.md) | murk-python | `CStr::from_ptr` replaced with safe `CStr::from_bytes_until_nul` | (this session) |
@@ -144,12 +144,12 @@ Tickets moved to [closed/](closed/).
 | murk-replay | 0 | 0 | 0 | 0 | 0 |
 | murk-space | 0 | 0 | 0 | 0 | 0 |
 | murk-core | 0 | 0 | 0 | 0 | 0 |
-| murk-bench | 0 | 1 | 0 | 1 | 2 |
+| murk-bench | 0 | 0 | 0 | 0 | 0 |
 | murk (umbrella) | 0 | 0 | 0 | 0 | 0 |
 | examples | 0 | 0 | 1 | 0 | 1 |
 | scripts | 0 | 0 | 0 | 1 | 1 |
 | workspace (cross-crate) | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **0** | **4** | **16** | **3** | **23** |
+| **Total** | **0** | **2** | **16** | **2** | **21** |
 
 Note: Workspace-wide tickets (#90-#92) affect multiple crates and are counted once under "workspace".
 
