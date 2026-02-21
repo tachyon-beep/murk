@@ -198,20 +198,12 @@ mod tests {
     #[test]
     #[should_panic(expected = "duplicate FieldId")]
     fn new_rejects_non_adjacent_duplicate_field_ids() {
-        StaticArena::new(&[
-            (FieldId(0), 10),
-            (FieldId(1), 20),
-            (FieldId(0), 30),
-        ]);
+        StaticArena::new(&[(FieldId(0), 10), (FieldId(1), 20), (FieldId(0), 30)]);
     }
 
     #[test]
     fn new_accepts_distinct_field_ids() {
-        let arena = StaticArena::new(&[
-            (FieldId(0), 10),
-            (FieldId(1), 20),
-            (FieldId(2), 30),
-        ]);
+        let arena = StaticArena::new(&[(FieldId(0), 10), (FieldId(1), 20), (FieldId(2), 30)]);
         assert_eq!(arena.field_count(), 3);
         assert_eq!(arena.memory_bytes(), 60 * 4);
     }

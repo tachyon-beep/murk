@@ -308,8 +308,7 @@ pub fn validate_pipeline(
     // 5. Build ReadResolutionPlan
     let mut last_writer: IndexMap<FieldId, usize> = IndexMap::new();
     let mut routes: Vec<IndexMap<FieldId, ReadSource>> = Vec::with_capacity(propagators.len());
-    let mut write_modes: Vec<IndexMap<FieldId, WriteMode>> =
-        Vec::with_capacity(propagators.len());
+    let mut write_modes: Vec<IndexMap<FieldId, WriteMode>> = Vec::with_capacity(propagators.len());
 
     for (i, prop) in propagators.iter().enumerate() {
         let mut prop_routes = IndexMap::new();
@@ -765,10 +764,7 @@ mod tests {
         let props: Vec<Box<dyn Propagator>> = vec![Box::new(PropIncremental)];
         let plan = validate_pipeline(&props, &fields_0_1_2(), 0.1).unwrap();
 
-        assert_eq!(
-            plan.write_mode(0, FieldId(1)),
-            Some(WriteMode::Incremental)
-        );
+        assert_eq!(plan.write_mode(0, FieldId(1)), Some(WriteMode::Incremental));
         assert_eq!(plan.incremental_fields_for(0), vec![FieldId(1)]);
     }
 
@@ -800,10 +796,7 @@ mod tests {
         assert!(plan.incremental_fields_for(0).is_empty());
 
         // PropIncrC (index 1): Incremental write on field 2
-        assert_eq!(
-            plan.write_mode(1, FieldId(2)),
-            Some(WriteMode::Incremental)
-        );
+        assert_eq!(plan.write_mode(1, FieldId(2)), Some(WriteMode::Incremental));
         assert_eq!(plan.incremental_fields_for(1), vec![FieldId(2)]);
     }
 
@@ -848,8 +841,7 @@ mod tests {
 
     #[test]
     fn nan_max_dt_rejected() {
-        let props: Vec<Box<dyn Propagator>> =
-            vec![Box::new(PropDtConstrained { max: f64::NAN })];
+        let props: Vec<Box<dyn Propagator>> = vec![Box::new(PropDtConstrained { max: f64::NAN })];
         let fields = [FieldId(0)].into_iter().collect();
         let result = validate_pipeline(&props, &fields, 0.1);
         match result {
@@ -877,37 +869,27 @@ mod tests {
 
     #[test]
     fn neg_inf_max_dt_rejected() {
-        let props: Vec<Box<dyn Propagator>> =
-            vec![Box::new(PropDtConstrained { max: f64::NEG_INFINITY })];
+        let props: Vec<Box<dyn Propagator>> = vec![Box::new(PropDtConstrained {
+            max: f64::NEG_INFINITY,
+        })];
         let fields = [FieldId(0)].into_iter().collect();
         let result = validate_pipeline(&props, &fields, 0.1);
-        assert!(matches!(
-            result,
-            Err(PipelineError::InvalidMaxDt { .. })
-        ));
+        assert!(matches!(result, Err(PipelineError::InvalidMaxDt { .. })));
     }
 
     #[test]
     fn zero_max_dt_rejected() {
-        let props: Vec<Box<dyn Propagator>> =
-            vec![Box::new(PropDtConstrained { max: 0.0 })];
+        let props: Vec<Box<dyn Propagator>> = vec![Box::new(PropDtConstrained { max: 0.0 })];
         let fields = [FieldId(0)].into_iter().collect();
         let result = validate_pipeline(&props, &fields, 0.1);
-        assert!(matches!(
-            result,
-            Err(PipelineError::InvalidMaxDt { .. })
-        ));
+        assert!(matches!(result, Err(PipelineError::InvalidMaxDt { .. })));
     }
 
     #[test]
     fn negative_max_dt_rejected() {
-        let props: Vec<Box<dyn Propagator>> =
-            vec![Box::new(PropDtConstrained { max: -1.0 })];
+        let props: Vec<Box<dyn Propagator>> = vec![Box::new(PropDtConstrained { max: -1.0 })];
         let fields = [FieldId(0)].into_iter().collect();
         let result = validate_pipeline(&props, &fields, 0.1);
-        assert!(matches!(
-            result,
-            Err(PipelineError::InvalidMaxDt { .. })
-        ));
+        assert!(matches!(result, Err(PipelineError::InvalidMaxDt { .. })));
     }
 }

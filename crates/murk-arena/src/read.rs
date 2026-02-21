@@ -71,16 +71,14 @@ impl<'a> Snapshot<'a> {
         let handle = &entry.handle;
 
         match handle.location() {
-            FieldLocation::PerTick { segment_index } => self.per_tick_segments.slice(
-                segment_index,
-                handle.offset,
-                handle.len(),
-            ),
-            FieldLocation::Sparse { segment_index } => self.sparse_segments.slice(
-                segment_index,
-                handle.offset,
-                handle.len(),
-            ),
+            FieldLocation::PerTick { segment_index } => {
+                self.per_tick_segments
+                    .slice(segment_index, handle.offset, handle.len())
+            }
+            FieldLocation::Sparse { segment_index } => {
+                self.sparse_segments
+                    .slice(segment_index, handle.offset, handle.len())
+            }
             FieldLocation::Static { .. } => self.static_arena.read_field(field),
         }
     }
@@ -170,16 +168,14 @@ impl OwnedSnapshot {
         let handle = &entry.handle;
 
         match handle.location() {
-            FieldLocation::PerTick { segment_index } => self.per_tick_segments.slice(
-                segment_index,
-                handle.offset,
-                handle.len(),
-            ),
-            FieldLocation::Sparse { segment_index } => self.sparse_segments.slice(
-                segment_index,
-                handle.offset,
-                handle.len(),
-            ),
+            FieldLocation::PerTick { segment_index } => {
+                self.per_tick_segments
+                    .slice(segment_index, handle.offset, handle.len())
+            }
+            FieldLocation::Sparse { segment_index } => {
+                self.sparse_segments
+                    .slice(segment_index, handle.offset, handle.len())
+            }
             FieldLocation::Static { .. } => self.static_arena.read_field(field),
         }
     }

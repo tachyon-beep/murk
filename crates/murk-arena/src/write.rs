@@ -124,16 +124,14 @@ impl<'a> WriteArena<'a> {
         let entry = self.descriptor.get(field)?;
         let handle = &entry.handle;
         match handle.location() {
-            FieldLocation::PerTick { segment_index } => self.per_tick_segments.slice(
-                segment_index,
-                handle.offset,
-                handle.len(),
-            ),
-            FieldLocation::Sparse { segment_index } => self.sparse_segments.slice(
-                segment_index,
-                handle.offset,
-                handle.len(),
-            ),
+            FieldLocation::PerTick { segment_index } => {
+                self.per_tick_segments
+                    .slice(segment_index, handle.offset, handle.len())
+            }
+            FieldLocation::Sparse { segment_index } => {
+                self.sparse_segments
+                    .slice(segment_index, handle.offset, handle.len())
+            }
             FieldLocation::Static { .. } => {
                 // Static fields are read from the StaticArena, not through WriteArena.
                 None
@@ -157,11 +155,8 @@ impl FieldWriter for WriteArena<'_> {
                 // PerTick fields were pre-allocated at begin_tick().
                 // Just return a mutable slice to the pre-allocated region.
                 if let FieldLocation::PerTick { segment_index } = handle.location() {
-                    self.per_tick_segments.slice_mut(
-                        segment_index,
-                        handle.offset,
-                        handle.len(),
-                    )
+                    self.per_tick_segments
+                        .slice_mut(segment_index, handle.offset, handle.len())
                 } else {
                     None
                 }
@@ -172,11 +167,8 @@ impl FieldWriter for WriteArena<'_> {
                 if handle.generation() == self.generation {
                     // Already written this tick — return existing allocation.
                     if let FieldLocation::Sparse { segment_index } = handle.location() {
-                        self.sparse_segments.slice_mut(
-                            segment_index,
-                            handle.offset,
-                            handle.len(),
-                        )
+                        self.sparse_segments
+                            .slice_mut(segment_index, handle.offset, handle.len())
                     } else {
                         None
                     }

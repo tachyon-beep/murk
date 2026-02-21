@@ -7,8 +7,8 @@
 use murk_core::{BoundaryBehavior, FieldDef, FieldId, FieldMutability, FieldReader, FieldType};
 use murk_engine::{BackoffConfig, LockstepWorld, WorldConfig};
 use murk_propagators::{
-    AgentEmission, EmissionMode, FlowField, IdentityCopy, MorphOp, MorphologicalOp,
-    NoiseInjection, NoiseType, RegrowthModel, ResourceField, ScalarDiffusion, WavePropagation,
+    AgentEmission, EmissionMode, FlowField, IdentityCopy, MorphOp, MorphologicalOp, NoiseInjection,
+    NoiseType, RegrowthModel, ResourceField, ScalarDiffusion, WavePropagation,
 };
 use murk_space::{EdgeBehavior, Square4};
 
@@ -52,10 +52,10 @@ fn emission_diffusion_flow_pipeline() {
     let config = WorldConfig {
         space: Box::new(Square4::new(10, 10, EdgeBehavior::Absorb).unwrap()),
         fields: vec![
-            scalar_field("presence"),  // 0 = PRESENCE
-            scalar_field("emission"),  // 1 = EMISSION
-            scalar_field("heat"),      // 2 = HEAT
-            vector2_field("flow"),     // 3 = FLOW
+            scalar_field("presence"), // 0 = PRESENCE
+            scalar_field("emission"), // 1 = EMISSION
+            scalar_field("heat"),     // 2 = HEAT
+            vector2_field("flow"),    // 3 = FLOW
         ],
         propagators: vec![
             Box::new(IdentityCopy::new(PRESENCE)),
@@ -114,8 +114,8 @@ fn resource_consumption_and_regrowth() {
     let config = WorldConfig {
         space: Box::new(Square4::new(5, 5, EdgeBehavior::Absorb).unwrap()),
         fields: vec![
-            scalar_field("presence"),  // 0
-            scalar_field("resource"),  // 1
+            scalar_field("presence"), // 0
+            scalar_field("resource"), // 1
         ],
         propagators: vec![
             Box::new(IdentityCopy::new(PRESENCE)),
@@ -161,8 +161,8 @@ fn wave_stability_500_ticks() {
     let config = WorldConfig {
         space: Box::new(Square4::new(10, 10, EdgeBehavior::Absorb).unwrap()),
         fields: vec![
-            scalar_field("displacement"),  // 0
-            scalar_field("velocity"),      // 1
+            scalar_field("displacement"), // 0
+            scalar_field("velocity"),     // 1
         ],
         propagators: vec![Box::new(
             WavePropagation::builder()
@@ -191,10 +191,7 @@ fn wave_stability_500_ticks() {
         let vel = snap.read(FieldId(1)).unwrap();
 
         for &v in disp.iter().chain(vel.iter()) {
-            assert!(
-                v.is_finite(),
-                "NaN/Inf in wave fields at tick {tick}: {v}"
-            );
+            assert!(v.is_finite(), "NaN/Inf in wave fields at tick {tick}: {v}");
         }
     }
 }
@@ -244,8 +241,8 @@ fn morphological_dilate_through_engine() {
     let config = WorldConfig {
         space: Box::new(Square4::new(5, 5, EdgeBehavior::Absorb).unwrap()),
         fields: vec![
-            scalar_field("mask_in"),   // 0
-            scalar_field("mask_out"),  // 1
+            scalar_field("mask_in"),  // 0
+            scalar_field("mask_out"), // 1
         ],
         propagators: vec![
             Box::new(IdentityCopy::new(FieldId(0))),

@@ -336,9 +336,9 @@ fn combined_pipeline_three_propagators() {
     let config = WorldConfig {
         space: Box::new(Square4::new(10, 10, EdgeBehavior::Absorb).unwrap()),
         fields: vec![
-            scalar_field("heat"),     // FieldId(0) = HEAT
+            scalar_field("heat"),      // FieldId(0) = HEAT
             vector2_field("gradient"), // FieldId(1) = GRADIENT
-            scalar_field("marker"),   // FieldId(2) = MARKER
+            scalar_field("marker"),    // FieldId(2) = MARKER
         ],
         propagators: vec![
             Box::new(

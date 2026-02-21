@@ -159,11 +159,13 @@ impl Hex2D {
         let eff_radius = radius.min(max_useful);
         let r = eff_radius as i32;
         let side = 2i64 * r as i64 + 1;
-        let bounding_size = side.checked_mul(side).ok_or_else(|| SpaceError::InvalidRegion {
-            reason: format!(
-                "hex disk bounding area overflow: side={side} exceeds i64 when squared"
-            ),
-        })? as usize;
+        let bounding_size = side
+            .checked_mul(side)
+            .ok_or_else(|| SpaceError::InvalidRegion {
+                reason: format!(
+                    "hex disk bounding area overflow: side={side} exceeds i64 when squared"
+                ),
+            })? as usize;
         let mut valid_mask = vec![0u8; bounding_size];
         let mut coords = Vec::new();
         let mut tensor_indices = Vec::new();
@@ -529,7 +531,10 @@ mod tests {
             center: c(0, 0),
             radius: u32::MAX,
         });
-        assert!(result.is_err(), "should return error on bounding area overflow");
+        assert!(
+            result.is_err(),
+            "should return error on bounding area overflow"
+        );
     }
 
     #[test]

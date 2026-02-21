@@ -913,10 +913,7 @@ mod tests {
         // With alpha clamped to 1.0, center becomes the mean of neighbours = 0.0
         // Without clamping: (1-40)*100 + 40*0 = -3900 (catastrophic!)
         for (i, &v) in result.iter().enumerate() {
-            assert!(
-                v >= 0.0,
-                "cell {i} went negative ({v}): alpha clamp failed"
-            );
+            assert!(v >= 0.0, "cell {i} went negative ({v}): alpha clamp failed");
         }
     }
 }

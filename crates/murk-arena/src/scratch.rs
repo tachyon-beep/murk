@@ -45,7 +45,13 @@ impl ScratchRegion {
         let new_cursor = self.cursor.checked_add(len)?;
         if new_cursor > self.data.len() {
             // Grow to at least double or the required size, whichever is larger.
-            let new_cap = self.data.len().max(1024).max(new_cursor).checked_mul(2).unwrap_or(new_cursor);
+            let new_cap = self
+                .data
+                .len()
+                .max(1024)
+                .max(new_cursor)
+                .checked_mul(2)
+                .unwrap_or(new_cursor);
             self.data.resize(new_cap, 0.0);
         }
         let start = self.cursor;

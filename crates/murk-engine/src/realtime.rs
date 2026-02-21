@@ -930,7 +930,9 @@ mod tests {
             wall_ms < 500,
             "shutdown took {wall_ms}ms with 0.5Hz tick rate \
              (report: total={}ms, drain={}ms, quiesce={}ms)",
-            report.total_ms, report.drain_ms, report.quiesce_ms
+            report.total_ms,
+            report.drain_ms,
+            report.quiesce_ms
         );
         assert!(report.tick_joined);
     }
@@ -974,21 +976,15 @@ mod tests {
         // Two ArcSpaceWrappers around identical Line1D spaces must compare
         // as topologically equal. Before the fix, the inner downcast saw
         // ArcSpaceWrapper instead of Line1D and returned false.
-        let a = ArcSpaceWrapper(Arc::new(
-            Line1D::new(10, EdgeBehavior::Absorb).unwrap(),
-        ));
-        let b = ArcSpaceWrapper(Arc::new(
-            Line1D::new(10, EdgeBehavior::Absorb).unwrap(),
-        ));
+        let a = ArcSpaceWrapper(Arc::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()));
+        let b = ArcSpaceWrapper(Arc::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()));
         assert!(
             a.topology_eq(&b),
             "identical Line1D through ArcSpaceWrapper should be topology-equal"
         );
 
         // Different sizes must not match.
-        let c = ArcSpaceWrapper(Arc::new(
-            Line1D::new(20, EdgeBehavior::Absorb).unwrap(),
-        ));
+        let c = ArcSpaceWrapper(Arc::new(Line1D::new(20, EdgeBehavior::Absorb).unwrap()));
         assert!(
             !a.topology_eq(&c),
             "different Line1D sizes should not be topology-equal"

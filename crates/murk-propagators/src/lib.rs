@@ -26,9 +26,9 @@ pub(crate) mod grid_helpers;
 pub mod identity_copy;
 pub mod morphological_op;
 pub mod noise_injection;
+pub mod resource_field;
 #[allow(deprecated)]
 pub mod reward;
-pub mod resource_field;
 pub mod scalar_diffusion;
 pub mod wave_propagation;
 

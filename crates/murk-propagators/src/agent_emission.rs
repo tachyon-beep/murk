@@ -186,23 +186,16 @@ impl Propagator for AgentEmission {
                     .reads_previous()
                     .read(self.emission_field)
                     .ok_or_else(|| PropagatorError::ExecutionFailed {
-                        reason: format!(
-                            "emission field {:?} not readable",
-                            self.emission_field
-                        ),
+                        reason: format!("emission field {:?} not readable", self.emission_field),
                     })?
                     .to_vec();
 
                 // Now take the write borrow.
-                let out = ctx
-                    .writes()
-                    .write(self.emission_field)
-                    .ok_or_else(|| PropagatorError::ExecutionFailed {
-                        reason: format!(
-                            "emission field {:?} not writable",
-                            self.emission_field
-                        ),
-                    })?;
+                let out = ctx.writes().write(self.emission_field).ok_or_else(|| {
+                    PropagatorError::ExecutionFailed {
+                        reason: format!("emission field {:?} not writable", self.emission_field),
+                    }
+                })?;
 
                 // Seed from previous emission.
                 out.copy_from_slice(&prev_emission);
@@ -227,15 +220,11 @@ impl Propagator for AgentEmission {
             }
             EmissionMode::Set => {
                 // Take the write borrow and zero-fill.
-                let out = ctx
-                    .writes()
-                    .write(self.emission_field)
-                    .ok_or_else(|| PropagatorError::ExecutionFailed {
-                        reason: format!(
-                            "emission field {:?} not writable",
-                            self.emission_field
-                        ),
-                    })?;
+                let out = ctx.writes().write(self.emission_field).ok_or_else(|| {
+                    PropagatorError::ExecutionFailed {
+                        reason: format!("emission field {:?} not writable", self.emission_field),
+                    }
+                })?;
 
                 // Verify length match to prevent out-of-bounds panic.
                 if presence.len() != out.len() {
@@ -313,18 +302,14 @@ mod tests {
 
     #[test]
     fn builder_rejects_missing_presence() {
-        let result = AgentEmission::builder()
-            .emission_field(F_EMIT)
-            .build();
+        let result = AgentEmission::builder().emission_field(F_EMIT).build();
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("presence_field"));
     }
 
     #[test]
     fn builder_rejects_missing_emission() {
-        let result = AgentEmission::builder()
-            .presence_field(F_PRES)
-            .build();
+        let result = AgentEmission::builder().presence_field(F_PRES).build();
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("emission_field"));
     }
@@ -510,6 +495,9 @@ mod tests {
 
         let rp = prop.reads_previous();
         assert!(rp.contains(F_PRES));
-        assert!(!rp.contains(F_EMIT), "Set mode should not read previous emission");
+        assert!(
+            !rp.contains(F_EMIT),
+            "Set mode should not read previous emission"
+        );
     }
 }

@@ -106,16 +106,13 @@ impl SparseSlab {
         // Try to reuse a retired segment range of the exact size before
         // bump-allocating. Retired ranges are guaranteed safe (freed in a
         // previous tick, after publish).
-        let (segment_index, offset) = if let Some(pos) = self
-            .retired_ranges
-            .iter()
-            .position(|r| r.len == len)
-        {
-            let r = self.retired_ranges.swap_remove(pos);
-            (r.segment_index, r.offset)
-        } else {
-            segments.alloc(len)?
-        };
+        let (segment_index, offset) =
+            if let Some(pos) = self.retired_ranges.iter().position(|r| r.len == len) {
+                let r = self.retired_ranges.swap_remove(pos);
+                (r.segment_index, r.offset)
+            } else {
+                segments.alloc(len)?
+            };
 
         // Mark old allocation as dead if it exists.
         if let Some(&old_idx) = self.live_map.get(&field) {
@@ -318,7 +315,11 @@ mod tests {
 
         // Gen 2: CoW write — should reuse the retired range.
         slab.alloc(FieldId(0), 100, 2, &mut segs).unwrap();
-        assert_eq!(segs.total_used(), used_after_cow1, "no new segment memory consumed");
+        assert_eq!(
+            segs.total_used(),
+            used_after_cow1,
+            "no new segment memory consumed"
+        );
         assert_eq!(slab.retired_range_count(), 0, "retired range was consumed");
     }
 

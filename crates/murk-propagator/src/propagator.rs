@@ -104,12 +104,12 @@ pub trait Propagator: Send + 'static {
     /// Scratch memory required **in bytes** (not f32 slots).
     ///
     /// The engine allocates `max(scratch_bytes())` across all propagators
-    /// and converts to f32 slots via [`ScratchRegion::with_byte_capacity()`].
+    /// and converts to f32 slots via `ScratchRegion::with_byte_capacity()`.
     /// The bump pointer is reset between each `step()` call.
     ///
     /// **Important:** Do not pass the return value directly to
-    /// [`ScratchRegion::new()`], which expects f32 slot counts.
-    /// Use [`ScratchRegion::with_byte_capacity()`] instead.
+    /// `ScratchRegion::new()`, which expects f32 slot counts.
+    /// Use `ScratchRegion::with_byte_capacity()` instead.
     fn scratch_bytes(&self) -> usize {
         0
     }

@@ -6,9 +6,9 @@ use numpy::{PyArray1, PyArrayMethods, PyUntypedArrayMethods};
 use pyo3::prelude::*;
 
 use murk_ffi::batched::{
-    murk_batched_create, murk_batched_destroy, murk_batched_num_worlds,
-    murk_batched_obs_mask_len, murk_batched_obs_output_len, murk_batched_observe_all,
-    murk_batched_reset_all, murk_batched_reset_world, murk_batched_step_and_observe,
+    murk_batched_create, murk_batched_destroy, murk_batched_num_worlds, murk_batched_obs_mask_len,
+    murk_batched_obs_output_len, murk_batched_observe_all, murk_batched_reset_all,
+    murk_batched_reset_world, murk_batched_step_and_observe,
 };
 use murk_ffi::{MurkCommand, MurkObsEntry};
 
@@ -271,9 +271,7 @@ impl BatchedWorld {
         let n_seeds = seeds.len();
         let seeds_addr = seeds.as_ptr() as usize;
 
-        let status = py.detach(|| {
-            murk_batched_reset_all(h, seeds_addr as *const u64, n_seeds)
-        });
+        let status = py.detach(|| murk_batched_reset_all(h, seeds_addr as *const u64, n_seeds));
         check_status(status)
     }
 

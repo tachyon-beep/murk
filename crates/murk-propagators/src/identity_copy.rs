@@ -77,12 +77,12 @@ impl Propagator for IdentityCopy {
                 reason: format!("field {:?} not readable", self.field),
             })?
             .to_vec();
-        let out = ctx
-            .writes()
-            .write(self.field)
-            .ok_or_else(|| PropagatorError::ExecutionFailed {
-                reason: format!("field {:?} not writable", self.field),
-            })?;
+        let out =
+            ctx.writes()
+                .write(self.field)
+                .ok_or_else(|| PropagatorError::ExecutionFailed {
+                    reason: format!("field {:?} not writable", self.field),
+                })?;
         out.copy_from_slice(&prev);
         Ok(())
     }
@@ -134,7 +134,11 @@ mod tests {
         prop.step(&mut ctx).unwrap();
 
         let output = writer.get_field(F_FIELD).unwrap();
-        assert_eq!(output, &input[..], "output must exactly match previous-tick input");
+        assert_eq!(
+            output,
+            &input[..],
+            "output must exactly match previous-tick input"
+        );
     }
 
     #[test]

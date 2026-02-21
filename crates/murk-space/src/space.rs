@@ -86,7 +86,7 @@ pub trait Space: Any + Send + Sync + 'static {
     /// Returns `true` if `self` and `other` are topologically equivalent:
     /// same concrete type and identical behavioral parameters.
     ///
-    /// Used by [`BatchedEngine`] to verify all worlds share the same
+    /// Used by `BatchedEngine` to verify all worlds share the same
     /// topology before compiling a shared observation plan.
     ///
     /// Implementors should downcast `other` to `Self` and compare all

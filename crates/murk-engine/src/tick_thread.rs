@@ -396,7 +396,7 @@ mod tests {
         // After rejection: effective should increase
         let skew = backoff.record_tick(true);
         assert_eq!(skew, 4); // 2 * 2.0 = 4
-        // Scale ratio: 4/2 = 2.0 — hold threshold would double
+                             // Scale ratio: 4/2 = 2.0 — hold threshold would double
 
         // Another rejection: 4 * 2.0 = 8
         let skew = backoff.record_tick(true);

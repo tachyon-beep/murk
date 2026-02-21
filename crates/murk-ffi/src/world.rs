@@ -854,15 +854,24 @@ mod tests {
         let world_h = create_test_world();
 
         let mut tick: u64 = 999;
-        assert_eq!(murk_current_tick_get(world_h, &mut tick), MurkStatus::Ok as i32);
+        assert_eq!(
+            murk_current_tick_get(world_h, &mut tick),
+            MurkStatus::Ok as i32
+        );
         assert_eq!(tick, 0);
 
         let mut disabled: u8 = 99;
-        assert_eq!(murk_is_tick_disabled_get(world_h, &mut disabled), MurkStatus::Ok as i32);
+        assert_eq!(
+            murk_is_tick_disabled_get(world_h, &mut disabled),
+            MurkStatus::Ok as i32
+        );
         assert_eq!(disabled, 0);
 
         let mut rollbacks: u32 = 99;
-        assert_eq!(murk_consecutive_rollbacks_get(world_h, &mut rollbacks), MurkStatus::Ok as i32);
+        assert_eq!(
+            murk_consecutive_rollbacks_get(world_h, &mut rollbacks),
+            MurkStatus::Ok as i32
+        );
         assert_eq!(rollbacks, 0);
 
         let mut seed: u64 = 0;
@@ -879,19 +888,31 @@ mod tests {
 
         // All _get variants must return InvalidHandle for a destroyed world.
         let mut tick: u64 = 999;
-        assert_eq!(murk_current_tick_get(world_h, &mut tick), MurkStatus::InvalidHandle as i32);
+        assert_eq!(
+            murk_current_tick_get(world_h, &mut tick),
+            MurkStatus::InvalidHandle as i32
+        );
         assert_eq!(tick, 999, "out must not be written on error");
 
         let mut disabled: u8 = 99;
-        assert_eq!(murk_is_tick_disabled_get(world_h, &mut disabled), MurkStatus::InvalidHandle as i32);
+        assert_eq!(
+            murk_is_tick_disabled_get(world_h, &mut disabled),
+            MurkStatus::InvalidHandle as i32
+        );
         assert_eq!(disabled, 99, "out must not be written on error");
 
         let mut rollbacks: u32 = 99;
-        assert_eq!(murk_consecutive_rollbacks_get(world_h, &mut rollbacks), MurkStatus::InvalidHandle as i32);
+        assert_eq!(
+            murk_consecutive_rollbacks_get(world_h, &mut rollbacks),
+            MurkStatus::InvalidHandle as i32
+        );
         assert_eq!(rollbacks, 99, "out must not be written on error");
 
         let mut seed: u64 = 999;
-        assert_eq!(murk_seed_get(world_h, &mut seed), MurkStatus::InvalidHandle as i32);
+        assert_eq!(
+            murk_seed_get(world_h, &mut seed),
+            MurkStatus::InvalidHandle as i32
+        );
         assert_eq!(seed, 999, "out must not be written on error");
     }
 
@@ -899,10 +920,22 @@ mod tests {
     fn accessor_get_variants_null_out_returns_invalid_argument() {
         let world_h = create_test_world();
 
-        assert_eq!(murk_current_tick_get(world_h, std::ptr::null_mut()), MurkStatus::InvalidArgument as i32);
-        assert_eq!(murk_is_tick_disabled_get(world_h, std::ptr::null_mut()), MurkStatus::InvalidArgument as i32);
-        assert_eq!(murk_consecutive_rollbacks_get(world_h, std::ptr::null_mut()), MurkStatus::InvalidArgument as i32);
-        assert_eq!(murk_seed_get(world_h, std::ptr::null_mut()), MurkStatus::InvalidArgument as i32);
+        assert_eq!(
+            murk_current_tick_get(world_h, std::ptr::null_mut()),
+            MurkStatus::InvalidArgument as i32
+        );
+        assert_eq!(
+            murk_is_tick_disabled_get(world_h, std::ptr::null_mut()),
+            MurkStatus::InvalidArgument as i32
+        );
+        assert_eq!(
+            murk_consecutive_rollbacks_get(world_h, std::ptr::null_mut()),
+            MurkStatus::InvalidArgument as i32
+        );
+        assert_eq!(
+            murk_seed_get(world_h, std::ptr::null_mut()),
+            MurkStatus::InvalidArgument as i32
+        );
 
         murk_lockstep_destroy(world_h);
     }

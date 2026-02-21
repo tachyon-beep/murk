@@ -220,9 +220,12 @@ impl PingPongArena {
     /// Returns a [`TickGuard`] providing write access to the staging buffer
     /// and scratch space. The guard must be dropped before calling `publish()`.
     pub fn begin_tick(&mut self) -> Result<TickGuard<'_>, ArenaError> {
-        let next_gen = self.generation.checked_add(1).ok_or(ArenaError::InvalidConfig {
-            reason: "generation counter overflow (u32::MAX ticks reached)".into(),
-        })?;
+        let next_gen = self
+            .generation
+            .checked_add(1)
+            .ok_or(ArenaError::InvalidConfig {
+                reason: "generation counter overflow (u32::MAX ticks reached)".into(),
+            })?;
 
         // Promote sparse ranges retired during the previous tick. After
         // publish(), the published descriptor no longer references them.
@@ -327,7 +330,11 @@ impl PingPongArena {
     /// - The staging buffer becomes the published buffer
     /// - The old published buffer will be reset on the next `begin_tick()`
     /// - The generation counter advances to the value computed by `begin_tick()`
-    pub fn publish(&mut self, tick_id: TickId, param_version: ParameterVersion) -> Result<(), ArenaError> {
+    pub fn publish(
+        &mut self,
+        tick_id: TickId,
+        param_version: ParameterVersion,
+    ) -> Result<(), ArenaError> {
         if !self.tick_in_progress {
             return Err(ArenaError::InvalidConfig {
                 reason: "publish() called without a preceding begin_tick()".into(),
@@ -415,7 +422,8 @@ impl PingPongArena {
         self.sparse_slab = SparseSlab::new();
 
         // Rebuild descriptors from field defs.
-        let descriptor = FieldDescriptor::from_field_defs(&self.field_defs, self.config.cell_count)?;
+        let descriptor =
+            FieldDescriptor::from_field_defs(&self.field_defs, self.config.cell_count)?;
         self.staging_descriptor = descriptor.clone();
         self.published_descriptor = descriptor;
 

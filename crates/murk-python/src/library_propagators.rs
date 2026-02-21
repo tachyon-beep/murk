@@ -175,9 +175,7 @@ impl PyGradientCompute {
             .output_field(FieldId(self.output_field))
             .build()
             .map_err(|e| {
-                pyo3::exceptions::PyValueError::new_err(format!(
-                    "GradientCompute build error: {e}"
-                ))
+                pyo3::exceptions::PyValueError::new_err(format!("GradientCompute build error: {e}"))
             })?;
 
         let handle = box_propagator_to_handle(Box::new(prop));
@@ -256,7 +254,11 @@ impl PyFlowField {
     #[new]
     #[pyo3(signature = (potential_field, flow_field, normalize=true))]
     fn new(potential_field: u32, flow_field: u32, normalize: bool) -> Self {
-        PyFlowField { potential_field, flow_field, normalize }
+        PyFlowField {
+            potential_field,
+            flow_field,
+            normalize,
+        }
     }
 
     fn register(&self, py: Python<'_>, config: &mut Config) -> PyResult<()> {
@@ -266,13 +268,18 @@ impl PyFlowField {
             .flow_field(FieldId(self.flow_field))
             .normalize(self.normalize)
             .build()
-            .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("FlowField build error: {e}")))?;
+            .map_err(|e| {
+                pyo3::exceptions::PyValueError::new_err(format!("FlowField build error: {e}"))
+            })?;
         let handle = box_propagator_to_handle(Box::new(prop));
         config.add_propagator_handle(py, handle)
     }
 
     fn __repr__(&self) -> String {
-        format!("FlowField(potential_field={}, flow_field={}, normalize={})", self.potential_field, self.flow_field, self.normalize)
+        format!(
+            "FlowField(potential_field={}, flow_field={}, normalize={})",
+            self.potential_field, self.flow_field, self.normalize
+        )
     }
 }
 
@@ -301,25 +308,39 @@ impl PyAgentEmission {
     #[new]
     #[pyo3(signature = (presence_field, emission_field, intensity=1.0, additive=true))]
     fn new(presence_field: u32, emission_field: u32, intensity: f32, additive: bool) -> Self {
-        PyAgentEmission { presence_field, emission_field, intensity, additive }
+        PyAgentEmission {
+            presence_field,
+            emission_field,
+            intensity,
+            additive,
+        }
     }
 
     fn register(&self, py: Python<'_>, config: &mut Config) -> PyResult<()> {
         let _ = config.require_handle()?;
-        let mode = if self.additive { murk_propagators::EmissionMode::Additive } else { murk_propagators::EmissionMode::Set };
+        let mode = if self.additive {
+            murk_propagators::EmissionMode::Additive
+        } else {
+            murk_propagators::EmissionMode::Set
+        };
         let prop = murk_propagators::AgentEmission::builder()
             .presence_field(FieldId(self.presence_field))
             .emission_field(FieldId(self.emission_field))
             .intensity(self.intensity)
             .mode(mode)
             .build()
-            .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("AgentEmission build error: {e}")))?;
+            .map_err(|e| {
+                pyo3::exceptions::PyValueError::new_err(format!("AgentEmission build error: {e}"))
+            })?;
         let handle = box_propagator_to_handle(Box::new(prop));
         config.add_propagator_handle(py, handle)
     }
 
     fn __repr__(&self) -> String {
-        format!("AgentEmission(presence_field={}, emission_field={}, intensity={}, additive={})", self.presence_field, self.emission_field, self.intensity, self.additive)
+        format!(
+            "AgentEmission(presence_field={}, emission_field={}, intensity={}, additive={})",
+            self.presence_field, self.emission_field, self.intensity, self.additive
+        )
     }
 }
 
@@ -351,13 +372,31 @@ pub(crate) struct PyResourceField {
 impl PyResourceField {
     #[new]
     #[pyo3(signature = (field, presence_field, consumption_rate=1.0, regrowth_rate=0.1, capacity=1.0, logistic=false))]
-    fn new(field: u32, presence_field: u32, consumption_rate: f32, regrowth_rate: f32, capacity: f32, logistic: bool) -> Self {
-        PyResourceField { field, presence_field, consumption_rate, regrowth_rate, capacity, logistic }
+    fn new(
+        field: u32,
+        presence_field: u32,
+        consumption_rate: f32,
+        regrowth_rate: f32,
+        capacity: f32,
+        logistic: bool,
+    ) -> Self {
+        PyResourceField {
+            field,
+            presence_field,
+            consumption_rate,
+            regrowth_rate,
+            capacity,
+            logistic,
+        }
     }
 
     fn register(&self, py: Python<'_>, config: &mut Config) -> PyResult<()> {
         let _ = config.require_handle()?;
-        let model = if self.logistic { murk_propagators::RegrowthModel::Logistic } else { murk_propagators::RegrowthModel::Linear };
+        let model = if self.logistic {
+            murk_propagators::RegrowthModel::Logistic
+        } else {
+            murk_propagators::RegrowthModel::Linear
+        };
         let prop = murk_propagators::ResourceField::builder()
             .field(FieldId(self.field))
             .presence_field(FieldId(self.presence_field))
@@ -366,13 +405,18 @@ impl PyResourceField {
             .capacity(self.capacity)
             .regrowth_model(model)
             .build()
-            .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("ResourceField build error: {e}")))?;
+            .map_err(|e| {
+                pyo3::exceptions::PyValueError::new_err(format!("ResourceField build error: {e}"))
+            })?;
         let handle = box_propagator_to_handle(Box::new(prop));
         config.add_propagator_handle(py, handle)
     }
 
     fn __repr__(&self) -> String {
-        format!("ResourceField(field={}, presence_field={}, capacity={})", self.field, self.presence_field, self.capacity)
+        format!(
+            "ResourceField(field={}, presence_field={}, capacity={})",
+            self.field, self.presence_field, self.capacity
+        )
     }
 }
 
@@ -403,12 +447,22 @@ impl PyMorphologicalOp {
     #[new]
     #[pyo3(signature = (input_field, output_field, dilate=true, radius=1, threshold=0.5))]
     fn new(input_field: u32, output_field: u32, dilate: bool, radius: u32, threshold: f32) -> Self {
-        PyMorphologicalOp { input_field, output_field, dilate, radius, threshold }
+        PyMorphologicalOp {
+            input_field,
+            output_field,
+            dilate,
+            radius,
+            threshold,
+        }
     }
 
     fn register(&self, py: Python<'_>, config: &mut Config) -> PyResult<()> {
         let _ = config.require_handle()?;
-        let op = if self.dilate { murk_propagators::MorphOp::Dilate } else { murk_propagators::MorphOp::Erode };
+        let op = if self.dilate {
+            murk_propagators::MorphOp::Dilate
+        } else {
+            murk_propagators::MorphOp::Erode
+        };
         let prop = murk_propagators::MorphologicalOp::builder()
             .input_field(FieldId(self.input_field))
             .output_field(FieldId(self.output_field))
@@ -416,13 +470,18 @@ impl PyMorphologicalOp {
             .radius(self.radius)
             .threshold(self.threshold)
             .build()
-            .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("MorphologicalOp build error: {e}")))?;
+            .map_err(|e| {
+                pyo3::exceptions::PyValueError::new_err(format!("MorphologicalOp build error: {e}"))
+            })?;
         let handle = box_propagator_to_handle(Box::new(prop));
         config.add_propagator_handle(py, handle)
     }
 
     fn __repr__(&self) -> String {
-        format!("MorphologicalOp(input_field={}, output_field={}, dilate={}, radius={})", self.input_field, self.output_field, self.dilate, self.radius)
+        format!(
+            "MorphologicalOp(input_field={}, output_field={}, dilate={}, radius={})",
+            self.input_field, self.output_field, self.dilate, self.radius
+        )
     }
 }
 
@@ -451,7 +510,12 @@ impl PyWavePropagation {
     #[new]
     #[pyo3(signature = (displacement_field, velocity_field, wave_speed=1.0, damping=0.0))]
     fn new(displacement_field: u32, velocity_field: u32, wave_speed: f64, damping: f64) -> Self {
-        PyWavePropagation { displacement_field, velocity_field, wave_speed, damping }
+        PyWavePropagation {
+            displacement_field,
+            velocity_field,
+            wave_speed,
+            damping,
+        }
     }
 
     fn register(&self, py: Python<'_>, config: &mut Config) -> PyResult<()> {
@@ -462,13 +526,18 @@ impl PyWavePropagation {
             .wave_speed(self.wave_speed)
             .damping(self.damping)
             .build()
-            .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("WavePropagation build error: {e}")))?;
+            .map_err(|e| {
+                pyo3::exceptions::PyValueError::new_err(format!("WavePropagation build error: {e}"))
+            })?;
         let handle = box_propagator_to_handle(Box::new(prop));
         config.add_propagator_handle(py, handle)
     }
 
     fn __repr__(&self) -> String {
-        format!("WavePropagation(displacement_field={}, velocity_field={}, wave_speed={}, damping={})", self.displacement_field, self.velocity_field, self.wave_speed, self.damping)
+        format!(
+            "WavePropagation(displacement_field={}, velocity_field={}, wave_speed={}, damping={})",
+            self.displacement_field, self.velocity_field, self.wave_speed, self.damping
+        )
     }
 }
 
@@ -497,7 +566,12 @@ impl PyNoiseInjection {
     #[new]
     #[pyo3(signature = (field, noise_type="gaussian".to_string(), scale=0.1, seed_offset=0))]
     fn new(field: u32, noise_type: String, scale: f64, seed_offset: u64) -> Self {
-        PyNoiseInjection { field, noise_type, scale, seed_offset }
+        PyNoiseInjection {
+            field,
+            noise_type,
+            scale,
+            seed_offset,
+        }
     }
 
     fn register(&self, py: Python<'_>, config: &mut Config) -> PyResult<()> {
@@ -506,9 +580,11 @@ impl PyNoiseInjection {
             "gaussian" => murk_propagators::NoiseType::Gaussian,
             "uniform" => murk_propagators::NoiseType::Uniform,
             "salt_pepper" => murk_propagators::NoiseType::SaltPepper,
-            other => return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            other => {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
                 "unknown noise_type '{other}', expected 'gaussian', 'uniform', or 'salt_pepper'"
-            ))),
+            )))
+            }
         };
         let prop = murk_propagators::NoiseInjection::builder()
             .field(FieldId(self.field))
@@ -516,12 +592,17 @@ impl PyNoiseInjection {
             .scale(self.scale)
             .seed_offset(self.seed_offset)
             .build()
-            .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("NoiseInjection build error: {e}")))?;
+            .map_err(|e| {
+                pyo3::exceptions::PyValueError::new_err(format!("NoiseInjection build error: {e}"))
+            })?;
         let handle = box_propagator_to_handle(Box::new(prop));
         config.add_propagator_handle(py, handle)
     }
 
     fn __repr__(&self) -> String {
-        format!("NoiseInjection(field={}, noise_type='{}', scale={}, seed_offset={})", self.field, self.noise_type, self.scale, self.seed_offset)
+        format!(
+            "NoiseInjection(field={}, noise_type='{}', scale={}, seed_offset={})",
+            self.field, self.noise_type, self.scale, self.seed_offset
+        )
     }
 }

@@ -46,9 +46,9 @@ pub mod types;
 pub mod world;
 
 pub use batched::{
-    murk_batched_create, murk_batched_destroy, murk_batched_num_worlds,
-    murk_batched_obs_mask_len, murk_batched_obs_output_len, murk_batched_observe_all,
-    murk_batched_reset_all, murk_batched_reset_world, murk_batched_step_and_observe,
+    murk_batched_create, murk_batched_destroy, murk_batched_num_worlds, murk_batched_obs_mask_len,
+    murk_batched_obs_output_len, murk_batched_observe_all, murk_batched_reset_all,
+    murk_batched_reset_world, murk_batched_step_and_observe,
 };
 pub use command::{MurkCommand, MurkCommandType, MurkReceipt};
 pub use config::{

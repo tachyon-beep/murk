@@ -89,12 +89,11 @@ impl Propagator for DiffusionPropagator {
         // HEAT_SOURCE is a command-only field: no propagator writes it,
         // so SetField values persist in the published snapshot. We read
         // the previous tick's values here (one-tick delay by design).
-        let heat_source =
-            ctx.reads_previous()
-                .read(HEAT_SOURCE)
-                .ok_or_else(|| PropagatorError::ExecutionFailed {
-                    reason: "heat_source field not readable".into(),
-                })?;
+        let heat_source = ctx.reads_previous().read(HEAT_SOURCE).ok_or_else(|| {
+            PropagatorError::ExecutionFailed {
+                reason: "heat_source field not readable".into(),
+            }
+        })?;
 
         // Copy into local buffers — we need random access while
         // holding the mutable write buffer (split-borrow limitation).

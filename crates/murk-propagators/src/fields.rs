@@ -3,19 +3,34 @@
 use murk_core::{BoundaryBehavior, FieldDef, FieldId, FieldMutability, FieldType};
 
 /// Heat scalar field (1 component/cell).
-#[deprecated(since = "0.1.7", note = "use user-defined FieldId with ScalarDiffusion instead")]
+#[deprecated(
+    since = "0.1.7",
+    note = "use user-defined FieldId with ScalarDiffusion instead"
+)]
 pub const HEAT: FieldId = FieldId(0);
 /// Velocity vector field (2 components/cell).
-#[deprecated(since = "0.1.7", note = "use user-defined FieldId with ScalarDiffusion instead")]
+#[deprecated(
+    since = "0.1.7",
+    note = "use user-defined FieldId with ScalarDiffusion instead"
+)]
 pub const VELOCITY: FieldId = FieldId(1);
 /// Agent presence scalar field (1 component/cell).
-#[deprecated(since = "0.1.7", note = "use user-defined FieldId with AgentMovementPropagator instead")]
+#[deprecated(
+    since = "0.1.7",
+    note = "use user-defined FieldId with AgentMovementPropagator instead"
+)]
 pub const AGENT_PRESENCE: FieldId = FieldId(2);
 /// Heat gradient vector field (2 components/cell).
-#[deprecated(since = "0.1.7", note = "use user-defined FieldId with GradientCompute instead")]
+#[deprecated(
+    since = "0.1.7",
+    note = "use user-defined FieldId with GradientCompute instead"
+)]
 pub const HEAT_GRADIENT: FieldId = FieldId(3);
 /// Reward scalar field (1 component/cell).
-#[deprecated(since = "0.1.7", note = "use user-defined FieldId with RewardPropagator instead")]
+#[deprecated(
+    since = "0.1.7",
+    note = "use user-defined FieldId with RewardPropagator instead"
+)]
 pub const REWARD: FieldId = FieldId(4);
 
 /// Returns the 5 field definitions for the reference pipeline in order.

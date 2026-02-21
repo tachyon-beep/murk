@@ -214,11 +214,10 @@ pub fn decode_header(r: &mut dyn Read) -> Result<(BuildMetadata, InitDescriptor)
 /// Encode a single replay frame.
 pub fn encode_frame(w: &mut dyn Write, frame: &Frame) -> Result<(), ReplayError> {
     write_u64_le(w, frame.tick_id)?;
-    let command_count = u32::try_from(frame.commands.len()).map_err(|_| {
-        ReplayError::DataTooLarge {
+    let command_count =
+        u32::try_from(frame.commands.len()).map_err(|_| ReplayError::DataTooLarge {
             detail: format!("command count {} exceeds u32::MAX", frame.commands.len()),
-        }
-    })?;
+        })?;
     write_u32_le(w, command_count)?;
 
     for cmd in &frame.commands {
@@ -281,9 +280,7 @@ pub fn decode_frame(r: &mut dyn Read) -> Result<Option<Frame>, ReplayError> {
     let command_count = read_u32_le(r)? as usize;
     if command_count > MAX_COMMANDS_PER_FRAME {
         return Err(ReplayError::MalformedFrame {
-            detail: format!(
-                "command count {command_count} exceeds limit {MAX_COMMANDS_PER_FRAME}"
-            ),
+            detail: format!("command count {command_count} exceeds limit {MAX_COMMANDS_PER_FRAME}"),
         });
     }
     let mut commands = Vec::with_capacity(command_count);
@@ -446,10 +443,7 @@ pub fn serialize_command(cmd: &Command) -> Result<SerializedCommand, ReplayError
             let mut buf = Vec::new();
             let params_len =
                 u32::try_from(params.len()).map_err(|_| ReplayError::DataTooLarge {
-                    detail: format!(
-                        "SetParameterBatch count {} exceeds u32::MAX",
-                        params.len()
-                    ),
+                    detail: format!("SetParameterBatch count {} exceeds u32::MAX", params.len()),
                 })?;
             buf.extend_from_slice(&params_len.to_le_bytes());
             for (key, value) in params {
@@ -631,7 +625,14 @@ mod tests {
     fn arb_command() -> impl Strategy<Value = Command> {
         prop_oneof![
             // Move
-            (any::<u64>(), arb_coord(), arb_opt_u64(), arb_opt_u64(), any::<u64>(), any::<u64>())
+            (
+                any::<u64>(),
+                arb_coord(),
+                arb_opt_u64(),
+                arb_opt_u64(),
+                any::<u64>(),
+                any::<u64>()
+            )
                 .prop_map(|(eid, coord, sid, sseq, eat, aseq)| Command {
                     payload: CommandPayload::Move {
                         entity_id: eid,
@@ -664,16 +665,21 @@ mod tests {
                     arrival_seq: aseq,
                 }),
             // Despawn
-            (any::<u64>(), arb_opt_u64(), arb_opt_u64(), any::<u64>(), any::<u64>()).prop_map(
-                |(eid, sid, sseq, eat, aseq)| Command {
+            (
+                any::<u64>(),
+                arb_opt_u64(),
+                arb_opt_u64(),
+                any::<u64>(),
+                any::<u64>()
+            )
+                .prop_map(|(eid, sid, sseq, eat, aseq)| Command {
                     payload: CommandPayload::Despawn { entity_id: eid },
                     expires_after_tick: TickId(eat),
                     source_id: sid,
                     source_seq: sseq,
                     priority_class: 1,
                     arrival_seq: aseq,
-                }
-            ),
+                }),
             // SetField
             (
                 arb_coord(),
@@ -716,7 +722,14 @@ mod tests {
                     }
                 }),
             // SetParameter
-            (0u32..10, any::<f64>(), arb_opt_u64(), arb_opt_u64(), any::<u64>(), any::<u64>())
+            (
+                0u32..10,
+                any::<f64>(),
+                arb_opt_u64(),
+                arb_opt_u64(),
+                any::<u64>(),
+                any::<u64>()
+            )
                 .prop_map(|(k, v, sid, sseq, eat, aseq)| {
                     Command {
                         payload: CommandPayload::SetParameter {

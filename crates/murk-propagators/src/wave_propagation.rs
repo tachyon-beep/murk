@@ -80,7 +80,10 @@ impl WavePropagation {
             .reads_previous()
             .read(self.displacement_field)
             .ok_or_else(|| PropagatorError::ExecutionFailed {
-                reason: format!("displacement field {:?} not readable", self.displacement_field),
+                reason: format!(
+                    "displacement field {:?} not readable",
+                    self.displacement_field
+                ),
             })?
             .to_vec();
 
@@ -114,20 +117,21 @@ impl WavePropagation {
             }
         }
 
-        let out_d = ctx
-            .writes()
-            .write(self.displacement_field)
-            .ok_or_else(|| PropagatorError::ExecutionFailed {
-                reason: format!("displacement field {:?} not writable", self.displacement_field),
-            })?;
+        let out_d = ctx.writes().write(self.displacement_field).ok_or_else(|| {
+            PropagatorError::ExecutionFailed {
+                reason: format!(
+                    "displacement field {:?} not writable",
+                    self.displacement_field
+                ),
+            }
+        })?;
         out_d.copy_from_slice(&new_d);
 
-        let out_v = ctx
-            .writes()
-            .write(self.velocity_field)
-            .ok_or_else(|| PropagatorError::ExecutionFailed {
+        let out_v = ctx.writes().write(self.velocity_field).ok_or_else(|| {
+            PropagatorError::ExecutionFailed {
                 reason: format!("velocity field {:?} not writable", self.velocity_field),
-            })?;
+            }
+        })?;
         out_v.copy_from_slice(&new_v);
 
         Ok(())
@@ -158,7 +162,10 @@ impl WavePropagation {
             .reads_previous()
             .read(self.displacement_field)
             .ok_or_else(|| PropagatorError::ExecutionFailed {
-                reason: format!("displacement field {:?} not readable", self.displacement_field),
+                reason: format!(
+                    "displacement field {:?} not readable",
+                    self.displacement_field
+                ),
             })?
             .to_vec();
 
@@ -187,20 +194,21 @@ impl WavePropagation {
             new_d[i] = prev_d[i] + new_v[i] * dt_f32;
         }
 
-        let out_d = ctx
-            .writes()
-            .write(self.displacement_field)
-            .ok_or_else(|| PropagatorError::ExecutionFailed {
-                reason: format!("displacement field {:?} not writable", self.displacement_field),
-            })?;
+        let out_d = ctx.writes().write(self.displacement_field).ok_or_else(|| {
+            PropagatorError::ExecutionFailed {
+                reason: format!(
+                    "displacement field {:?} not writable",
+                    self.displacement_field
+                ),
+            }
+        })?;
         out_d.copy_from_slice(&new_d);
 
-        let out_v = ctx
-            .writes()
-            .write(self.velocity_field)
-            .ok_or_else(|| PropagatorError::ExecutionFailed {
+        let out_v = ctx.writes().write(self.velocity_field).ok_or_else(|| {
+            PropagatorError::ExecutionFailed {
                 reason: format!("velocity field {:?} not writable", self.velocity_field),
-            })?;
+            }
+        })?;
         out_v.copy_from_slice(&new_v);
 
         Ok(())
@@ -364,9 +372,7 @@ mod tests {
 
     #[test]
     fn builder_rejects_missing_displacement() {
-        let result = WavePropagation::builder()
-            .velocity_field(F_VEL)
-            .build();
+        let result = WavePropagation::builder().velocity_field(F_VEL).build();
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("displacement_field"));
     }
@@ -491,9 +497,17 @@ mod tests {
 
         let vel = writer.get_field(F_VEL).unwrap();
         // Center should get negative velocity (restoring force pulls it back)
-        assert!(vel[12] < 0.0, "center velocity should be negative, got {}", vel[12]);
+        assert!(
+            vel[12] < 0.0,
+            "center velocity should be negative, got {}",
+            vel[12]
+        );
         // Neighbors should get positive velocity (wave spreading outward)
-        assert!(vel[7] > 0.0, "north neighbor should get positive velocity, got {}", vel[7]);
+        assert!(
+            vel[7] > 0.0,
+            "north neighbor should get positive velocity, got {}",
+            vel[7]
+        );
     }
 
     #[test]
@@ -540,7 +554,12 @@ mod tests {
         let mut scratch2 = ScratchRegion::new(0);
         let mut ctx2 = make_ctx(&reader2, &mut writer2, &mut scratch2, &grid, 0.01);
         prop_damped.step(&mut ctx2).unwrap();
-        let damped_energy: f32 = writer2.get_field(F_VEL).unwrap().iter().map(|v| v * v).sum();
+        let damped_energy: f32 = writer2
+            .get_field(F_VEL)
+            .unwrap()
+            .iter()
+            .map(|v| v * v)
+            .sum();
 
         assert!(
             damped_energy < undamped_energy,

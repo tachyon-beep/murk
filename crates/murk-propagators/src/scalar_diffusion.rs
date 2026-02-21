@@ -150,12 +150,11 @@ impl ScalarDiffusion {
             })?
             .to_vec();
 
-        let out = ctx
-            .writes()
-            .write(self.output_field)
-            .ok_or_else(|| PropagatorError::ExecutionFailed {
+        let out = ctx.writes().write(self.output_field).ok_or_else(|| {
+            PropagatorError::ExecutionFailed {
                 reason: format!("output field {:?} not writable", self.output_field),
-            })?;
+            }
+        })?;
 
         for r in 0..rows_i {
             for c in 0..cols_i {
@@ -260,12 +259,11 @@ impl ScalarDiffusion {
         self.apply_post_processing(&mut out_buf, dt);
 
         // Write diffused output
-        let out = ctx
-            .writes()
-            .write(self.output_field)
-            .ok_or_else(|| PropagatorError::ExecutionFailed {
+        let out = ctx.writes().write(self.output_field).ok_or_else(|| {
+            PropagatorError::ExecutionFailed {
                 reason: format!("output field {:?} not writable", self.output_field),
-            })?;
+            }
+        })?;
         out.copy_from_slice(&out_buf);
 
         // Compute gradient if requested
@@ -414,16 +412,11 @@ impl ScalarDiffusionBuilder {
             ));
         }
         if !(self.decay >= 0.0) || !self.decay.is_finite() {
-            return Err(format!(
-                "decay must be finite and >= 0, got {}",
-                self.decay
-            ));
+            return Err(format!("decay must be finite and >= 0, got {}", self.decay));
         }
         if let (Some(lo), Some(hi)) = (self.clamp_min, self.clamp_max) {
             if lo > hi {
-                return Err(format!(
-                    "clamp_min ({lo}) must be <= clamp_max ({hi})"
-                ));
+                return Err(format!("clamp_min ({lo}) must be <= clamp_max ({hi})"));
             }
         }
 
@@ -546,18 +539,14 @@ mod tests {
 
     #[test]
     fn builder_rejects_missing_input() {
-        let result = ScalarDiffusion::builder()
-            .output_field(F_OUT)
-            .build();
+        let result = ScalarDiffusion::builder().output_field(F_OUT).build();
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("input_field"));
     }
 
     #[test]
     fn builder_rejects_missing_output() {
-        let result = ScalarDiffusion::builder()
-            .input_field(F_HEAT)
-            .build();
+        let result = ScalarDiffusion::builder().input_field(F_HEAT).build();
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("output_field"));
     }
@@ -693,10 +682,26 @@ mod tests {
         // Center should have decreased
         assert!(result[12] < 100.0, "center should cool: {}", result[12]);
         // Neighbours should have increased
-        assert!(result[7] > 0.0, "north neighbour should warm: {}", result[7]);
-        assert!(result[17] > 0.0, "south neighbour should warm: {}", result[17]);
-        assert!(result[11] > 0.0, "west neighbour should warm: {}", result[11]);
-        assert!(result[13] > 0.0, "east neighbour should warm: {}", result[13]);
+        assert!(
+            result[7] > 0.0,
+            "north neighbour should warm: {}",
+            result[7]
+        );
+        assert!(
+            result[17] > 0.0,
+            "south neighbour should warm: {}",
+            result[17]
+        );
+        assert!(
+            result[11] > 0.0,
+            "west neighbour should warm: {}",
+            result[11]
+        );
+        assert!(
+            result[13] > 0.0,
+            "east neighbour should warm: {}",
+            result[13]
+        );
     }
 
     #[test]

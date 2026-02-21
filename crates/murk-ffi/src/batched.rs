@@ -242,11 +242,7 @@ pub extern "C" fn murk_batched_reset_world(handle: u64, world_index: usize, seed
 /// Reset all worlds with per-world seeds.
 #[no_mangle]
 #[allow(unsafe_code)]
-pub extern "C" fn murk_batched_reset_all(
-    handle: u64,
-    seeds: *const u64,
-    n_seeds: usize,
-) -> i32 {
+pub extern "C" fn murk_batched_reset_all(handle: u64, seeds: *const u64, n_seeds: usize) -> i32 {
     let mut table = match BATCHED.lock() {
         Ok(g) => g,
         Err(_) => return MurkStatus::InternalError as i32,
@@ -469,13 +465,7 @@ mod tests {
         }];
 
         let mut batch_h: u64 = 0;
-        let status = murk_batched_create(
-            handles.as_ptr(),
-            2,
-            obs.as_ptr(),
-            1,
-            &mut batch_h,
-        );
+        let status = murk_batched_create(handles.as_ptr(), 2, obs.as_ptr(), 1, &mut batch_h);
         assert_eq!(status, MurkStatus::Ok as i32);
         assert_eq!(murk_batched_num_worlds(batch_h), 2);
         assert_eq!(murk_batched_obs_output_len(batch_h), 10); // Line1D(10)
@@ -568,13 +558,8 @@ mod tests {
         // Observe all (world 0 is reset, world 1 still has data).
         let mut output2 = [0.0f32; 20];
         let mut mask2 = [0u8; 20];
-        let status = murk_batched_observe_all(
-            batch_h,
-            output2.as_mut_ptr(),
-            20,
-            mask2.as_mut_ptr(),
-            20,
-        );
+        let status =
+            murk_batched_observe_all(batch_h, output2.as_mut_ptr(), 20, mask2.as_mut_ptr(), 20);
         assert_eq!(status, MurkStatus::Ok as i32);
 
         // World 0 is reset → zeroed fields → obs should be 0.0.
@@ -670,8 +655,7 @@ mod p1_regression_tests {
             pool_stride: 0,
         }];
         let mut batch_h: u64 = 0;
-        let status =
-            murk_batched_create(handles.as_ptr(), 1, obs.as_ptr(), 1, &mut batch_h);
+        let status = murk_batched_create(handles.as_ptr(), 1, obs.as_ptr(), 1, &mut batch_h);
         assert_eq!(status, MurkStatus::InvalidArgument as i32);
     }
 
@@ -693,8 +677,7 @@ mod p1_regression_tests {
             pool_stride: 0,
         }];
         let mut batch_h: u64 = 0;
-        let status =
-            murk_batched_create(handles.as_ptr(), 1, obs.as_ptr(), 1, &mut batch_h);
+        let status = murk_batched_create(handles.as_ptr(), 1, obs.as_ptr(), 1, &mut batch_h);
         assert_eq!(status, MurkStatus::InvalidArgument as i32);
     }
 
@@ -716,8 +699,7 @@ mod p1_regression_tests {
             pool_stride: 0,
         }];
         let mut batch_h: u64 = 0;
-        let status =
-            murk_batched_create(handles.as_ptr(), 1, obs.as_ptr(), 1, &mut batch_h);
+        let status = murk_batched_create(handles.as_ptr(), 1, obs.as_ptr(), 1, &mut batch_h);
         assert_eq!(status, MurkStatus::InvalidArgument as i32);
     }
 }

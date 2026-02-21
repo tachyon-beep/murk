@@ -160,6 +160,9 @@ mod tests {
     fn empty_snapshot_hash_is_fnv_offset() {
         let snap = MockSnapshot::new(TickId(0), WorldGenerationId(0), ParameterVersion(0));
         let h = snapshot_hash(&snap, 0);
-        assert_eq!(h, FNV_OFFSET, "empty snapshot hash must equal FNV_OFFSET for replay compatibility");
+        assert_eq!(
+            h, FNV_OFFSET,
+            "empty snapshot hash must equal FNV_OFFSET for replay compatibility"
+        );
     }
 }

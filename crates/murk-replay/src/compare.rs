@@ -223,7 +223,9 @@ mod tests {
         let result = compare_snapshot(&replayed, recorded_hash, 1, 1, Some(&recorded)).unwrap();
         let report = result.unwrap();
 
-        let length_div = report.divergences.iter()
+        let length_div = report
+            .divergences
+            .iter()
             .find(|d| d.kind == DivergenceKind::LengthMismatch)
             .expect("should have a LengthMismatch divergence");
         assert_eq!(length_div.field_id, 0);

@@ -61,7 +61,10 @@ impl FieldDescriptor {
     /// All handles are initialised with generation 0 and placeholder locations.
     /// The caller (PingPongArena) must call [`FieldDescriptor::update_handle`] after allocating
     /// actual storage.
-    pub fn from_field_defs(field_defs: &[(FieldId, FieldDef)], cell_count: u32) -> Result<Self, ArenaError> {
+    pub fn from_field_defs(
+        field_defs: &[(FieldId, FieldDef)],
+        cell_count: u32,
+    ) -> Result<Self, ArenaError> {
         let mut entries = IndexMap::with_capacity(field_defs.len());
         for (id, def) in field_defs {
             let components = def.field_type.components();

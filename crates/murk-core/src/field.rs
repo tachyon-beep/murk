@@ -159,10 +159,10 @@ impl FieldDef {
     /// - If `bounds` is `Some((min, max))`, requires `min <= max` and both finite.
     pub fn validate(&self) -> Result<(), String> {
         match self.field_type {
-            FieldType::Vector { dims } if dims == 0 => {
+            FieldType::Vector { dims: 0 } => {
                 return Err(format!("field '{}': Vector dims must be > 0", self.name));
             }
-            FieldType::Categorical { n_values } if n_values == 0 => {
+            FieldType::Categorical { n_values: 0 } => {
                 return Err(format!(
                     "field '{}': Categorical n_values must be > 0",
                     self.name

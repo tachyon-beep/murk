@@ -3,7 +3,7 @@
 //! Reads a scalar field from the previous tick (`reads_previous`) and
 //! computes the central-difference gradient into a 2-component vector field.
 //! Has a [`Square4`] fast path for direct index arithmetic and a generic
-//! fallback using [`Space::canonical_ordering`].
+//! fallback using `Space::canonical_ordering()`.
 //!
 //! Constructed via the builder pattern: [`GradientCompute::builder`].
 
@@ -95,12 +95,11 @@ impl GradientCompute {
             })?
             .to_vec();
 
-        let grad_out =
-            ctx.writes()
-                .write(self.output_field)
-                .ok_or_else(|| PropagatorError::ExecutionFailed {
-                    reason: format!("output field {:?} not writable", self.output_field),
-                })?;
+        let grad_out = ctx.writes().write(self.output_field).ok_or_else(|| {
+            PropagatorError::ExecutionFailed {
+                reason: format!("output field {:?} not writable", self.output_field),
+            }
+        })?;
 
         let cell_count = rows as usize * cols as usize;
         if grad_out.len() < cell_count * 2 {
@@ -197,12 +196,11 @@ impl GradientCompute {
         }
 
         // Write results
-        let grad_out =
-            ctx.writes()
-                .write(self.output_field)
-                .ok_or_else(|| PropagatorError::ExecutionFailed {
-                    reason: format!("output field {:?} not writable", self.output_field),
-                })?;
+        let grad_out = ctx.writes().write(self.output_field).ok_or_else(|| {
+            PropagatorError::ExecutionFailed {
+                reason: format!("output field {:?} not writable", self.output_field),
+            }
+        })?;
         if grad_out.len() != cell_count * 2 {
             return Err(PropagatorError::ExecutionFailed {
                 reason: format!(
@@ -347,16 +345,12 @@ mod tests {
         assert!(result.unwrap_err().contains("input_field"));
 
         // Missing output
-        let result = GradientCompute::builder()
-            .input_field(F_SCALAR)
-            .build();
+        let result = GradientCompute::builder().input_field(F_SCALAR).build();
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("output_field"));
 
         // Missing input
-        let result = GradientCompute::builder()
-            .output_field(F_GRAD)
-            .build();
+        let result = GradientCompute::builder().output_field(F_GRAD).build();
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("input_field"));
     }
@@ -563,7 +557,10 @@ mod tests {
         let mut ctx = make_ctx(&reader, &mut writer, &mut scratch, &grid, 0.01);
 
         let result = prop.step(&mut ctx);
-        assert!(result.is_err(), "expected error for undersized output buffer");
+        assert!(
+            result.is_err(),
+            "expected error for undersized output buffer"
+        );
         let err = result.unwrap_err();
         match err {
             PropagatorError::ExecutionFailed { reason } => {

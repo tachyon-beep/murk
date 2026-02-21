@@ -211,20 +211,27 @@ impl Propagator for MorphologicalOp {
 
             out_buf[i] = match self.op {
                 MorphOp::Dilate => {
-                    if any_present { 1.0 } else { 0.0 }
+                    if any_present {
+                        1.0
+                    } else {
+                        0.0
+                    }
                 }
                 MorphOp::Erode => {
-                    if all_present { 1.0 } else { 0.0 }
+                    if all_present {
+                        1.0
+                    } else {
+                        0.0
+                    }
                 }
             };
         }
 
-        let out = ctx
-            .writes()
-            .write(self.output_field)
-            .ok_or_else(|| PropagatorError::ExecutionFailed {
+        let out = ctx.writes().write(self.output_field).ok_or_else(|| {
+            PropagatorError::ExecutionFailed {
                 reason: format!("output field {:?} not writable", self.output_field),
-            })?;
+            }
+        })?;
         out.copy_from_slice(&out_buf);
 
         Ok(())
@@ -277,18 +284,14 @@ mod tests {
 
     #[test]
     fn builder_rejects_missing_input() {
-        let result = MorphologicalOp::builder()
-            .output_field(F_OUT)
-            .build();
+        let result = MorphologicalOp::builder().output_field(F_OUT).build();
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("input_field"));
     }
 
     #[test]
     fn builder_rejects_missing_output() {
-        let result = MorphologicalOp::builder()
-            .input_field(F_IN)
-            .build();
+        let result = MorphologicalOp::builder().input_field(F_IN).build();
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("output_field"));
     }

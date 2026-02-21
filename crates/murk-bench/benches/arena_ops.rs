@@ -128,7 +128,9 @@ fn bench_arena_snapshot(c: &mut Criterion) {
                 data[0] = 42.0;
             }
             // Publish with incrementing TickId to match internal generation.
-            arena.publish(TickId(snap_tick), ParameterVersion(0)).unwrap();
+            arena
+                .publish(TickId(snap_tick), ParameterVersion(0))
+                .unwrap();
             snap_tick += 1;
             // Take snapshot and read field.
             let snap = arena.snapshot();

@@ -17,7 +17,7 @@ impl ScratchRegion {
     /// Create a new scratch region with the given capacity **in f32 slots**
     /// (not bytes).
     ///
-    /// If you have a byte count (e.g., from [`Propagator::scratch_bytes()`]),
+    /// If you have a byte count (e.g., from `Propagator::scratch_bytes()`),
     /// use [`with_byte_capacity()`](Self::with_byte_capacity) instead.
     pub fn new(capacity: usize) -> Self {
         Self {
@@ -126,8 +126,8 @@ mod tests {
         // Verify the safe formula produces the correct ceiling division.
         let slot_size = std::mem::size_of::<f32>(); // 4
         let expected = usize::MAX / slot_size + 1; // ceil(usize::MAX / 4)
-        // We can't actually allocate this, but verify the arithmetic is correct.
-        // Use the same formula as with_byte_capacity directly:
+                                                   // We can't actually allocate this, but verify the arithmetic is correct.
+                                                   // Use the same formula as with_byte_capacity directly:
         let slots = usize::MAX / slot_size + usize::from(usize::MAX % slot_size != 0);
         assert_eq!(slots, expected);
     }

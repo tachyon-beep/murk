@@ -124,10 +124,7 @@ impl BatchedEngine {
     ///
     /// Returns [`BatchError::Config`] if any world fails to construct,
     /// or [`BatchError::Observe`] if the obs plan fails to compile.
-    pub fn new(
-        configs: Vec<WorldConfig>,
-        obs_spec: Option<&ObsSpec>,
-    ) -> Result<Self, BatchError> {
+    pub fn new(configs: Vec<WorldConfig>, obs_spec: Option<&ObsSpec>) -> Result<Self, BatchError> {
         if configs.is_empty() {
             return Err(BatchError::InvalidArgument {
                 reason: "BatchedEngine requires at least one world config".into(),
@@ -236,10 +233,7 @@ impl BatchedEngine {
         let n = self.worlds.len();
         if commands.len() != n {
             return Err(BatchError::InvalidArgument {
-                reason: format!(
-                    "commands has {} entries, expected {n}",
-                    commands.len()
-                ),
+                reason: format!("commands has {} entries, expected {n}", commands.len()),
             });
         }
 
@@ -247,12 +241,12 @@ impl BatchedEngine {
         let mut metrics = Vec::with_capacity(n);
 
         for (idx, world) in self.worlds.iter_mut().enumerate() {
-            let result = world.step_sync(commands[idx].clone()).map_err(|e| {
-                BatchError::Step {
+            let result = world
+                .step_sync(commands[idx].clone())
+                .map_err(|e| BatchError::Step {
                     world_index: idx,
                     error: e,
-                }
-            })?;
+                })?;
             tick_ids.push(result.snapshot.tick_id());
             metrics.push(result.metrics);
         }
@@ -299,18 +293,12 @@ impl BatchedEngine {
         let expected_mask = n * self.obs_mask_len;
         if output.len() < expected_out {
             return Err(BatchError::InvalidArgument {
-                reason: format!(
-                    "output buffer too small: {} < {expected_out}",
-                    output.len()
-                ),
+                reason: format!("output buffer too small: {} < {expected_out}", output.len()),
             });
         }
         if mask.len() < expected_mask {
             return Err(BatchError::InvalidArgument {
-                reason: format!(
-                    "mask buffer too small: {} < {expected_mask}",
-                    mask.len()
-                ),
+                reason: format!("mask buffer too small: {} < {expected_mask}", mask.len()),
             });
         }
         Ok(())
@@ -755,10 +743,7 @@ mod tests {
             backoff: BackoffConfig::default(),
         };
 
-        let result = BatchedEngine::new(
-            vec![config_two_fields, config_one_field],
-            Some(&spec),
-        );
+        let result = BatchedEngine::new(vec![config_two_fields, config_one_field], Some(&spec));
         match result {
             Err(e) => {
                 let msg = format!("{e}");

@@ -179,7 +179,10 @@ fn parse_space(space_type: i32, p: &[f64]) -> Option<Box<dyn Space>> {
                 let comp_type = p[offset] as i32;
                 let n_comp_params = f64_to_usize(p[offset + 1])?;
                 offset += 2;
-                if offset.checked_add(n_comp_params).is_none_or(|end| end > p.len()) {
+                if offset
+                    .checked_add(n_comp_params)
+                    .is_none_or(|end| end > p.len())
+                {
                     return None;
                 }
                 let comp_params = &p[offset..offset + n_comp_params];

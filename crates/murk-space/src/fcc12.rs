@@ -99,9 +99,7 @@ impl Fcc12 {
         }
 
         // Wrap requires even dimensions for parity consistency.
-        if edge == EdgeBehavior::Wrap
-            && (w % 2 != 0 || h % 2 != 0 || d % 2 != 0)
-        {
+        if edge == EdgeBehavior::Wrap && (w % 2 != 0 || h % 2 != 0 || d % 2 != 0) {
             return Err(SpaceError::InvalidComposition {
                 reason: "FCC12 with Wrap requires even dimensions for parity consistency".into(),
             });

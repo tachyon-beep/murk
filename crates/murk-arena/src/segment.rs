@@ -180,7 +180,9 @@ impl SegmentList {
     /// Returns `None` if `segment_index` is out of bounds or the slice
     /// exceeds the segment's allocated region.
     pub fn slice(&self, segment_index: u16, offset: u32, len: u32) -> Option<&[f32]> {
-        self.segments.get(segment_index as usize)?.slice(offset, len)
+        self.segments
+            .get(segment_index as usize)?
+            .slice(offset, len)
     }
 
     /// Get a mutable slice from the given segment at the given offset and length.
@@ -188,7 +190,9 @@ impl SegmentList {
     /// Returns `None` if `segment_index` is out of bounds or the slice
     /// exceeds the segment's allocated region.
     pub fn slice_mut(&mut self, segment_index: u16, offset: u32, len: u32) -> Option<&mut [f32]> {
-        self.segments.get_mut(segment_index as usize)?.slice_mut(offset, len)
+        self.segments
+            .get_mut(segment_index as usize)?
+            .slice_mut(offset, len)
     }
 
     /// Reset all segments' bump pointers without deallocating.

@@ -113,9 +113,7 @@ impl ResourceFieldBuilder {
     /// - `regrowth_rate` is negative or NaN
     /// - `capacity` is not > 0 or is NaN
     pub fn build(self) -> Result<ResourceField, String> {
-        let field = self
-            .field
-            .ok_or_else(|| "field is required".to_string())?;
+        let field = self.field.ok_or_else(|| "field is required".to_string())?;
         let presence_field = self
             .presence_field
             .ok_or_else(|| "presence_field is required".to_string())?;
@@ -190,12 +188,12 @@ impl Propagator for ResourceField {
             })?
             .to_vec();
 
-        let out = ctx
-            .writes()
-            .write(self.field)
-            .ok_or_else(|| PropagatorError::ExecutionFailed {
-                reason: format!("resource field {:?} not writable", self.field),
-            })?;
+        let out =
+            ctx.writes()
+                .write(self.field)
+                .ok_or_else(|| PropagatorError::ExecutionFailed {
+                    reason: format!("resource field {:?} not writable", self.field),
+                })?;
 
         // Length mismatch defense
         if prev.len() != out.len() {
@@ -295,18 +293,14 @@ mod tests {
 
     #[test]
     fn builder_rejects_missing_field() {
-        let result = ResourceField::builder()
-            .presence_field(F_PRES)
-            .build();
+        let result = ResourceField::builder().presence_field(F_PRES).build();
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("field"));
     }
 
     #[test]
     fn builder_rejects_missing_presence() {
-        let result = ResourceField::builder()
-            .field(F_RES)
-            .build();
+        let result = ResourceField::builder().field(F_RES).build();
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("presence_field"));
     }
@@ -542,10 +536,6 @@ mod tests {
         prop.step(&mut ctx).unwrap();
 
         let res = writer.get_field(F_RES).unwrap();
-        assert!(
-            res[0].abs() < 1e-6,
-            "should clamp to 0, got {}",
-            res[0]
-        );
+        assert!(res[0].abs() < 1e-6, "should clamp to 0, got {}", res[0]);
     }
 }

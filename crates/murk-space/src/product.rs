@@ -126,7 +126,12 @@ impl ProductSpace {
     }
 
     /// Compute distance using an alternate metric (not the default L1).
-    pub fn metric_distance(&self, a: &Coord, b: &Coord, metric: &ProductMetric) -> Result<f64, SpaceError> {
+    pub fn metric_distance(
+        &self,
+        a: &Coord,
+        b: &Coord,
+        metric: &ProductMetric,
+    ) -> Result<f64, SpaceError> {
         let per_comp: Vec<f64> = (0..self.components.len())
             .map(|i| {
                 let ca = self.split_coord(a, i);
@@ -543,7 +548,11 @@ mod tests {
         let s = hex_line();
         let a: Coord = smallvec![2, 1, 5];
         let b: Coord = smallvec![4, 0, 8];
-        assert_eq!(s.metric_distance(&a, &b, &ProductMetric::LInfinity).unwrap(), 3.0);
+        assert_eq!(
+            s.metric_distance(&a, &b, &ProductMetric::LInfinity)
+                .unwrap(),
+            3.0
+        );
     }
 
     #[test]
@@ -553,7 +562,8 @@ mod tests {
         let b: Coord = smallvec![4, 0, 8];
         // hex_dist=2, line_dist=3, weights=[1.0, 2.0] → 2*1.0 + 3*2.0 = 8.0
         assert_eq!(
-            s.metric_distance(&a, &b, &ProductMetric::Weighted(vec![1.0, 2.0])).unwrap(),
+            s.metric_distance(&a, &b, &ProductMetric::Weighted(vec![1.0, 2.0]))
+                .unwrap(),
             8.0
         );
     }
@@ -771,7 +781,9 @@ mod tests {
         let a: Coord = smallvec![2, 1, 5];
         let b: Coord = smallvec![4, 0, 8];
         // Exactly 2 weights for 2 components — correct
-        let d = s.metric_distance(&a, &b, &ProductMetric::Weighted(vec![1.0, 1.0])).unwrap();
+        let d = s
+            .metric_distance(&a, &b, &ProductMetric::Weighted(vec![1.0, 1.0]))
+            .unwrap();
         assert_eq!(d, 5.0); // hex_dist(2) + line_dist(3) = 5
     }
 

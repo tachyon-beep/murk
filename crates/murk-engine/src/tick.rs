@@ -123,8 +123,7 @@ impl TickEngine {
             .collect();
 
         // Safety: validate() already checked cell_count fits in u32.
-        let cell_count =
-            u32::try_from(config.space.cell_count()).expect("cell count validated");
+        let cell_count = u32::try_from(config.space.cell_count()).expect("cell count validated");
         let arena_config = ArenaConfig::new(cell_count);
 
         // Build static arena for any Static fields.
@@ -326,10 +325,12 @@ impl TickEngine {
 
         // 6. Publish.
         let publish_start = Instant::now();
-        self.arena.publish(next_tick, self.param_version).map_err(|_| TickError {
-            kind: StepError::AllocationFailed,
-            receipts: vec![],
-        })?;
+        self.arena
+            .publish(next_tick, self.param_version)
+            .map_err(|_| TickError {
+                kind: StepError::AllocationFailed,
+                receipts: vec![],
+            })?;
         let snapshot_publish_us = publish_start.elapsed().as_micros() as u64;
 
         // 7. Update state.
@@ -996,7 +997,10 @@ mod tests {
         // Non-SetField commands must NOT report as applied and must carry
         // UnsupportedCommand reason so callers can distinguish the failure mode.
         for receipt in &result.receipts {
-            assert!(!receipt.accepted, "unimplemented command type must be rejected");
+            assert!(
+                !receipt.accepted,
+                "unimplemented command type must be rejected"
+            );
             assert_eq!(
                 receipt.applied_tick_id, None,
                 "unimplemented command must not have applied_tick_id"

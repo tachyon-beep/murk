@@ -5,7 +5,7 @@
 //! field. Optionally normalizes the result to unit length.
 //!
 //! Has a [`Square4`] fast path for direct index arithmetic and a generic
-//! fallback using [`Space::canonical_ordering`].
+//! fallback using `Space::canonical_ordering()`.
 //!
 //! Constructed via the builder pattern: [`FlowField::builder`].
 
@@ -98,12 +98,11 @@ impl FlowField {
             })?
             .to_vec();
 
-        let flow_out =
-            ctx.writes()
-                .write(self.flow_field)
-                .ok_or_else(|| PropagatorError::ExecutionFailed {
-                    reason: format!("flow field {:?} not writable", self.flow_field),
-                })?;
+        let flow_out = ctx.writes().write(self.flow_field).ok_or_else(|| {
+            PropagatorError::ExecutionFailed {
+                reason: format!("flow field {:?} not writable", self.flow_field),
+            }
+        })?;
 
         for r in 0..rows_i {
             for c in 0..cols_i {
@@ -211,12 +210,11 @@ impl FlowField {
         }
 
         // Write results
-        let flow_out =
-            ctx.writes()
-                .write(self.flow_field)
-                .ok_or_else(|| PropagatorError::ExecutionFailed {
-                    reason: format!("flow field {:?} not writable", self.flow_field),
-                })?;
+        let flow_out = ctx.writes().write(self.flow_field).ok_or_else(|| {
+            PropagatorError::ExecutionFailed {
+                reason: format!("flow field {:?} not writable", self.flow_field),
+            }
+        })?;
         flow_out.copy_from_slice(&flow_buf);
 
         Ok(())
@@ -348,18 +346,14 @@ mod tests {
 
     #[test]
     fn builder_rejects_missing_potential() {
-        let result = FlowField::builder()
-            .flow_field(F_FLOW)
-            .build();
+        let result = FlowField::builder().flow_field(F_FLOW).build();
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("potential_field"));
     }
 
     #[test]
     fn builder_rejects_missing_flow() {
-        let result = FlowField::builder()
-            .potential_field(F_POTENTIAL)
-            .build();
+        let result = FlowField::builder().potential_field(F_POTENTIAL).build();
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("flow_field"));
     }

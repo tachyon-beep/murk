@@ -112,15 +112,10 @@ impl NoiseInjectionBuilder {
     /// - `scale` is negative or NaN
     /// - `noise_type` is SaltPepper and `scale` > 1.0
     pub fn build(self) -> Result<NoiseInjection, String> {
-        let field = self
-            .field
-            .ok_or_else(|| "field is required".to_string())?;
+        let field = self.field.ok_or_else(|| "field is required".to_string())?;
 
         if !(self.scale >= 0.0) {
-            return Err(format!(
-                "scale must be finite and >= 0, got {}",
-                self.scale
-            ));
+            return Err(format!("scale must be finite and >= 0, got {}", self.scale));
         }
 
         if self.noise_type == NoiseType::SaltPepper && self.scale > 1.0 {
@@ -171,12 +166,12 @@ impl Propagator for NoiseInjection {
             })?
             .to_vec();
 
-        let out = ctx
-            .writes()
-            .write(self.field)
-            .ok_or_else(|| PropagatorError::ExecutionFailed {
-                reason: format!("field {:?} not writable", self.field),
-            })?;
+        let out =
+            ctx.writes()
+                .write(self.field)
+                .ok_or_else(|| PropagatorError::ExecutionFailed {
+                    reason: format!("field {:?} not writable", self.field),
+                })?;
 
         // Length mismatch defense
         if prev.len() != out.len() {
@@ -247,10 +242,7 @@ mod tests {
 
     #[test]
     fn builder_minimal() {
-        let prop = NoiseInjection::builder()
-            .field(F_DATA)
-            .build()
-            .unwrap();
+        let prop = NoiseInjection::builder().field(F_DATA).build().unwrap();
 
         assert_eq!(prop.name(), "NoiseInjection");
         assert!(prop.reads().is_empty(), "reads() should be empty");
@@ -273,10 +265,7 @@ mod tests {
 
     #[test]
     fn builder_rejects_negative_scale() {
-        let result = NoiseInjection::builder()
-            .field(F_DATA)
-            .scale(-1.0)
-            .build();
+        let result = NoiseInjection::builder().field(F_DATA).scale(-1.0).build();
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("scale"));
     }
@@ -383,7 +372,10 @@ mod tests {
 
         let out = writer.get_field(F_DATA).unwrap();
         let non_zero = out.iter().filter(|&&v| v.abs() > 1e-6).count();
-        assert!(non_zero > 0, "Gaussian noise should produce non-zero values");
+        assert!(
+            non_zero > 0,
+            "Gaussian noise should produce non-zero values"
+        );
     }
 
     #[test]

@@ -182,9 +182,7 @@ impl ObsPlan {
                 }
                 if min > max {
                     return Err(ObsError::InvalidObsSpec {
-                        reason: format!(
-                            "entry {i}: Normalize min ({min}) must be <= max ({max})"
-                        ),
+                        reason: format!("entry {i}: Normalize min ({min}) must be <= max ({max})"),
                     });
                 }
             }
@@ -1070,7 +1068,6 @@ fn execute_agent_entry_pooled(
     scratch: &mut [f32],
     scratch_mask: &mut [u8],
 ) -> usize {
-
     if use_fast_path {
         let geo = geometry.as_ref().unwrap();
         let base_rank = geo.canonical_rank(center) as isize;
