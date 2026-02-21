@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Per-file static-analysis bug hunter for the murk workspace.
 
-Scans Rust and Python source files and dispatches each to a CLI agent
-(codex or claude) in read-only sandbox mode.  The agent produces a bug
-report using a murk-specific template that includes crate attribution,
-engine-mode classification, and language-aware analysis hints.
+Scans Rust, Python, and C source/header files and dispatches each to a
+CLI agent (codex or claude) in read-only sandbox mode.  The agent
+produces a bug report using a murk-specific template that includes crate
+attribution, engine-mode classification, and language-aware analysis
+hints.
 
 Usage examples:
 
@@ -22,6 +23,9 @@ Usage examples:
 
     # Include test files
     python scripts/codex_bug_hunt.py --include-tests --extensions rs,py
+
+    # Scan C headers and source files only
+    python scripts/codex_bug_hunt.py --extensions h,c
 """
 
 from __future__ import annotations
@@ -78,6 +82,28 @@ LANG_HINTS: dict[str, str] = {
         "- SB3/Gymnasium API contract violations (reset, step, observation_space)\n"
         "- Torch tensor dtype/device mismatches in examples\n"
         "- Episode length off-by-one from warmup ticks consuming tick budget\n"
+    ),
+    ".h": (
+        "C header / FFI surface focus areas:\n"
+        "- ABI stability: struct layout changes that break binary compatibility\n"
+        "- Missing or incorrect include guards\n"
+        "- Fixed-width integer consistency (uint32_t vs int32_t vs size_t)\n"
+        "- Opaque handle typedefs leaking implementation details\n"
+        "- Const-correctness: missing const on read-only pointer parameters\n"
+        "- Nullable pointer contracts: which params may be NULL, unclear docs\n"
+        "- Status code gaps: missing error codes, overlapping values, sign convention\n"
+        "- Callback function pointer signatures: missing context param, wrong calling convention\n"
+        "- Platform portability: alignment assumptions, padding, endianness\n"
+    ),
+    ".c": (
+        "C source / FFI integration focus areas:\n"
+        "- Null pointer dereference: unchecked returns from murk_* functions\n"
+        "- Status code handling: ignoring negative returns, conflating 0 with success\n"
+        "- Memory management: double-free of handles, use-after-destroy\n"
+        "- Handle lifetime: using a handle after its owning world/config is destroyed\n"
+        "- Buffer sizing: undersized output buffers passed to murk_* functions\n"
+        "- Thread safety: calling non-thread-safe FFI functions from multiple threads\n"
+        "- Integer overflow: unchecked casts between size_t and uint32_t\n"
     ),
 }
 
@@ -176,6 +202,7 @@ DEFAULT_TEMPLATE = """\
 - **Rust toolchain:** stable
 - **Murk version/commit:** HEAD
 - **Python version (if murk-python):**
+- **C compiler (if murk-ffi C header/source):**
 
 ## Determinism Impact
 
@@ -192,7 +219,7 @@ N/A - found via static analysis
 ## Minimal Reproducer
 
 ```
-<!-- Provide a minimal code snippet (Rust or Python) that triggers the bug. -->
+<!-- Provide a minimal code snippet (Rust, Python, or C) that triggers the bug. -->
 ```
 
 ## Additional Context
@@ -298,7 +325,8 @@ def build_prompt(
     return (
         "You are a static-analysis agent doing a focused bug audit of the murk "
         "simulation framework.  Murk is a Rust workspace with PyO3 Python "
-        "bindings, arena-based generational allocation, and two engine modes "
+        "bindings, a C FFI surface (auto-generated via cbindgen), arena-based "
+        "generational allocation, and two engine modes "
         "(Lockstep and RealtimeAsync).\n\n"
         f"Target file: {file_path}\n\n"
         "Instructions:\n"
@@ -457,7 +485,7 @@ def report_severity(report_path: Path) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Per-file bug hunter for the murk workspace (Rust + Python).",
+        description="Per-file bug hunter for the murk workspace (Rust + Python + C).",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "examples:\n"
@@ -465,6 +493,7 @@ def main() -> int:
             "  %(prog)s --extensions rs --limit 10 --backend claude\n"
             "  %(prog)s --root crates/murk-engine --skip-existing\n"
             "  %(prog)s --include-tests --organize-by-priority\n"
+            "  %(prog)s --extensions h,c --root crates/murk-ffi\n"
         ),
     )
     parser.add_argument(
@@ -484,8 +513,8 @@ def main() -> int:
     )
     parser.add_argument(
         "--extensions",
-        default="rs,py",
-        help="Comma-separated file extensions (default: rs,py).",
+        default="rs,py,h,c",
+        help="Comma-separated file extensions (default: rs,py,h,c).",
     )
     parser.add_argument(
         "--include-tests",
