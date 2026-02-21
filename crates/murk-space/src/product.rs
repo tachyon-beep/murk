@@ -20,16 +20,37 @@ pub enum ProductMetric {
     Weighted(Vec<f64>),
 }
 
-/// Cartesian product of arbitrary spaces.
+/// Cartesian product of N component spaces S_1 x S_2 x ... x S_N.
 ///
-/// Composes N spaces into a single space where each cell is an N-tuple
-/// of per-component coordinates. Coordinates are concatenated:
-/// `[q0, r0, ..., q1, r1, ...]`.
+/// # Formal definition
 ///
-/// - **Neighbours** (R-SPACE-8): vary one component at a time, others held constant
-/// - **Distance** (R-SPACE-9): L1 sum of per-component distances (graph geodesic)
-/// - **Canonical ordering** (R-SPACE-10): lexicographic, leftmost component slowest
-/// - **Regions**: Cartesian product of per-component region plans
+/// Given component spaces S_1, S_2, ..., S_N, the product space P is:
+///
+/// - **Cell set**: P = S_1 x S_2 x ... x S_N (all N-tuples of per-component cells).
+/// - **Cell count**: |P| = |S_1| * |S_2| * ... * |S_N| (overflow-checked at construction).
+/// - **Coordinates**: Concatenation of per-component coordinates.
+///   If S_i has dimensionality d_i, then P has dimensionality d_1 + d_2 + ... + d_N,
+///   and a product coordinate is `[c_{1,0}, c_{1,1}, ..., c_{2,0}, c_{2,1}, ...]`.
+/// - **Product graph edges**: Two cells are adjacent iff they differ in exactly one
+///   component, and the differing coordinates are adjacent in that component space.
+///   This is the standard graph Cartesian product (not the tensor or strong product).
+///
+/// # Edge behavior composition
+///
+/// Each component space applies its own [`EdgeBehavior`](crate::EdgeBehavior)
+/// (Absorb/Wrap/Clamp) independently. The product space does not introduce any
+/// cross-component edge effects. For example, a `Line1D(Wrap) x Line1D(Absorb)`
+/// product wraps along the first axis and absorbs along the second.
+///
+/// # Implemented operations
+///
+/// - **Neighbours** (R-SPACE-8): vary one component at a time, others held constant.
+///   See [`neighbours()`](Self::neighbours) for details.
+/// - **Distance** (R-SPACE-9): L1 sum of per-component distances (graph geodesic).
+///   See [`distance()`](Self::distance) and [`metric_distance()`](Self::metric_distance).
+/// - **Canonical ordering** (R-SPACE-10): lexicographic, leftmost component slowest.
+/// - **Regions**: Cartesian product of per-component region plans, or BFS for disks.
+///   See [`compile_region()`](Self::compile_region).
 pub struct ProductSpace {
     components: Vec<Box<dyn Space>>,
     dim_offsets: Vec<usize>,
@@ -125,7 +146,26 @@ impl ProductSpace {
         coords.sort_by_key(|c| self.canonical_rank(c).unwrap_or(usize::MAX));
     }
 
-    /// Compute distance using an alternate metric (not the default L1).
+    /// Compute distance between two product-space coordinates using an
+    /// alternate metric.
+    ///
+    /// Splits `a` and `b` into per-component sub-coordinates, computes each
+    /// component distance d_i(a_i, b_i), then combines them according to `metric`:
+    ///
+    /// - [`ProductMetric::L1`]: Sum of component distances.
+    ///   d(a, b) = sum_i d_i(a_i, b_i).
+    ///   Equivalent to the default [`distance()`](Space::distance) (graph geodesic).
+    ///
+    /// - [`ProductMetric::LInfinity`]: Maximum component distance.
+    ///   d(a, b) = max_i d_i(a_i, b_i).
+    ///   Useful for Chebyshev-style reasoning ("how many steps in the
+    ///   slowest component?").
+    ///
+    /// - [`ProductMetric::Weighted(w)`](ProductMetric::Weighted): Validated weighted sum.
+    ///   d(a, b) = sum_i w_i * d_i(a_i, b_i).
+    ///   Requires `|w| == N` (number of components). Returns
+    ///   `Err(SpaceError::InvalidComposition)` if the weight vector length
+    ///   does not match the component count.
     pub fn metric_distance(
         &self,
         a: &Coord,
@@ -159,7 +199,18 @@ impl ProductSpace {
         }
     }
 
-    /// Compile a Cartesian product of per-component region plans.
+    /// Compile a Cartesian product of per-component region plans into a
+    /// single product-space region plan.
+    ///
+    /// Given N per-component plans (each with their own coords, tensor indices,
+    /// and bounding shapes), produces the full Cartesian product: every
+    /// combination of one cell from each component plan. The product bounding
+    /// shape is the concatenation of per-component bounding dimensions, and
+    /// the product tensor index is computed via mixed-radix strides over the
+    /// per-component bounding sizes.
+    ///
+    /// Used by [`compile_region()`](Self::compile_region) for `All`, `Rect`,
+    /// and `Coords` region specs.
     fn compile_cartesian_product(&self, per_comp: &[RegionPlan]) -> RegionPlan {
         // Bounding shape = concatenation of per-component bounding shapes.
         let mut bounding_dims = Vec::new();
@@ -249,9 +300,17 @@ impl Space for ProductSpace {
         self.total_cells
     }
 
+    /// Returns the product-graph neighbours of `coord`.
+    ///
+    /// Varies one component at a time: for each component space S_i, holds all
+    /// other components fixed and queries S_i for its neighbours at the current
+    /// sub-coordinate. This produces the standard graph Cartesian product
+    /// adjacency -- two cells are neighbours iff they differ in exactly one
+    /// component, and those differing coordinates are adjacent in S_i.
+    ///
+    /// The neighbour count equals the sum of per-component neighbour counts
+    /// (not the product), since only one component varies per edge.
     fn neighbours(&self, coord: &Coord) -> SmallVec<[Coord; 8]> {
-        // R-SPACE-8: for each component, generate its neighbours
-        // while holding other components constant.
         let parts: Vec<Coord> = (0..self.components.len())
             .map(|i| self.split_coord(coord, i))
             .collect();
@@ -268,8 +327,14 @@ impl Space for ProductSpace {
         result
     }
 
+    /// Default product-space distance: L1 (Manhattan) sum of per-component distances.
+    ///
+    /// d(a, b) = sum_i d_i(a_i, b_i)
+    ///
+    /// This equals the graph geodesic (shortest-path length) in the product graph,
+    /// because the product graph adjacency varies exactly one component per step.
+    /// For alternative metrics see [`metric_distance()`](Self::metric_distance).
     fn distance(&self, a: &Coord, b: &Coord) -> f64 {
-        // R-SPACE-9: L1 sum of per-component distances.
         (0..self.components.len())
             .map(|i| {
                 let ca = self.split_coord(a, i);
@@ -279,10 +344,30 @@ impl Space for ProductSpace {
             .sum()
     }
 
+    /// Compile a region specification into a product-space region plan.
+    ///
+    /// Region compilation strategy by variant:
+    ///
+    /// - **`All`**: Cartesian product of per-component `All` plans. Every cell
+    ///   in every component is included, yielding the full product space.
+    ///
+    /// - **`Rect { min, max }`**: Splits the min/max bounds by component
+    ///   dimensionality, compiles a per-component `Rect`, then takes the
+    ///   Cartesian product. The result contains all cells where each
+    ///   sub-coordinate falls within its component's rectangle.
+    ///
+    /// - **`Coords(list)`**: Validates each coordinate against all component
+    ///   spaces, deduplicates, and sorts into canonical order. Produces a
+    ///   flat (1-D bounding shape) plan.
+    ///
+    /// - **`Disk { center, radius }`** / **`Neighbours { center, depth }`**:
+    ///   BFS in the product graph starting from `center`, collecting all cells
+    ///   reachable within `radius` (or `depth`) hops. This correctly handles
+    ///   the product graph topology where each hop varies exactly one component.
+    ///   Results are sorted into canonical order.
     fn compile_region(&self, spec: &RegionSpec) -> Result<RegionPlan, SpaceError> {
         match spec {
             RegionSpec::All => {
-                // Cartesian product of per-component All plans.
                 let per_comp: Vec<RegionPlan> = self
                     .components
                     .iter()
@@ -441,6 +526,14 @@ impl Space for ProductSpace {
 
 impl ProductSpace {
     /// BFS-based disk compilation in the product graph.
+    ///
+    /// Performs breadth-first search from `center`, expanding product-graph
+    /// neighbours at each level, up to `radius` hops. Because the product
+    /// graph adjacency varies one component per step, the BFS distance equals
+    /// the L1 sum of per-component graph distances (the default metric).
+    ///
+    /// The result is sorted into canonical order after BFS completes.
+    /// Returns `Err` if `center` is out of bounds in any component.
     fn compile_disk_bfs(&self, center: &Coord, radius: u32) -> Result<RegionPlan, SpaceError> {
         if center.len() != self.total_ndim {
             return Err(SpaceError::CoordOutOfBounds {
