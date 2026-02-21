@@ -482,4 +482,105 @@ mod tests {
         );
         murk_config_destroy(h);
     }
+
+    #[test]
+    fn null_params_with_count_returns_invalid_argument() {
+        let mut h: u64 = 0;
+        murk_config_create(&mut h);
+        assert_eq!(
+            murk_config_set_space(h, MurkSpaceType::Line1D as i32, std::ptr::null(), 2),
+            MurkStatus::InvalidArgument as i32
+        );
+        murk_config_destroy(h);
+    }
+
+    #[test]
+    fn null_field_name_returns_invalid_argument() {
+        let mut h: u64 = 0;
+        murk_config_create(&mut h);
+        assert_eq!(
+            murk_config_add_field(
+                h,
+                std::ptr::null(),
+                MurkFieldType::Scalar as i32,
+                MurkFieldMutability::PerTick as i32,
+                0,
+                MurkBoundaryBehavior::Clamp as i32,
+            ),
+            MurkStatus::InvalidArgument as i32
+        );
+        murk_config_destroy(h);
+    }
+
+    #[test]
+    fn invalid_handle_set_seed_returns_invalid_handle() {
+        assert_eq!(
+            murk_config_set_seed(9999, 42),
+            MurkStatus::InvalidHandle as i32
+        );
+    }
+
+    #[test]
+    fn invalid_handle_set_ring_buffer_returns_invalid_handle() {
+        assert_eq!(
+            murk_config_set_ring_buffer_size(9999, 8),
+            MurkStatus::InvalidHandle as i32
+        );
+    }
+
+    #[test]
+    fn invalid_handle_set_max_ingress_returns_invalid_handle() {
+        assert_eq!(
+            murk_config_set_max_ingress_queue(9999, 1024),
+            MurkStatus::InvalidHandle as i32
+        );
+    }
+
+    #[test]
+    fn hex2d_space_params() {
+        let mut h: u64 = 0;
+        murk_config_create(&mut h);
+        let params = [3.0f64, 3.0]; // cols=3, rows=3
+        assert_eq!(
+            murk_config_set_space(h, MurkSpaceType::Hex2D as i32, params.as_ptr(), 2),
+            MurkStatus::Ok as i32
+        );
+        murk_config_destroy(h);
+    }
+
+    #[test]
+    fn ring1d_space_params() {
+        let mut h: u64 = 0;
+        murk_config_create(&mut h);
+        let params = [10.0f64]; // len=10
+        assert_eq!(
+            murk_config_set_space(h, MurkSpaceType::Ring1D as i32, params.as_ptr(), 1),
+            MurkStatus::Ok as i32
+        );
+        murk_config_destroy(h);
+    }
+
+    #[test]
+    fn square8_space_params() {
+        let mut h: u64 = 0;
+        murk_config_create(&mut h);
+        let params = [4.0f64, 4.0, 1.0]; // 4x4, Wrap
+        assert_eq!(
+            murk_config_set_space(h, MurkSpaceType::Square8 as i32, params.as_ptr(), 3),
+            MurkStatus::Ok as i32
+        );
+        murk_config_destroy(h);
+    }
+
+    #[test]
+    fn fcc12_space_params() {
+        let mut h: u64 = 0;
+        murk_config_create(&mut h);
+        let params = [3.0f64, 3.0, 3.0, 0.0]; // 3x3x3, Absorb
+        assert_eq!(
+            murk_config_set_space(h, MurkSpaceType::Fcc12 as i32, params.as_ptr(), 4),
+            MurkStatus::Ok as i32
+        );
+        murk_config_destroy(h);
+    }
 }

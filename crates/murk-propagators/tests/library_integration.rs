@@ -7,8 +7,10 @@
 
 use murk_core::{BoundaryBehavior, FieldDef, FieldId, FieldMutability, FieldReader, FieldType};
 use murk_engine::{BackoffConfig, LockstepWorld, WorldConfig};
-use murk_propagators::{GradientCompute, IdentityCopy, ScalarDiffusion};
-use murk_space::{EdgeBehavior, Square4};
+use murk_propagators::{
+    FlowField, GradientCompute, IdentityCopy, ScalarDiffusion, WavePropagation,
+};
+use murk_space::{EdgeBehavior, Hex2D, Ring1D, Space, Square4};
 
 // ---------- Field IDs (our own, not the deprecated constants) ----------
 
@@ -412,5 +414,288 @@ fn combined_pipeline_three_propagators() {
         marker.iter().all(|&v| v == 0.0),
         "marker field should be all zeros, max={}",
         marker.iter().cloned().fold(0.0f32, f32::max)
+    );
+}
+
+// ==========================================================================
+// Generic fallback path tests (non-Square4 spaces)
+// ==========================================================================
+// All propagators have a Square4 fast path and a generic fallback. The tests
+// above only use Square4. These tests exercise the generic `step_generic()`
+// code path by using Ring1D (1D) and Hex2D (2D, 6-connected).
+
+// ---------- Test 6: ScalarDiffusion on Ring1D (generic path) ----------
+
+/// ScalarDiffusion on a 20-cell Ring1D (periodic). The generic fallback is used
+/// because Ring1D is not Square4. After many ticks with a source, energy should
+/// spread symmetrically around the ring.
+#[test]
+fn scalar_diffusion_generic_ring1d() {
+    let cell_count = 20;
+    let source_cell = 0;
+    let config = WorldConfig {
+        space: Box::new(Ring1D::new(cell_count).unwrap()),
+        fields: vec![scalar_field("heat")],
+        propagators: vec![Box::new(
+            ScalarDiffusion::builder()
+                .input_field(HEAT)
+                .output_field(HEAT)
+                .coefficient(0.1)
+                .sources(vec![(source_cell, 50.0)])
+                .build()
+                .unwrap(),
+        )],
+        dt: 0.1,
+        seed: 42,
+        ring_buffer_size: 8,
+        max_ingress_queue: 1024,
+        tick_rate_hz: None,
+        backoff: BackoffConfig::default(),
+    };
+
+    let mut world = LockstepWorld::new(config).unwrap();
+
+    for _ in 0..200 {
+        world.step_sync(vec![]).unwrap();
+    }
+
+    let snap = world.snapshot();
+    let heat = snap.read(HEAT).unwrap();
+    assert_eq!(heat.len(), cell_count as usize);
+
+    // All values should be finite and non-negative (no clamp_min but source is positive).
+    for (i, &v) in heat.iter().enumerate() {
+        assert!(v.is_finite(), "NaN/Inf at cell {i}: {v}");
+    }
+
+    // Source cell should be pinned at 50.0.
+    assert!(
+        (heat[source_cell] - 50.0).abs() < 1e-4,
+        "source cell should be ~50.0, got {}",
+        heat[source_cell]
+    );
+
+    // On a periodic ring, heat spreads symmetrically. Cell 10 (opposite side)
+    // should have some heat after 200 ticks.
+    assert!(
+        heat[10] > 0.0,
+        "opposite side of ring should have heat, got {}",
+        heat[10]
+    );
+}
+
+// ---------- Test 7: WavePropagation on Ring1D (generic path) ----------
+
+/// WavePropagation on a 20-cell Ring1D. The generic fallback computes the
+/// Laplacian using canonical_ordering + neighbours instead of the Square4
+/// index arithmetic. Starting from all zeros, displacement should remain
+/// zero (no excitation) and all values should be finite.
+#[test]
+fn wave_propagation_generic_ring1d() {
+    let cell_count = 20;
+    let config = WorldConfig {
+        space: Box::new(Ring1D::new(cell_count).unwrap()),
+        fields: vec![scalar_field("displacement"), scalar_field("velocity")],
+        propagators: vec![Box::new(
+            WavePropagation::builder()
+                .displacement_field(HEAT) // FieldId(0)
+                .velocity_field(GRADIENT) // FieldId(1) — reusing const, just an ID
+                .wave_speed(1.0)
+                .damping(0.05)
+                .build()
+                .unwrap(),
+        )],
+        dt: 0.05,
+        seed: 42,
+        ring_buffer_size: 8,
+        max_ingress_queue: 1024,
+        tick_rate_hz: None,
+        backoff: BackoffConfig::default(),
+    };
+
+    let mut world = LockstepWorld::new(config).unwrap();
+
+    // Run 50 ticks starting from all zeros — exercises the generic Laplacian
+    // computation path through Ring1D's canonical_ordering.
+    for _ in 0..50 {
+        world.step_sync(vec![]).unwrap();
+    }
+
+    let snap = world.snapshot();
+    let disp = snap.read(HEAT).unwrap();
+    let vel = snap.read(GRADIENT).unwrap();
+
+    assert_eq!(disp.len(), cell_count as usize);
+    assert_eq!(vel.len(), cell_count as usize);
+
+    // All values should be finite (no NaN from Laplacian computation).
+    for (i, &v) in disp.iter().enumerate() {
+        assert!(v.is_finite(), "displacement NaN/Inf at cell {i}: {v}");
+    }
+    for (i, &v) in vel.iter().enumerate() {
+        assert!(v.is_finite(), "velocity NaN/Inf at cell {i}: {v}");
+    }
+
+    // Starting from zeros with no excitation, displacement should remain zero.
+    assert!(
+        disp.iter().all(|&v| v == 0.0),
+        "displacement should remain zero with no excitation"
+    );
+}
+
+// ---------- Test 8: ScalarDiffusion + GradientCompute on Hex2D (generic path) ----------
+
+/// ScalarDiffusion and GradientCompute on a Hex2D (radius 3, 37 cells).
+/// Both use the generic fallback since Hex2D is not Square4.
+#[test]
+fn diffusion_and_gradient_generic_hex2d() {
+    let hex = Hex2D::new(5, 5).unwrap();
+    let cell_count = hex.cell_count();
+
+    let config = WorldConfig {
+        space: Box::new(hex),
+        fields: vec![scalar_field("heat"), vector2_field("gradient")],
+        propagators: vec![
+            Box::new(
+                ScalarDiffusion::builder()
+                    .input_field(HEAT)
+                    .output_field(HEAT)
+                    .coefficient(0.05) // conservative for 6-connected
+                    .sources(vec![(0, 80.0)]) // center cell
+                    .build()
+                    .unwrap(),
+            ),
+            Box::new(
+                GradientCompute::builder()
+                    .input_field(HEAT)
+                    .output_field(GRADIENT)
+                    .build()
+                    .unwrap(),
+            ),
+        ],
+        dt: 0.1,
+        seed: 42,
+        ring_buffer_size: 8,
+        max_ingress_queue: 1024,
+        tick_rate_hz: None,
+        backoff: BackoffConfig::default(),
+    };
+
+    let mut world = LockstepWorld::new(config).unwrap();
+
+    for _ in 0..50 {
+        world.step_sync(vec![]).unwrap();
+    }
+
+    let snap = world.snapshot();
+    let heat = snap.read(HEAT).unwrap();
+    let grad = snap.read(GRADIENT).unwrap();
+
+    assert_eq!(heat.len(), cell_count);
+    assert_eq!(grad.len(), cell_count * 2); // 2-component vector
+
+    // All values finite.
+    for (i, &v) in heat.iter().enumerate() {
+        assert!(v.is_finite(), "heat NaN/Inf at cell {i}: {v}");
+    }
+    for (i, &v) in grad.iter().enumerate() {
+        assert!(v.is_finite(), "gradient NaN/Inf at index {i}: {v}");
+    }
+
+    // Source cell should have high heat.
+    assert!(
+        heat[0] > 10.0,
+        "center cell should have substantial heat, got {}",
+        heat[0]
+    );
+
+    // Gradient should be non-trivial somewhere (heat is spreading radially).
+    let max_grad_mag = (0..cell_count)
+        .map(|i| {
+            let gx = grad[i * 2];
+            let gy = grad[i * 2 + 1];
+            (gx * gx + gy * gy).sqrt()
+        })
+        .fold(0.0f32, f32::max);
+    assert!(
+        max_grad_mag > 0.01,
+        "gradient should be non-trivial, max magnitude={max_grad_mag}"
+    );
+}
+
+// ---------- Test 9: FlowField on Hex2D (generic path) ----------
+
+/// FlowField on Hex2D with normalization enabled. Uses the generic
+/// fallback for gradient-based flow direction computation.
+#[test]
+fn flow_field_generic_hex2d() {
+    let hex = Hex2D::new(5, 5).unwrap();
+    let cell_count = hex.cell_count();
+
+    let config = WorldConfig {
+        space: Box::new(hex),
+        fields: vec![scalar_field("potential"), vector2_field("flow")],
+        propagators: vec![
+            // First diffuse to create a smooth potential field.
+            Box::new(
+                ScalarDiffusion::builder()
+                    .input_field(HEAT)
+                    .output_field(HEAT)
+                    .coefficient(0.05)
+                    .sources(vec![(0, 100.0)])
+                    .build()
+                    .unwrap(),
+            ),
+            // Then compute flow from the potential.
+            Box::new(
+                FlowField::builder()
+                    .potential_field(HEAT)
+                    .flow_field(GRADIENT)
+                    .normalize(true)
+                    .build()
+                    .unwrap(),
+            ),
+        ],
+        dt: 0.1,
+        seed: 42,
+        ring_buffer_size: 8,
+        max_ingress_queue: 1024,
+        tick_rate_hz: None,
+        backoff: BackoffConfig::default(),
+    };
+
+    let mut world = LockstepWorld::new(config).unwrap();
+
+    for _ in 0..30 {
+        world.step_sync(vec![]).unwrap();
+    }
+
+    let snap = world.snapshot();
+    let flow = snap.read(GRADIENT).unwrap();
+
+    assert_eq!(flow.len(), cell_count * 2);
+
+    // All values finite.
+    for (i, &v) in flow.iter().enumerate() {
+        assert!(v.is_finite(), "flow NaN/Inf at index {i}: {v}");
+    }
+
+    // With normalize=true, non-zero flow vectors should have magnitude ~1.0.
+    let mut found_nonzero = false;
+    for i in 0..cell_count {
+        let fx = flow[i * 2];
+        let fy = flow[i * 2 + 1];
+        let mag = (fx * fx + fy * fy).sqrt();
+        if mag > 0.01 {
+            found_nonzero = true;
+            assert!(
+                (mag - 1.0).abs() < 0.1,
+                "normalized flow at cell {i} should have magnitude ~1.0, got {mag}"
+            );
+        }
+    }
+    assert!(
+        found_nonzero,
+        "should have at least one non-zero flow vector"
     );
 }

@@ -682,6 +682,113 @@ mod p1_regression_tests {
     }
 
     #[test]
+    fn null_handle_out_returns_invalid_argument() {
+        let cfg = create_config_handle();
+        let handles = [cfg];
+        let status = murk_batched_create(
+            handles.as_ptr(),
+            1,
+            std::ptr::null(),
+            0,
+            std::ptr::null_mut(),
+        );
+        assert_eq!(status, MurkStatus::InvalidArgument as i32);
+    }
+
+    #[test]
+    fn zero_worlds_returns_invalid_argument() {
+        let mut batch_h: u64 = 0;
+        let status = murk_batched_create(std::ptr::null(), 0, std::ptr::null(), 0, &mut batch_h);
+        assert_eq!(status, MurkStatus::InvalidArgument as i32);
+    }
+
+    #[test]
+    fn null_config_handles_returns_invalid_argument() {
+        let mut batch_h: u64 = 0;
+        let status = murk_batched_create(std::ptr::null(), 2, std::ptr::null(), 0, &mut batch_h);
+        assert_eq!(status, MurkStatus::InvalidArgument as i32);
+    }
+
+    #[test]
+    fn invalid_config_handle_returns_invalid_handle() {
+        let handles = [9999u64]; // non-existent config handle
+        let mut batch_h: u64 = 0;
+        let status = murk_batched_create(handles.as_ptr(), 1, std::ptr::null(), 0, &mut batch_h);
+        assert_eq!(status, MurkStatus::InvalidHandle as i32);
+    }
+
+    #[test]
+    fn query_invalid_handle_returns_zero() {
+        assert_eq!(murk_batched_num_worlds(9999), 0);
+        assert_eq!(murk_batched_obs_output_len(9999), 0);
+        assert_eq!(murk_batched_obs_mask_len(9999), 0);
+    }
+
+    #[test]
+    fn observe_all_null_output_returns_invalid_argument() {
+        let cfg = create_config_handle();
+        let handles = [cfg];
+        let obs = [MurkObsEntry {
+            field_id: 0,
+            region_type: 0,
+            transform_type: 0,
+            normalize_min: 0.0,
+            normalize_max: 0.0,
+            dtype: 0,
+            region_params: [0; 8],
+            n_region_params: 0,
+            pool_kernel: 0,
+            pool_kernel_size: 0,
+            pool_stride: 0,
+        }];
+        let mut batch_h: u64 = 0;
+        murk_batched_create(handles.as_ptr(), 1, obs.as_ptr(), 1, &mut batch_h);
+
+        // Step once so there's data to observe.
+        let cmds: [*const MurkCommand; 1] = [std::ptr::null()];
+        let n_cmds = [0usize];
+        let mut output = [0.0f32; 10];
+        let mut mask = [0u8; 10];
+        murk_batched_step_and_observe(
+            batch_h,
+            cmds.as_ptr(),
+            n_cmds.as_ptr(),
+            output.as_mut_ptr(),
+            10,
+            mask.as_mut_ptr(),
+            10,
+            std::ptr::null_mut(),
+        );
+
+        // Null output buffer.
+        let mut mask2 = [0u8; 10];
+        let status =
+            murk_batched_observe_all(batch_h, std::ptr::null_mut(), 10, mask2.as_mut_ptr(), 10);
+        assert_eq!(status, MurkStatus::InvalidArgument as i32);
+
+        // Null mask buffer.
+        let mut output2 = [0.0f32; 10];
+        let status =
+            murk_batched_observe_all(batch_h, output2.as_mut_ptr(), 10, std::ptr::null_mut(), 10);
+        assert_eq!(status, MurkStatus::InvalidArgument as i32);
+
+        murk_batched_destroy(batch_h);
+    }
+
+    #[test]
+    fn reset_all_null_seeds_with_count_returns_invalid_argument() {
+        let cfg = create_config_handle();
+        let handles = [cfg];
+        let mut batch_h: u64 = 0;
+        murk_batched_create(handles.as_ptr(), 1, std::ptr::null(), 0, &mut batch_h);
+
+        let status = murk_batched_reset_all(batch_h, std::ptr::null(), 1);
+        assert_eq!(status, MurkStatus::InvalidArgument as i32);
+
+        murk_batched_destroy(batch_h);
+    }
+
+    #[test]
     fn zero_pool_stride_rejected() {
         let cfg = create_config_handle();
         let handles = [cfg];
