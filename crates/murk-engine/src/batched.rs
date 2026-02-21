@@ -285,8 +285,13 @@ impl BatchedEngine {
     /// large enough) without performing any mutation. Called by
     /// `step_and_observe` before `step_all` to guarantee atomicity.
     fn validate_observe_buffers(&self, output: &[f32], mask: &[u8]) -> Result<(), BatchError> {
-        if self.obs_plan.is_none() {
-            return Err(BatchError::NoObsPlan);
+        let plan = self.obs_plan.as_ref().ok_or(BatchError::NoObsPlan)?;
+        if plan.is_standard() {
+            return Err(BatchError::InvalidArgument {
+                reason: "obs spec uses agent-relative regions (AgentDisk/AgentRect), \
+                         which are unsupported in batched step_and_observe"
+                    .into(),
+            });
         }
         let n = self.worlds.len();
         let expected_out = n * self.obs_output_len;
@@ -356,7 +361,7 @@ mod tests {
     use murk_core::id::FieldId;
     use murk_core::traits::FieldReader;
     use murk_obs::spec::{ObsDtype, ObsEntry, ObsRegion, ObsTransform};
-    use murk_space::{EdgeBehavior, Line1D, RegionSpec};
+    use murk_space::{EdgeBehavior, Line1D, RegionSpec, Square4};
     use murk_test_utils::ConstPropagator;
 
     use crate::config::BackoffConfig;
@@ -375,6 +380,20 @@ mod tests {
     fn make_config(seed: u64, value: f32) -> WorldConfig {
         WorldConfig {
             space: Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()),
+            fields: vec![scalar_field("energy")],
+            propagators: vec![Box::new(ConstPropagator::new("const", FieldId(0), value))],
+            dt: 0.1,
+            seed,
+            ring_buffer_size: 8,
+            max_ingress_queue: 1024,
+            tick_rate_hz: None,
+            backoff: BackoffConfig::default(),
+        }
+    }
+
+    fn make_grid_config(seed: u64, value: f32) -> WorldConfig {
+        WorldConfig {
+            space: Box::new(Square4::new(4, 4, EdgeBehavior::Absorb).unwrap()),
             fields: vec![scalar_field("energy")],
             propagators: vec![Box::new(ConstPropagator::new("const", FieldId(0), value))],
             dt: 0.1,
@@ -688,6 +707,40 @@ mod tests {
         assert!(result.is_err());
 
         // Worlds must still be at tick 0.
+        assert_eq!(engine.world_tick(0), Some(TickId(0)));
+        assert_eq!(engine.world_tick(1), Some(TickId(0)));
+    }
+
+    #[test]
+    fn step_and_observe_agent_relative_plan_does_not_step() {
+        let spec = ObsSpec {
+            entries: vec![ObsEntry {
+                field_id: FieldId(0),
+                region: ObsRegion::AgentRect {
+                    half_extent: smallvec::smallvec![1, 1],
+                },
+                pool: None,
+                transform: ObsTransform::Identity,
+                dtype: ObsDtype::F32,
+            }],
+        };
+        let configs = vec![make_grid_config(0, 1.0), make_grid_config(1, 1.0)];
+        let mut engine = BatchedEngine::new(configs, Some(&spec)).unwrap();
+        let n = engine.num_worlds();
+        let mut output = vec![0.0f32; n * engine.obs_output_len()];
+        let mut mask = vec![0u8; n * engine.obs_mask_len()];
+
+        let result = engine.step_and_observe(&[vec![], vec![]], &mut output, &mut mask);
+        match result {
+            Err(BatchError::InvalidArgument { reason }) => {
+                assert!(
+                    reason.contains("AgentDisk/AgentRect"),
+                    "unexpected reason: {reason}"
+                );
+            }
+            _ => panic!("expected InvalidArgument for agent-relative plan"),
+        }
+
         assert_eq!(engine.world_tick(0), Some(TickId(0)));
         assert_eq!(engine.world_tick(1), Some(TickId(0)));
     }

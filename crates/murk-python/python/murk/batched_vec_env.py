@@ -172,6 +172,8 @@ class BatchedVecEnv:
             for i in range(self.num_envs):
                 if needs_reset[i]:
                     self._patch_reset_observation(i, obs[i])
+                    # Metadata must match the reset-state observation we return.
+                    self._tick_ids[i] = 0
 
         info_dict: dict[str, Any] = {
             "final_observation": final_observations,

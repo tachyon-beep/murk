@@ -13,6 +13,28 @@ use crate::error::ReplayError;
 use crate::types::*;
 use crate::{FORMAT_VERSION, MAGIC, MAX_BLOB_LEN, MAX_COMMANDS_PER_FRAME, MAX_STRING_LEN};
 
+fn checked_blob_len(len: usize, what: &str) -> Result<u32, ReplayError> {
+    if len > MAX_BLOB_LEN {
+        return Err(ReplayError::DataTooLarge {
+            detail: format!("{what} length {len} exceeds limit {MAX_BLOB_LEN}"),
+        });
+    }
+    u32::try_from(len).map_err(|_| ReplayError::DataTooLarge {
+        detail: format!("{what} length {len} exceeds u32::MAX"),
+    })
+}
+
+fn checked_command_count(len: usize) -> Result<u32, ReplayError> {
+    if len > MAX_COMMANDS_PER_FRAME {
+        return Err(ReplayError::DataTooLarge {
+            detail: format!("command count {len} exceeds limit {MAX_COMMANDS_PER_FRAME}"),
+        });
+    }
+    u32::try_from(len).map_err(|_| ReplayError::DataTooLarge {
+        detail: format!("command count {len} exceeds u32::MAX"),
+    })
+}
+
 // ── Primitive writers ───────────────────────────────────────────
 
 /// Write a single byte.
@@ -63,9 +85,7 @@ pub fn write_length_prefixed_str(w: &mut dyn Write, s: &str) -> Result<(), Repla
 
 /// Write a length-prefixed byte array (u32 length + bytes).
 pub fn write_length_prefixed_bytes(w: &mut dyn Write, b: &[u8]) -> Result<(), ReplayError> {
-    let len = u32::try_from(b.len()).map_err(|_| ReplayError::DataTooLarge {
-        detail: format!("byte array length {} exceeds u32::MAX", b.len()),
-    })?;
+    let len = checked_blob_len(b.len(), "byte array")?;
     write_u32_le(w, len)?;
     w.write_all(b)?;
     Ok(())
@@ -214,10 +234,7 @@ pub fn decode_header(r: &mut dyn Read) -> Result<(BuildMetadata, InitDescriptor)
 /// Encode a single replay frame.
 pub fn encode_frame(w: &mut dyn Write, frame: &Frame) -> Result<(), ReplayError> {
     write_u64_le(w, frame.tick_id)?;
-    let command_count =
-        u32::try_from(frame.commands.len()).map_err(|_| ReplayError::DataTooLarge {
-            detail: format!("command count {} exceeds u32::MAX", frame.commands.len()),
-        })?;
+    let command_count = checked_command_count(frame.commands.len())?;
     write_u32_le(w, command_count)?;
 
     for cmd in &frame.commands {
@@ -1231,6 +1248,30 @@ mod tests {
                 assert!(detail.contains("exceeds limit"), "wrong detail: {detail}");
             }
             other => panic!("expected MalformedFrame, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn encode_rejects_oversized_blob_length() {
+        let result = checked_blob_len(crate::MAX_BLOB_LEN + 1, "byte array");
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ReplayError::DataTooLarge { detail } => {
+                assert!(detail.contains("exceeds limit"), "wrong detail: {detail}");
+            }
+            other => panic!("expected DataTooLarge, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn encode_rejects_oversized_command_count() {
+        let result = checked_command_count(crate::MAX_COMMANDS_PER_FRAME + 1);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ReplayError::DataTooLarge { detail } => {
+                assert!(detail.contains("exceeds limit"), "wrong detail: {detail}");
+            }
+            other => panic!("expected DataTooLarge, got {other:?}"),
         }
     }
 

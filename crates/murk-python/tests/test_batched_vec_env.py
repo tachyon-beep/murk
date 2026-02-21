@@ -250,6 +250,27 @@ class TestBatchedVecEnv:
 
         env.close()
 
+    def test_auto_reset_tick_ids_match_reset_observation(self):
+        """info['tick_ids'] reflects reset-state ticks after auto-reset."""
+
+        class TerminatingEnv(BatchedVecEnv):
+            def _check_terminated(self, obs, tick_ids):
+                # Terminate immediately so every world auto-resets this step.
+                return tick_ids >= 1
+
+        env = TerminatingEnv(
+            config_factory=lambda i: make_config(value=7.0, seed=i),
+            obs_entries=[ObsEntry(0)],
+            num_envs=2,
+        )
+        env.reset(seed=0)
+
+        _, _, terminated, _, infos = env.step(np.zeros(2))
+        assert terminated.all()
+        np.testing.assert_array_equal(infos["tick_ids"], np.array([0, 0], dtype=np.uint64))
+
+        env.close()
+
     def test_performance_vs_sequential(self):
         """BatchedVecEnv should be faster than sequential for N>=8."""
         n_envs = 8
