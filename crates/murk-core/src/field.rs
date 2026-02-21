@@ -149,6 +149,45 @@ pub struct FieldDef {
     pub boundary_behavior: BoundaryBehavior,
 }
 
+impl FieldDef {
+    /// Validate this field definition for structural correctness.
+    ///
+    /// Returns `Ok(())` if valid, or an error description if any invariant
+    /// is violated. Checks:
+    /// - `Vector { dims: 0 }` is rejected (zero components is meaningless).
+    /// - `Categorical { n_values: 0 }` is rejected (zero categories is meaningless).
+    /// - If `bounds` is `Some((min, max))`, requires `min <= max` and both finite.
+    pub fn validate(&self) -> Result<(), String> {
+        match self.field_type {
+            FieldType::Vector { dims: 0 } => {
+                return Err(format!("field '{}': Vector dims must be > 0", self.name));
+            }
+            FieldType::Categorical { n_values: 0 } => {
+                return Err(format!(
+                    "field '{}': Categorical n_values must be > 0",
+                    self.name
+                ));
+            }
+            _ => {}
+        }
+        if let Some((min, max)) = self.bounds {
+            if !min.is_finite() || !max.is_finite() {
+                return Err(format!(
+                    "field '{}': bounds must be finite, got ({}, {})",
+                    self.name, min, max
+                ));
+            }
+            if min > max {
+                return Err(format!(
+                    "field '{}': bounds min ({}) must be <= max ({})",
+                    self.name, min, max
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
 /// A set of field IDs implemented as a dynamically-sized bitset.
 ///
 /// Used by propagators to declare which fields they read and write,
@@ -215,6 +254,7 @@ impl FieldSet {
     /// assert!(u.contains(FieldId(1)));
     /// assert!(u.contains(FieldId(2)));
     /// ```
+    #[must_use]
     pub fn union(&self, other: &Self) -> Self {
         let max_len = self.bits.len().max(other.bits.len());
         let mut bits = Vec::with_capacity(max_len);
@@ -239,6 +279,7 @@ impl FieldSet {
     /// assert_eq!(inter.len(), 1);
     /// assert!(inter.contains(FieldId(1)));
     /// ```
+    #[must_use]
     pub fn intersection(&self, other: &Self) -> Self {
         let min_len = self.bits.len().min(other.bits.len());
         let mut bits = Vec::with_capacity(min_len);
@@ -266,6 +307,7 @@ impl FieldSet {
     /// assert!(!diff.contains(FieldId(1)));
     /// assert!(diff.contains(FieldId(2)));
     /// ```
+    #[must_use]
     pub fn difference(&self, other: &Self) -> Self {
         let mut bits = Vec::with_capacity(self.bits.len());
         for i in 0..self.bits.len() {
@@ -279,6 +321,7 @@ impl FieldSet {
     }
 
     /// Check whether `self` is a subset of `other`.
+    #[must_use]
     pub fn is_subset(&self, other: &Self) -> bool {
         for i in 0..self.bits.len() {
             let b = other.bits.get(i).copied().unwrap_or(0);
@@ -290,11 +333,13 @@ impl FieldSet {
     }
 
     /// Returns `true` if the set contains no fields.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.bits.iter().all(|&w| w == 0)
     }
 
     /// Returns the number of fields in the set.
+    #[must_use]
     pub fn len(&self) -> usize {
         self.bits.iter().map(|w| w.count_ones() as usize).sum()
     }

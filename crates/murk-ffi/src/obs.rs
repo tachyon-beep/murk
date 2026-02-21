@@ -3,7 +3,7 @@
 //! An [`ObsPlanCache`] is compiled from an [`ObsSpec`] against a world's space,
 //! then executed to fill caller-allocated observation buffers.
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use murk_core::id::FieldId;
 use murk_core::Coord;
@@ -18,7 +18,100 @@ use crate::handle::HandleTable;
 use crate::status::MurkStatus;
 use crate::world::worlds;
 
-static OBS_PLANS: Mutex<HandleTable<ObsPlanState>> = Mutex::new(HandleTable::new());
+// Compile-time layout assertions for ABI stability.
+const _: () = assert!(std::mem::align_of::<MurkObsEntry>() == 4);
+const _: () = assert!(std::mem::align_of::<MurkObsResult>() == 8);
+const _: () = assert!(std::mem::size_of::<MurkObsResult>() == 16);
+
+type ObsPlanArc = Arc<Mutex<ObsPlanState>>;
+
+static OBS_PLANS: Mutex<HandleTable<ObsPlanArc>> = Mutex::new(HandleTable::new());
+
+/// Clone the Arc for a plan handle, briefly locking the global table.
+///
+/// Returns `None` if the handle is invalid or the mutex is poisoned.
+fn get_obs_plan(handle: u64) -> Option<ObsPlanArc> {
+    OBS_PLANS.lock().ok()?.get(handle).cloned()
+}
+
+/// Convert a C `MurkObsEntry` to a Rust `ObsEntry`.
+/// Returns `None` on invalid parameters.
+///
+/// Shared by both `obs.rs` (single-world obs plans) and `batched.rs`
+/// (batched engine obs specs) to avoid divergence.
+pub(crate) fn convert_obs_entry(e: &MurkObsEntry) -> Option<ObsEntry> {
+    let region = match e.region_type {
+        0 => ObsRegion::Fixed(RegionSpec::All),
+        5 => {
+            if e.n_region_params < 1 {
+                return None;
+            }
+            if e.region_params[0] < 0 {
+                return None;
+            }
+            ObsRegion::AgentDisk {
+                radius: e.region_params[0] as u32,
+            }
+        }
+        6 => {
+            let n = e.n_region_params as usize;
+            if n == 0 || n > 8 {
+                return None;
+            }
+            if e.region_params[..n].iter().any(|&v| v < 0) {
+                return None;
+            }
+            let half_extent: SmallVec<[u32; 4]> =
+                e.region_params[..n].iter().map(|&v| v as u32).collect();
+            ObsRegion::AgentRect { half_extent }
+        }
+        _ => return None,
+    };
+
+    let transform = match e.transform_type {
+        0 => ObsTransform::Identity,
+        1 => ObsTransform::Normalize {
+            min: e.normalize_min as f64,
+            max: e.normalize_max as f64,
+        },
+        _ => return None,
+    };
+
+    let dtype = match e.dtype {
+        0 => ObsDtype::F32,
+        _ => return None,
+    };
+
+    let pool = match e.pool_kernel {
+        0 => None,
+        k @ 1..=4 => {
+            let kernel = match k {
+                1 => PoolKernel::Mean,
+                2 => PoolKernel::Max,
+                3 => PoolKernel::Min,
+                4 => PoolKernel::Sum,
+                _ => unreachable!(),
+            };
+            if e.pool_kernel_size <= 0 || e.pool_stride <= 0 {
+                return None;
+            }
+            Some(PoolConfig {
+                kernel,
+                kernel_size: e.pool_kernel_size as usize,
+                stride: e.pool_stride as usize,
+            })
+        }
+        _ => return None,
+    };
+
+    Some(ObsEntry {
+        field_id: FieldId(e.field_id),
+        region,
+        pool,
+        transform,
+        dtype,
+    })
+}
 
 struct ObsPlanState {
     cache: ObsPlanCache,
@@ -96,72 +189,13 @@ pub extern "C" fn murk_obsplan_compile(
     // SAFETY: entries points to n_entries valid MurkObsEntry structs.
     let entry_slice = unsafe { std::slice::from_raw_parts(entries, n_entries) };
 
-    // Convert C entries to Rust ObsSpec.
+    // Convert C entries to Rust ObsSpec using shared conversion function.
     let mut obs_entries = Vec::with_capacity(n_entries);
     for e in entry_slice {
-        let region = match e.region_type {
-            0 => ObsRegion::Fixed(RegionSpec::All),
-            5 => {
-                // AgentDisk: radius in region_params[0].
-                if e.n_region_params < 1 {
-                    return MurkStatus::InvalidArgument as i32;
-                }
-                ObsRegion::AgentDisk {
-                    radius: e.region_params[0] as u32,
-                }
-            }
-            6 => {
-                // AgentRect: half-extents in region_params[0..n].
-                let n = e.n_region_params as usize;
-                if n == 0 || n > 8 {
-                    return MurkStatus::InvalidArgument as i32;
-                }
-                let half_extent: SmallVec<[u32; 4]> =
-                    e.region_params[..n].iter().map(|&v| v as u32).collect();
-                ObsRegion::AgentRect { half_extent }
-            }
-            _ => return MurkStatus::InvalidArgument as i32,
-        };
-
-        let transform = match e.transform_type {
-            0 => ObsTransform::Identity,
-            1 => ObsTransform::Normalize {
-                min: e.normalize_min as f64,
-                max: e.normalize_max as f64,
-            },
-            _ => return MurkStatus::InvalidArgument as i32,
-        };
-        let dtype = match e.dtype {
-            0 => ObsDtype::F32,
-            _ => return MurkStatus::InvalidArgument as i32,
-        };
-
-        let pool = match e.pool_kernel {
-            0 => None,
-            k @ 1..=4 => {
-                let kernel = match k {
-                    1 => PoolKernel::Mean,
-                    2 => PoolKernel::Max,
-                    3 => PoolKernel::Min,
-                    4 => PoolKernel::Sum,
-                    _ => unreachable!(),
-                };
-                Some(PoolConfig {
-                    kernel,
-                    kernel_size: e.pool_kernel_size as usize,
-                    stride: e.pool_stride as usize,
-                })
-            }
-            _ => return MurkStatus::InvalidArgument as i32,
-        };
-
-        obs_entries.push(ObsEntry {
-            field_id: FieldId(e.field_id),
-            region,
-            pool,
-            transform,
-            dtype,
-        });
+        match convert_obs_entry(e) {
+            Some(entry) => obs_entries.push(entry),
+            None => return MurkStatus::InvalidArgument as i32,
+        }
     }
     let spec = ObsSpec {
         entries: obs_entries,
@@ -169,13 +203,13 @@ pub extern "C" fn murk_obsplan_compile(
 
     // Get the space from the world to trigger initial compilation.
     let world_arc = {
-        let w_table = worlds().lock().unwrap();
+        let w_table = ffi_lock!(worlds());
         match w_table.get(world_handle).cloned() {
             Some(arc) => arc,
             None => return MurkStatus::InvalidHandle as i32,
         }
     };
-    let world = world_arc.lock().unwrap();
+    let world = ffi_lock!(world_arc);
 
     let mut cache = ObsPlanCache::new(spec);
     // Compile eagerly so we detect errors now rather than at execute time.
@@ -184,8 +218,8 @@ pub extern "C" fn murk_obsplan_compile(
     }
     drop(world);
 
-    let state = ObsPlanState { cache };
-    let handle = OBS_PLANS.lock().unwrap().insert(state);
+    let state = Arc::new(Mutex::new(ObsPlanState { cache }));
+    let handle = ffi_lock!(OBS_PLANS).insert(state);
     unsafe { *plan_out = handle };
     MurkStatus::Ok as i32
 }
@@ -209,11 +243,12 @@ pub extern "C" fn murk_obsplan_execute(
         return MurkStatus::InvalidArgument as i32;
     }
 
-    let mut plans = OBS_PLANS.lock().unwrap();
-    let plan_state = match plans.get_mut(plan_handle) {
-        Some(s) => s,
+    // Acquire per-plan Arc briefly, then drop global table lock.
+    let plan_arc = match get_obs_plan(plan_handle) {
+        Some(arc) => arc,
         None => return MurkStatus::InvalidHandle as i32,
     };
+    let mut plan_state = ffi_lock!(plan_arc);
 
     // Check buffer sizes.
     let expected_out = plan_state.cache.output_len().unwrap_or(0);
@@ -229,14 +264,16 @@ pub extern "C" fn murk_obsplan_execute(
     let out_slice = unsafe { std::slice::from_raw_parts_mut(output, output_len) };
     let mask_slice = unsafe { std::slice::from_raw_parts_mut(mask, mask_len) };
 
+    // Acquire per-world Arc briefly, then drop global table lock.
+    // Lock ordering: no global table locks are held at this point.
     let world_arc = {
-        let w_table = worlds().lock().unwrap();
+        let w_table = ffi_lock!(worlds());
         match w_table.get(world_handle).cloned() {
             Some(arc) => arc,
             None => return MurkStatus::InvalidHandle as i32,
         }
     };
-    let world = world_arc.lock().unwrap();
+    let world = ffi_lock!(world_arc);
 
     let snap = world.snapshot();
 
@@ -295,24 +332,27 @@ pub extern "C" fn murk_obsplan_execute_agents(
         .map(|chunk| chunk.iter().copied().collect())
         .collect();
 
-    let mut plans = OBS_PLANS.lock().unwrap();
-    let plan_state = match plans.get_mut(plan_handle) {
-        Some(s) => s,
+    // Acquire per-plan Arc briefly, then drop global table lock.
+    let plan_arc = match get_obs_plan(plan_handle) {
+        Some(arc) => arc,
         None => return MurkStatus::InvalidHandle as i32,
     };
+    let mut plan_state = ffi_lock!(plan_arc);
 
     // SAFETY: output/mask point to output_len/mask_len valid elements.
     let out_slice = unsafe { std::slice::from_raw_parts_mut(output, output_len) };
     let mask_slice = unsafe { std::slice::from_raw_parts_mut(mask, mask_len) };
 
+    // Acquire per-world Arc briefly, then drop global table lock.
+    // Lock ordering: no global table locks are held at this point.
     let world_arc = {
-        let w_table = worlds().lock().unwrap();
+        let w_table = ffi_lock!(worlds());
         match w_table.get(world_handle).cloned() {
             Some(arc) => arc,
             None => return MurkStatus::InvalidHandle as i32,
         }
     };
-    let world = world_arc.lock().unwrap();
+    let world = ffi_lock!(world_arc);
     let snap = world.snapshot();
 
     match plan_state.cache.execute_agents(
@@ -344,7 +384,7 @@ pub extern "C" fn murk_obsplan_execute_agents(
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_obsplan_destroy(plan_handle: u64) -> i32 {
-    match OBS_PLANS.lock().unwrap().remove(plan_handle) {
+    match ffi_lock!(OBS_PLANS).remove(plan_handle) {
         Some(_) => MurkStatus::Ok as i32,
         None => MurkStatus::InvalidHandle as i32,
     }
@@ -352,28 +392,32 @@ pub extern "C" fn murk_obsplan_destroy(plan_handle: u64) -> i32 {
 
 /// Query the output length (in f32 elements) of a compiled plan.
 ///
-/// Returns -1 if the handle is invalid.
+/// Returns -1 if the handle is invalid or mutex is poisoned.
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_obsplan_output_len(plan_handle: u64) -> i64 {
-    let plans = OBS_PLANS.lock().unwrap();
-    match plans.get(plan_handle) {
-        Some(s) => s.cache.output_len().map_or(-1, |l| l as i64),
-        None => -1,
-    }
+    get_obs_plan(plan_handle)
+        .and_then(|arc| {
+            arc.lock()
+                .ok()
+                .and_then(|s| s.cache.output_len().map(|l| l as i64))
+        })
+        .unwrap_or(-1)
 }
 
 /// Query the mask length (in bytes) of a compiled plan.
 ///
-/// Returns -1 if the handle is invalid.
+/// Returns -1 if the handle is invalid or mutex is poisoned.
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_obsplan_mask_len(plan_handle: u64) -> i64 {
-    let plans = OBS_PLANS.lock().unwrap();
-    match plans.get(plan_handle) {
-        Some(s) => s.cache.mask_len().map_or(-1, |l| l as i64),
-        None => -1,
-    }
+    get_obs_plan(plan_handle)
+        .and_then(|arc| {
+            arc.lock()
+                .ok()
+                .and_then(|s| s.cache.mask_len().map(|l| l as i64))
+        })
+        .unwrap_or(-1)
 }
 
 #[cfg(test)]

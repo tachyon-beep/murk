@@ -159,6 +159,12 @@ impl Space for Square8 {
     fn instance_id(&self) -> SpaceInstanceId {
         self.instance_id
     }
+
+    fn topology_eq(&self, other: &dyn Space) -> bool {
+        (other as &dyn std::any::Any)
+            .downcast_ref::<Self>()
+            .is_some_and(|o| self.rows == o.rows && self.cols == o.cols && self.edge == o.edge)
+    }
 }
 
 #[cfg(test)]
@@ -234,7 +240,7 @@ mod tests {
     fn compile_region_all() {
         let s = Square8::new(5, 5, EdgeBehavior::Absorb).unwrap();
         let plan = s.compile_region(&RegionSpec::All).unwrap();
-        assert_eq!(plan.cell_count, 25);
+        assert_eq!(plan.cell_count(), 25);
         assert_eq!(plan.valid_ratio(), 1.0);
     }
 
@@ -249,7 +255,7 @@ mod tests {
             })
             .unwrap();
         // Chebyshev ball of radius 2: 5×5 = 25 cells
-        assert_eq!(plan.cell_count, 25);
+        assert_eq!(plan.cell_count(), 25);
     }
 
     #[test]
@@ -261,7 +267,7 @@ mod tests {
                 max: c(4, 6),
             })
             .unwrap();
-        assert_eq!(plan.cell_count, 12); // 3 rows * 4 cols
+        assert_eq!(plan.cell_count(), 12); // 3 rows * 4 cols
     }
 
     // ── Constructor tests ───────────────────────────────────────

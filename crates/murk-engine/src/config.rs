@@ -96,7 +96,7 @@ impl AsyncConfig {
 // ── ConfigError ────────────────────────────────────────────────────
 
 /// Errors detected during [`WorldConfig::validate()`].
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum ConfigError {
     /// Propagator pipeline validation failed.
     Pipeline(PipelineError),
@@ -118,6 +118,23 @@ pub enum ConfigError {
         /// The invalid value.
         value: f64,
     },
+    /// BackoffConfig invariant violated.
+    InvalidBackoff {
+        /// Description of which invariant was violated.
+        reason: String,
+    },
+    /// Cell count or field count exceeds `u32::MAX`.
+    CellCountOverflow {
+        /// The value that overflowed.
+        value: usize,
+    },
+    /// A field definition failed validation.
+    InvalidField {
+        /// Description of the validation failure.
+        reason: String,
+    },
+    /// Engine could not be recovered from tick thread (e.g. thread panicked).
+    EngineRecoveryFailed,
 }
 
 impl fmt::Display for ConfigError {
@@ -133,6 +150,18 @@ impl fmt::Display for ConfigError {
             Self::IngressQueueZero => write!(f, "max_ingress_queue must be at least 1"),
             Self::InvalidTickRate { value } => {
                 write!(f, "tick_rate_hz must be finite and positive, got {value}")
+            }
+            Self::InvalidBackoff { reason } => {
+                write!(f, "invalid backoff config: {reason}")
+            }
+            Self::CellCountOverflow { value } => {
+                write!(f, "cell count {value} exceeds u32::MAX")
+            }
+            Self::InvalidField { reason } => {
+                write!(f, "invalid field: {reason}")
+            }
+            Self::EngineRecoveryFailed => {
+                write!(f, "engine could not be recovered from tick thread")
             }
         }
     }
@@ -202,6 +231,23 @@ impl WorldConfig {
         if self.fields.is_empty() {
             return Err(ConfigError::NoFields);
         }
+        // 2a. Each field must pass structural validation.
+        for field in &self.fields {
+            field
+                .validate()
+                .map_err(|reason| ConfigError::InvalidField { reason })?;
+        }
+        // 2b. Cell count must fit in u32 (arena uses u32 internally).
+        let cell_count = self.space.cell_count();
+        if u32::try_from(cell_count).is_err() {
+            return Err(ConfigError::CellCountOverflow { value: cell_count });
+        }
+        // 2c. Field count must fit in u32 (FieldId is u32).
+        if u32::try_from(self.fields.len()).is_err() {
+            return Err(ConfigError::CellCountOverflow {
+                value: self.fields.len(),
+            });
+        }
         // 3. Ring buffer >= 2.
         if self.ring_buffer_size < 2 {
             return Err(ConfigError::RingBufferTooSmall {
@@ -218,16 +264,60 @@ impl WorldConfig {
                 return Err(ConfigError::InvalidTickRate { value: hz });
             }
         }
-        // 6. Pipeline validation (delegates to murk-propagator).
+        // 6. BackoffConfig invariants.
+        let b = &self.backoff;
+        if b.initial_max_skew > b.max_skew_cap {
+            return Err(ConfigError::InvalidBackoff {
+                reason: format!(
+                    "initial_max_skew ({}) exceeds max_skew_cap ({})",
+                    b.initial_max_skew, b.max_skew_cap,
+                ),
+            });
+        }
+        if !b.backoff_factor.is_finite() || b.backoff_factor < 1.0 {
+            return Err(ConfigError::InvalidBackoff {
+                reason: format!(
+                    "backoff_factor must be finite and >= 1.0, got {}",
+                    b.backoff_factor,
+                ),
+            });
+        }
+        if !b.rejection_rate_threshold.is_finite()
+            || b.rejection_rate_threshold < 0.0
+            || b.rejection_rate_threshold > 1.0
+        {
+            return Err(ConfigError::InvalidBackoff {
+                reason: format!(
+                    "rejection_rate_threshold must be in [0.0, 1.0], got {}",
+                    b.rejection_rate_threshold,
+                ),
+            });
+        }
+        if b.decay_rate == 0 {
+            return Err(ConfigError::InvalidBackoff {
+                reason: "decay_rate must be at least 1".to_string(),
+            });
+        }
+
+        // 7. Pipeline validation (delegates to murk-propagator).
+        //    The plan is intentionally discarded here — the world constructor
+        //    calls validate_pipeline() again to obtain it.
         let defined = self.defined_field_set();
-        validate_pipeline(&self.propagators, &defined, self.dt)?;
+        let _ = validate_pipeline(&self.propagators, &defined, self.dt)?;
 
         Ok(())
     }
 
     /// Build a [`FieldSet`] from the configured field definitions.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the number of fields exceeds `u32::MAX`. This is
+    /// unreachable in practice since `validate()` is called first.
     pub(crate) fn defined_field_set(&self) -> FieldSet {
-        (0..self.fields.len()).map(|i| FieldId(i as u32)).collect()
+        (0..self.fields.len())
+            .map(|i| FieldId(u32::try_from(i).expect("field count validated")))
+            .collect()
     }
 }
 
@@ -384,6 +474,11 @@ mod tests {
             fn instance_id(&self) -> murk_core::SpaceInstanceId {
                 self.0
             }
+            fn topology_eq(&self, other: &dyn Space) -> bool {
+                (other as &dyn std::any::Any)
+                    .downcast_ref::<Self>()
+                    .is_some()
+            }
         }
 
         let mut cfg = valid_config();
@@ -430,5 +525,71 @@ mod tests {
             (2..=16).contains(&count),
             "auto count {count} out of [2,16]"
         );
+    }
+
+    // ── BackoffConfig validation ─────────────────────────────
+
+    #[test]
+    fn validate_backoff_initial_exceeds_cap_fails() {
+        let mut cfg = valid_config();
+        cfg.backoff.initial_max_skew = 100;
+        cfg.backoff.max_skew_cap = 5;
+        match cfg.validate() {
+            Err(ConfigError::InvalidBackoff { .. }) => {}
+            other => panic!("expected InvalidBackoff, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_backoff_nan_factor_fails() {
+        let mut cfg = valid_config();
+        cfg.backoff.backoff_factor = f64::NAN;
+        match cfg.validate() {
+            Err(ConfigError::InvalidBackoff { .. }) => {}
+            other => panic!("expected InvalidBackoff, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_backoff_factor_below_one_fails() {
+        let mut cfg = valid_config();
+        cfg.backoff.backoff_factor = 0.5;
+        match cfg.validate() {
+            Err(ConfigError::InvalidBackoff { .. }) => {}
+            other => panic!("expected InvalidBackoff, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_backoff_threshold_out_of_range_fails() {
+        let mut cfg = valid_config();
+        cfg.backoff.rejection_rate_threshold = 1.5;
+        match cfg.validate() {
+            Err(ConfigError::InvalidBackoff { .. }) => {}
+            other => panic!("expected InvalidBackoff, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_backoff_zero_decay_rate_fails() {
+        let mut cfg = valid_config();
+        cfg.backoff.decay_rate = 0;
+        match cfg.validate() {
+            Err(ConfigError::InvalidBackoff { .. }) => {}
+            other => panic!("expected InvalidBackoff, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_valid_backoff_succeeds() {
+        let mut cfg = valid_config();
+        cfg.backoff = BackoffConfig {
+            initial_max_skew: 5,
+            max_skew_cap: 10,
+            backoff_factor: 1.5,
+            decay_rate: 60,
+            rejection_rate_threshold: 0.20,
+        };
+        assert!(cfg.validate().is_ok());
     }
 }

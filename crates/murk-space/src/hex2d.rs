@@ -147,14 +147,25 @@ impl Hex2D {
     }
 
     /// Compile a hex disk region via direct enumeration.
-    fn compile_hex_disk(&self, center_q: i32, center_r: i32, radius: u32) -> RegionPlan {
+    fn compile_hex_disk(
+        &self,
+        center_q: i32,
+        center_r: i32,
+        radius: u32,
+    ) -> Result<RegionPlan, SpaceError> {
         // Clamp effective radius to grid bounds to avoid overflow.
         // No cell can be further than (rows + cols) from center.
         let max_useful = (self.rows as u64 + self.cols as u64).min(i32::MAX as u64) as u32;
         let eff_radius = radius.min(max_useful);
         let r = eff_radius as i32;
         let side = 2i64 * r as i64 + 1;
-        let bounding_size = (side * side) as usize;
+        let bounding_size = side
+            .checked_mul(side)
+            .ok_or_else(|| SpaceError::InvalidRegion {
+                reason: format!(
+                    "hex disk bounding area overflow: side={side} exceeds i64 when squared"
+                ),
+            })? as usize;
         let mut valid_mask = vec![0u8; bounding_size];
         let mut coords = Vec::new();
         let mut tensor_indices = Vec::new();
@@ -187,15 +198,13 @@ impl Hex2D {
             (ar, aq).cmp(&(br, bq))
         });
         let (coords, tensor_indices): (Vec<_>, Vec<_>) = pairs.into_iter().unzip();
-        let cell_count = coords.len();
 
-        RegionPlan {
-            cell_count,
+        Ok(RegionPlan {
             coords,
             tensor_indices,
             valid_mask,
             bounding_shape: BoundingShape::Rect(vec![side as usize, side as usize]),
-        }
+        })
     }
 }
 
@@ -229,7 +238,6 @@ impl Space for Hex2D {
                 let tensor_indices: Vec<usize> = (0..cell_count).collect();
                 let valid_mask = vec![1u8; cell_count];
                 Ok(RegionPlan {
-                    cell_count,
                     coords,
                     tensor_indices,
                     valid_mask,
@@ -242,12 +250,12 @@ impl Space for Hex2D {
 
             RegionSpec::Disk { center, radius } => {
                 let (cq, cr) = self.check_bounds(center)?;
-                Ok(self.compile_hex_disk(cq, cr, *radius))
+                self.compile_hex_disk(cq, cr, *radius)
             }
 
             RegionSpec::Neighbours { center, depth } => {
                 let (cq, cr) = self.check_bounds(center)?;
-                Ok(self.compile_hex_disk(cq, cr, *depth))
+                self.compile_hex_disk(cq, cr, *depth)
             }
 
             RegionSpec::Rect { min, max } => {
@@ -273,7 +281,6 @@ impl Space for Hex2D {
                 let shape_rows = (r_hi - r_lo + 1) as usize;
                 let shape_cols = (q_hi - q_lo + 1) as usize;
                 Ok(RegionPlan {
-                    cell_count,
                     coords,
                     tensor_indices,
                     valid_mask,
@@ -293,7 +300,6 @@ impl Space for Hex2D {
                 let tensor_indices: Vec<usize> = (0..cell_count).collect();
                 let valid_mask = vec![1u8; cell_count];
                 Ok(RegionPlan {
-                    cell_count,
                     coords: sorted,
                     tensor_indices,
                     valid_mask,
@@ -329,6 +335,12 @@ impl Space for Hex2D {
 
     fn instance_id(&self) -> SpaceInstanceId {
         self.instance_id
+    }
+
+    fn topology_eq(&self, other: &dyn Space) -> bool {
+        (other as &dyn std::any::Any)
+            .downcast_ref::<Self>()
+            .is_some_and(|o| self.rows == o.rows && self.cols == o.cols)
     }
 }
 
@@ -426,7 +438,7 @@ mod tests {
     fn compile_region_all() {
         let s = Hex2D::new(5, 5).unwrap();
         let plan = s.compile_region(&RegionSpec::All).unwrap();
-        assert_eq!(plan.cell_count, 25);
+        assert_eq!(plan.cell_count(), 25);
         assert_eq!(plan.valid_ratio(), 1.0);
     }
 
@@ -440,7 +452,7 @@ mod tests {
             })
             .unwrap();
         // Hex disk R=1: center + 6 neighbours = 7
-        assert_eq!(plan.cell_count, 7);
+        assert_eq!(plan.cell_count(), 7);
     }
 
     #[test]
@@ -453,7 +465,7 @@ mod tests {
             })
             .unwrap();
         // Hex disk R=2: 3*4+3*2+1 = 19 cells
-        assert_eq!(plan.cell_count, 19);
+        assert_eq!(plan.cell_count(), 19);
     }
 
     #[test]
@@ -494,8 +506,8 @@ mod tests {
             })
             .unwrap();
         // Corner: many cells clipped by boundary.
-        assert!(plan.cell_count < 19);
-        assert!(plan.cell_count >= 1);
+        assert!(plan.cell_count() < 19);
+        assert!(plan.cell_count() >= 1);
     }
 
     #[test]
@@ -508,7 +520,21 @@ mod tests {
                 radius: u32::MAX,
             })
             .unwrap();
-        assert_eq!(plan.cell_count, 9);
+        assert_eq!(plan.cell_count(), 9);
+    }
+
+    #[test]
+    fn compile_hex_disk_overflow_returns_error() {
+        // Large grid where max_useful approaches i32::MAX, causing side*side to overflow i64.
+        let s = Hex2D::new(i32::MAX as u32, 1).unwrap();
+        let result = s.compile_region(&RegionSpec::Disk {
+            center: c(0, 0),
+            radius: u32::MAX,
+        });
+        assert!(
+            result.is_err(),
+            "should return error on bounding area overflow"
+        );
     }
 
     #[test]
@@ -521,7 +547,7 @@ mod tests {
             })
             .unwrap();
         // 4 cols * 4 rows = 16
-        assert_eq!(plan.cell_count, 16);
+        assert_eq!(plan.cell_count(), 16);
     }
 
     #[test]

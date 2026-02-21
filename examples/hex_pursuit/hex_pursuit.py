@@ -25,12 +25,11 @@ from murk._murk import (
     Command,
     Config,
     FieldMutability,
+    IdentityCopy,
     ObsEntry,
     ObsPlan,
-    PropagatorDef,
     RegionType,
     World,
-    WriteMode,
 )
 
 # ─── World parameters ───────────────────────────────────────────
@@ -69,14 +68,11 @@ N_EPISODES = 5
 #
 # We still need a propagator because Murk requires at least one
 # propagator to write each PerTick field (otherwise the field would
-# be zero every tick). We use WriteMode.Incremental so the previous
-# tick's values carry forward, then overwrite via commands.
+# be zero every tick). IdentityCopy carries forward the previous tick's
+# values, then commands overwrite specific cells afterwards.
 #
-
-def identity_step(reads, reads_prev, writes, tick_id, dt, cell_count):
-    """Copy previous values forward. Commands overwrite afterwards."""
-    writes[0][:] = reads_prev[0]
-    writes[1][:] = reads_prev[1]
+# Uses the native Rust IdentityCopy propagator — no GIL, no Python
+# trampoline. One instance per field.
 
 
 # ─── Hex coordinate helpers ─────────────────────────────────────
@@ -122,18 +118,9 @@ def main():
     config.set_dt(1.0)
     config.set_seed(42)
 
-    # Register a propagator that copies previous values forward.
-    # WriteMode.Full because we write every cell (identity copy).
-    prop = PropagatorDef(
-        "identity",
-        identity_step,
-        reads_previous=[PREDATOR_FIELD, PREY_FIELD],
-        writes=[
-            (PREDATOR_FIELD, WriteMode.Full),
-            (PREY_FIELD, WriteMode.Full),
-        ],
-    )
-    prop.register(config)
+    # Register native identity-copy propagators (one per field).
+    IdentityCopy(PREDATOR_FIELD).register(config)
+    IdentityCopy(PREY_FIELD).register(config)
 
     world = World(config)
 

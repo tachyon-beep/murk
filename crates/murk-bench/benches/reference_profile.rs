@@ -15,7 +15,8 @@ fn bench_tick_10k(c: &mut Criterion) {
 
     c.bench_function("tick_10k", |b| {
         b.iter(|| {
-            world.step_sync(vec![]).unwrap();
+            let result = world.step_sync(vec![]).unwrap();
+            std::hint::black_box(&result);
         });
     });
 }
@@ -29,7 +30,8 @@ fn bench_tick_100k(c: &mut Criterion) {
 
     c.bench_function("tick_100k", |b| {
         b.iter(|| {
-            world.step_sync(vec![]).unwrap();
+            let result = world.step_sync(vec![]).unwrap();
+            std::hint::black_box(&result);
         });
     });
 }
@@ -41,7 +43,8 @@ fn bench_1000_ticks_10k(c: &mut Criterion) {
             let config = reference_profile(42, ab);
             let mut world = LockstepWorld::new(config).unwrap();
             for _ in 0..1000 {
-                world.step_sync(vec![]).unwrap();
+                let result = world.step_sync(vec![]).unwrap();
+                std::hint::black_box(&result);
             }
         });
     });

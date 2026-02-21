@@ -45,7 +45,8 @@ pub struct MurkStepContext {
     /// Simulation timestep.
     pub dt: f64,
     /// Number of cells in the space.
-    pub cell_count: usize,
+    /// Fixed-width `u64` for ABI portability (not `usize`).
+    pub cell_count: u64,
 }
 
 /// C-side propagator definition with function pointers.
@@ -77,6 +78,12 @@ pub struct MurkPropagatorDef {
     pub scratch_bytes: usize,
 }
 
+// Compile-time layout assertions for ABI stability.
+// MurkWriteDecl: u32 + i32 = 8 bytes.
+const _: () = assert!(std::mem::size_of::<MurkWriteDecl>() == 8);
+// MurkStepContext: all fixed-width types (u64 cell_count, not usize).
+const _: () = assert!(std::mem::align_of::<MurkStepContext>() == 8);
+
 /// Rust-side wrapper that implements `Propagator` by delegating to C callbacks.
 pub(crate) struct CallbackPropagator {
     name: String,
@@ -88,10 +95,22 @@ pub(crate) struct CallbackPropagator {
     scratch: usize,
 }
 
-// SAFETY: The FFI contract requires user_data to be thread-safe.
-// C callers are responsible for ensuring no data races on user_data.
+// SAFETY: The FFI contract requires user_data to be transferable across threads.
+// C callers must ensure user_data remains valid on the thread where the engine runs.
 #[allow(unsafe_code)]
 unsafe impl Send for CallbackPropagator {}
+
+// NOTE: CallbackPropagator is deliberately `!Sync`.
+//
+// `Sync` would permit `&self` access (including `step(&self)`) from multiple threads
+// simultaneously. Since `user_data` is an opaque `*mut c_void` from C code, we cannot
+// guarantee it is safe for concurrent reads — most C callback state is not thread-safe.
+//
+// Currently, `LockstepWorld` wraps each world in `Mutex`, which serializes all calls
+// to `step()`. This `Mutex` is the load-bearing invariant that makes `!Sync` safe.
+// If the engine later supports parallel propagator execution (e.g. RealtimeAsync mode
+// with a thread pool), this `!Sync` will produce a compile error — which is the
+// desired outcome, forcing an explicit decision about C callback thread safety.
 
 impl murk_propagator::Propagator for CallbackPropagator {
     fn name(&self) -> &str {
@@ -125,7 +144,7 @@ impl murk_propagator::Propagator for CallbackPropagator {
             write_fn: trampoline_write,
             tick_id: ctx.tick_id().0,
             dt: ctx.dt(),
-            cell_count: ctx.space().cell_count(),
+            cell_count: ctx.space().cell_count() as u64,
         };
 
         // SAFETY: step_fn and user_data are valid per FFI contract.
@@ -153,6 +172,9 @@ unsafe extern "C" fn trampoline_read(
     out_ptr: *mut *const f32,
     out_len: *mut usize,
 ) -> i32 {
+    if opaque.is_null() || out_ptr.is_null() || out_len.is_null() {
+        return MurkStatus::InvalidArgument as i32;
+    }
     // SAFETY: opaque was set to &mut StepContextWrapper in step() above.
     let wrapper = &*(opaque as *const StepContextWrapper<'_, '_>);
     match wrapper.ctx.reads().read(FieldId(field_id)) {
@@ -172,6 +194,9 @@ unsafe extern "C" fn trampoline_read_previous(
     out_ptr: *mut *const f32,
     out_len: *mut usize,
 ) -> i32 {
+    if opaque.is_null() || out_ptr.is_null() || out_len.is_null() {
+        return MurkStatus::InvalidArgument as i32;
+    }
     // SAFETY: opaque was set to &mut StepContextWrapper in step() above.
     let wrapper = &*(opaque as *const StepContextWrapper<'_, '_>);
     match wrapper.ctx.reads_previous().read(FieldId(field_id)) {
@@ -191,6 +216,9 @@ unsafe extern "C" fn trampoline_write(
     out_ptr: *mut *mut f32,
     out_len: *mut usize,
 ) -> i32 {
+    if opaque.is_null() || out_ptr.is_null() || out_len.is_null() {
+        return MurkStatus::InvalidArgument as i32;
+    }
     // SAFETY: opaque was set to &mut StepContextWrapper in step() above.
     let wrapper = &mut *(opaque as *mut StepContextWrapper<'_, '_>);
     match wrapper.ctx.writes().write(FieldId(field_id)) {

@@ -4,7 +4,9 @@
 //! and writes smoothed values plus the heat gradient. Uses a Square4 fast path
 //! for direct index arithmetic when available.
 
+#[allow(deprecated)]
 use crate::fields::{HEAT, HEAT_GRADIENT, VELOCITY};
+use crate::grid_helpers::{neighbours_flat, resolve_axis};
 use murk_core::{FieldId, FieldSet, PropagatorError};
 use murk_propagator::context::StepContext;
 use murk_propagator::propagator::{Propagator, WriteMode};
@@ -23,42 +25,16 @@ pub struct DiffusionPropagator {
 
 impl DiffusionPropagator {
     /// Create a new diffusion propagator with the given diffusivity coefficient.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `diffusivity` is negative, NaN, or infinite.
     pub fn new(diffusivity: f64) -> Self {
+        assert!(
+            diffusivity >= 0.0 && diffusivity.is_finite(),
+            "diffusivity must be finite and >= 0, got {diffusivity}"
+        );
         Self { diffusivity }
-    }
-
-    /// Resolve a single axis value under the given edge behavior.
-    /// Returns `Some(resolved)` or `None` for Absorb out-of-bounds.
-    fn resolve_axis(val: i32, len: i32, edge: EdgeBehavior) -> Option<i32> {
-        if val >= 0 && val < len {
-            return Some(val);
-        }
-        match edge {
-            EdgeBehavior::Absorb => None,
-            EdgeBehavior::Clamp => Some(val.clamp(0, len - 1)),
-            EdgeBehavior::Wrap => Some(((val % len) + len) % len),
-        }
-    }
-
-    /// Collect the flat indices of the 4-connected neighbours for cell (r,c),
-    /// respecting the grid's edge behavior.
-    fn neighbours_flat(
-        r: i32,
-        c: i32,
-        rows: i32,
-        cols: i32,
-        edge: EdgeBehavior,
-    ) -> smallvec::SmallVec<[usize; 4]> {
-        let offsets: [(i32, i32); 4] = [(-1, 0), (1, 0), (0, -1), (0, 1)];
-        let mut result = smallvec::SmallVec::new();
-        for (dr, dc) in offsets {
-            let nr = Self::resolve_axis(r + dr, rows, edge);
-            let nc = Self::resolve_axis(c + dc, cols, edge);
-            if let (Some(nr), Some(nc)) = (nr, nc) {
-                result.push(nr as usize * cols as usize + nc as usize);
-            }
-        }
-        result
     }
 
     fn step_square4(
@@ -98,11 +74,11 @@ impl DiffusionPropagator {
         for r in 0..rows_i {
             for c in 0..cols_i {
                 let i = r as usize * cols as usize + c as usize;
-                let nbs = Self::neighbours_flat(r, c, rows_i, cols_i, edge);
+                let nbs = neighbours_flat(r, c, rows_i, cols_i, edge);
                 let count = nbs.len() as u32;
                 if count > 0 {
                     let sum: f32 = nbs.iter().map(|&ni| heat_prev[ni]).sum();
-                    let alpha = (self.diffusivity * dt * count as f64) as f32;
+                    let alpha = (self.diffusivity * dt * count as f64).min(1.0) as f32;
                     let mean = sum / count as f32;
                     heat_out[i] = (1.0 - alpha) * heat_prev[i] + alpha * mean;
                 } else {
@@ -121,13 +97,13 @@ impl DiffusionPropagator {
         for r in 0..rows_i {
             for c in 0..cols_i {
                 let i = r as usize * cols as usize + c as usize;
-                let nbs = Self::neighbours_flat(r, c, rows_i, cols_i, edge);
+                let nbs = neighbours_flat(r, c, rows_i, cols_i, edge);
                 let count = nbs.len() as u32;
                 for comp in 0..2 {
                     let idx = i * 2 + comp;
                     if count > 0 {
                         let sum: f32 = nbs.iter().map(|&ni| vel_prev[ni * 2 + comp]).sum();
-                        let alpha = (self.diffusivity * dt * count as f64) as f32;
+                        let alpha = (self.diffusivity * dt * count as f64).min(1.0) as f32;
                         let mean = sum / count as f32;
                         vel_out[idx] = (1.0 - alpha) * vel_prev[idx] + alpha * mean;
                     } else {
@@ -151,16 +127,16 @@ impl DiffusionPropagator {
             for c in 0..cols_i {
                 let i = r as usize * cols as usize + c as usize;
 
-                let h_east = Self::resolve_axis(c + 1, cols_i, edge)
+                let h_east = resolve_axis(c + 1, cols_i, edge)
                     .map(|nc| heat_prev[r as usize * cols as usize + nc as usize])
                     .unwrap_or(heat_prev[i]);
-                let h_west = Self::resolve_axis(c - 1, cols_i, edge)
+                let h_west = resolve_axis(c - 1, cols_i, edge)
                     .map(|nc| heat_prev[r as usize * cols as usize + nc as usize])
                     .unwrap_or(heat_prev[i]);
-                let h_south = Self::resolve_axis(r + 1, rows_i, edge)
+                let h_south = resolve_axis(r + 1, rows_i, edge)
                     .map(|nr| heat_prev[nr as usize * cols as usize + c as usize])
                     .unwrap_or(heat_prev[i]);
-                let h_north = Self::resolve_axis(r - 1, rows_i, edge)
+                let h_north = resolve_axis(r - 1, rows_i, edge)
                     .map(|nr| heat_prev[nr as usize * cols as usize + c as usize])
                     .unwrap_or(heat_prev[i]);
 
@@ -236,7 +212,7 @@ impl DiffusionPropagator {
             let count = nbs.len() as u32;
             if count > 0 {
                 let sum: f32 = nbs.iter().map(|&r| heat_prev[r]).sum();
-                let alpha = (self.diffusivity * dt * count as f64) as f32;
+                let alpha = (self.diffusivity * dt * count as f64).min(1.0) as f32;
                 let mean = sum / count as f32;
                 heat_new[i] = (1.0 - alpha) * heat_prev[i] + alpha * mean;
             } else {
@@ -247,7 +223,7 @@ impl DiffusionPropagator {
                 let idx = i * 2 + comp;
                 if count > 0 {
                     let sum: f32 = nbs.iter().map(|&r| vel_prev[r * 2 + comp]).sum();
-                    let alpha = (self.diffusivity * dt * count as f64) as f32;
+                    let alpha = (self.diffusivity * dt * count as f64).min(1.0) as f32;
                     let mean = sum / count as f32;
                     vel_new[idx] = (1.0 - alpha) * vel_prev[idx] + alpha * mean;
                 } else {
@@ -326,8 +302,14 @@ impl Propagator for DiffusionPropagator {
     }
 
     fn max_dt(&self) -> Option<f64> {
-        // CFL stability constraint: dt <= 1 / (4 * D)
-        Some(1.0 / (4.0 * self.diffusivity))
+        if self.diffusivity > 0.0 {
+            // CFL stability constraint: dt <= 1 / (max_degree * D)
+            // Use 12 (Fcc12) as worst-case to be safe for all space topologies.
+            // Square4=4, Hex2D=6, Fcc12=12.
+            Some(1.0 / (12.0 * self.diffusivity))
+        } else {
+            None
+        }
     }
 
     fn step(&self, ctx: &mut StepContext<'_>) -> Result<(), PropagatorError> {
@@ -346,6 +328,7 @@ impl Propagator for DiffusionPropagator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[allow(deprecated)]
     use crate::fields::{HEAT, HEAT_GRADIENT, VELOCITY};
     use murk_core::TickId;
     use murk_propagator::scratch::ScratchRegion;
@@ -475,10 +458,14 @@ mod tests {
     #[test]
     fn max_dt_constraint() {
         let prop = DiffusionPropagator::new(0.25);
-        assert_eq!(prop.max_dt(), Some(1.0)); // 1 / (4 * 0.25)
+        // 1 / (12 * 0.25) ≈ 0.333...
+        let dt = prop.max_dt().unwrap();
+        assert!((dt - 1.0 / 3.0).abs() < 1e-10);
 
         let prop2 = DiffusionPropagator::new(1.0);
-        assert_eq!(prop2.max_dt(), Some(0.25)); // 1 / (4 * 1.0)
+        // 1 / (12 * 1.0) ≈ 0.0833...
+        let dt2 = prop2.max_dt().unwrap();
+        assert!((dt2 - 1.0 / 12.0).abs() < 1e-10);
     }
 
     #[test]
@@ -732,6 +719,105 @@ mod tests {
     }
 
     #[test]
+    fn diffusion_matches_scalar_diffusion() {
+        // Prove that ScalarDiffusion produces bit-identical heat + gradient output
+        // compared to the old DiffusionPropagator on a 5x5 Absorb grid with a
+        // hot center (heat[12] = 100.0).
+        use crate::scalar_diffusion::ScalarDiffusion;
+        use murk_propagator::propagator::Propagator;
+
+        let grid = Square4::new(5, 5, EdgeBehavior::Absorb).unwrap();
+        let n = grid.cell_count();
+        let dt = 0.01;
+
+        // --- Initial field data ---
+        let mut heat = vec![0.0f32; n];
+        heat[12] = 100.0; // hot center
+
+        // --- Run old DiffusionPropagator ---
+        let old_prop = DiffusionPropagator::new(0.1);
+
+        let mut old_reader = MockFieldReader::new();
+        old_reader.set_field(HEAT, heat.clone());
+        old_reader.set_field(VELOCITY, vec![0.0; n * 2]);
+
+        let mut old_writer = MockFieldWriter::new();
+        old_writer.add_field(HEAT, n);
+        old_writer.add_field(VELOCITY, n * 2);
+        old_writer.add_field(HEAT_GRADIENT, n * 2);
+
+        let mut old_scratch = ScratchRegion::new(0);
+        let mut old_ctx = make_ctx(&old_reader, &mut old_writer, &mut old_scratch, &grid, dt);
+
+        old_prop.step(&mut old_ctx).unwrap();
+
+        let old_heat = old_writer.get_field(HEAT).unwrap().to_vec();
+        let old_grad = old_writer.get_field(HEAT_GRADIENT).unwrap().to_vec();
+
+        // --- Run new ScalarDiffusion ---
+        let new_prop = ScalarDiffusion::builder()
+            .input_field(HEAT)
+            .output_field(HEAT)
+            .coefficient(0.1)
+            .gradient_field(HEAT_GRADIENT)
+            .build()
+            .unwrap();
+
+        let mut new_reader = MockFieldReader::new();
+        new_reader.set_field(HEAT, heat);
+
+        let mut new_writer = MockFieldWriter::new();
+        new_writer.add_field(HEAT, n);
+        new_writer.add_field(HEAT_GRADIENT, n * 2);
+
+        let mut new_scratch = ScratchRegion::new(0);
+        let mut new_ctx = StepContext::new(
+            &new_reader,
+            &new_reader,
+            &mut new_writer,
+            &mut new_scratch,
+            &grid,
+            TickId(1),
+            dt,
+        );
+
+        new_prop.step(&mut new_ctx).unwrap();
+
+        let new_heat = new_writer.get_field(HEAT).unwrap();
+        let new_grad = new_writer.get_field(HEAT_GRADIENT).unwrap();
+
+        // --- Compare heat output ---
+        assert_eq!(
+            old_heat.len(),
+            new_heat.len(),
+            "heat buffer length mismatch"
+        );
+        for i in 0..old_heat.len() {
+            assert!(
+                (old_heat[i] - new_heat[i]).abs() < 1e-6,
+                "heat mismatch at cell {i}: old={}, new={}",
+                old_heat[i],
+                new_heat[i]
+            );
+        }
+
+        // --- Compare gradient output ---
+        assert_eq!(
+            old_grad.len(),
+            new_grad.len(),
+            "gradient buffer length mismatch"
+        );
+        for i in 0..old_grad.len() {
+            assert!(
+                (old_grad[i] - new_grad[i]).abs() < 1e-6,
+                "gradient mismatch at component {i}: old={}, new={}",
+                old_grad[i],
+                new_grad[i]
+            );
+        }
+    }
+
+    #[test]
     fn wrap_gradient_at_boundary() {
         // On a 4x4 Wrap grid with linear-x heat, the gradient at (0,0)
         // should wrap around to see heat at (0,3).
@@ -767,5 +853,67 @@ mod tests {
             "wrap grad_x at (0,0) should be -10, got {}",
             grad[0]
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "diffusivity must be finite")]
+    fn rejects_negative_diffusivity() {
+        DiffusionPropagator::new(-1.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "diffusivity must be finite")]
+    fn rejects_nan_diffusivity() {
+        DiffusionPropagator::new(f64::NAN);
+    }
+
+    #[test]
+    #[should_panic(expected = "diffusivity must be finite")]
+    fn rejects_infinite_diffusivity() {
+        DiffusionPropagator::new(f64::INFINITY);
+    }
+
+    #[test]
+    fn zero_diffusivity_max_dt_is_none() {
+        let prop = DiffusionPropagator::new(0.0);
+        assert!(
+            prop.max_dt().is_none(),
+            "zero diffusivity should give max_dt=None, got {:?}",
+            prop.max_dt()
+        );
+    }
+
+    #[test]
+    fn alpha_clamped_prevents_sign_inversion() {
+        // Even if dt is larger than CFL allows (simulating a bypass),
+        // alpha should be clamped so values don't go negative.
+        let grid = Square4::new(3, 3, EdgeBehavior::Absorb).unwrap();
+        let n = grid.cell_count();
+        let prop = DiffusionPropagator::new(10.0); // very high diffusivity
+
+        let mut heat = vec![0.0f32; n];
+        heat[4] = 100.0; // center of 3x3
+
+        let mut reader = MockFieldReader::new();
+        reader.set_field(HEAT, heat);
+        reader.set_field(VELOCITY, vec![0.0; n * 2]);
+
+        let mut writer = MockFieldWriter::new();
+        writer.add_field(HEAT, n);
+        writer.add_field(VELOCITY, n * 2);
+        writer.add_field(HEAT_GRADIENT, n * 2);
+
+        let mut scratch = ScratchRegion::new(0);
+        // dt=1.0 with diffusivity=10.0: alpha = 10*1*4 = 40 >> 1
+        let mut ctx = make_ctx(&reader, &mut writer, &mut scratch, &grid, 1.0);
+
+        prop.step(&mut ctx).unwrap();
+
+        let result = writer.get_field(HEAT).unwrap();
+        // With alpha clamped to 1.0, center becomes the mean of neighbours = 0.0
+        // Without clamping: (1-40)*100 + 40*0 = -3900 (catastrophic!)
+        for (i, &v) in result.iter().enumerate() {
+            assert!(v >= 0.0, "cell {i} went negative ({v}): alpha clamp failed");
+        }
     }
 }

@@ -31,3 +31,4 @@ book/build/
 
 # Agent config
 .claude/
+docs/bugs/generated/

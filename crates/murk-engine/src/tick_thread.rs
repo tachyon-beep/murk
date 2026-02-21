@@ -100,7 +100,8 @@ impl AdaptiveBackoff {
             self.ticks_since_last_rejection += 1;
             // Decay: if no rejections for `decay_rate` ticks, reset.
             if self.ticks_since_last_rejection >= self.config.decay_rate {
-                self.effective_max_skew = self.config.initial_max_skew;
+                self.effective_max_skew =
+                    self.config.initial_max_skew.min(self.config.max_skew_cap);
             }
         }
 
@@ -114,9 +115,13 @@ impl AdaptiveBackoff {
     }
 
     /// Current effective max skew tolerance.
-    #[cfg(test)]
     pub fn effective_max_skew(&self) -> u64 {
         self.effective_max_skew
+    }
+
+    /// Initial max skew from config (used as the baseline for scaling).
+    pub fn initial_max_skew(&self) -> u64 {
+        self.config.initial_max_skew
     }
 }
 
@@ -197,8 +202,9 @@ impl TickThreadState {
                     // 4. Advance global epoch.
                     self.epoch_counter.advance();
 
-                    // 5. Check for stalled workers.
-                    let had_rejection = self.check_stalled_workers();
+                    // 5. Check for stalled workers (adaptive threshold).
+                    let effective_hold_ns = self.effective_hold_ns();
+                    let had_rejection = self.check_stalled_workers(effective_hold_ns);
                     self.backoff.record_tick(had_rejection);
 
                     drop(result);
@@ -210,10 +216,12 @@ impl TickThreadState {
                 }
             }
 
-            // 6. Sleep for remaining budget.
+            // 6. Sleep for remaining budget, interruptible by shutdown.
+            // Uses park_timeout instead of thread::sleep so the shutdown
+            // path can wake us immediately via thread::unpark().
             let elapsed = tick_start.elapsed();
             if let Some(remaining) = self.tick_budget.checked_sub(elapsed) {
-                std::thread::sleep(remaining);
+                std::thread::park_timeout(remaining);
             }
         }
 
@@ -231,29 +239,37 @@ impl TickThreadState {
         }
     }
 
+    /// Compute the effective epoch-hold threshold, scaled by the adaptive
+    /// backoff ratio. At rest (no rejections), this equals `max_epoch_hold_ns`.
+    /// Under sustained rejections, it grows proportionally to `effective_max_skew`.
+    fn effective_hold_ns(&self) -> u64 {
+        let effective = self.backoff.effective_max_skew().max(1);
+        let initial = self.backoff.initial_max_skew().max(1);
+        self.max_epoch_hold_ns * effective / initial
+    }
+
     /// Check for stalled workers and force-unpin them.
     /// Returns `true` if any worker was force-unpinned.
-    fn check_stalled_workers(&self) -> bool {
+    fn check_stalled_workers(&self, effective_hold_ns: u64) -> bool {
         let now_ns = crate::epoch::monotonic_nanos();
         let mut had_rejection = false;
 
         for worker in self.worker_epochs.iter() {
-            if !worker.is_pinned() {
-                continue;
-            }
-
-            // Use pin_start_ns (set when pin() was called) to measure
-            // actual pin hold duration, not time-since-last-unpin which
-            // would include idle time between tasks.
-            let pin_start = worker.pin_start_ns();
+            // Use pin_snapshot() for a consistent (epoch, pin_start_ns) read.
+            // This avoids a TOCTOU race where a concurrent unpin/repin could
+            // produce a mismatched pair and trigger false-positive stall detection.
+            let pin_start = match worker.pin_snapshot() {
+                Some((_epoch, start_ns)) => start_ns,
+                None => continue, // not pinned
+            };
             let hold_ns = now_ns.saturating_sub(pin_start);
 
-            if hold_ns > self.max_epoch_hold_ns {
+            if hold_ns > effective_hold_ns {
                 // First: request cooperative cancellation.
                 worker.request_cancel();
 
                 // If already past the grace period, force unpin.
-                if hold_ns > self.max_epoch_hold_ns + self.cancel_grace_ns {
+                if hold_ns > effective_hold_ns + self.cancel_grace_ns {
                     worker.unpin();
                     worker.clear_cancel();
                     had_rejection = true;
@@ -359,5 +375,42 @@ mod tests {
             window.push(false);
         }
         assert!((window.rate()).abs() < 1e-10);
+    }
+
+    #[test]
+    fn backoff_output_scales_hold_threshold() {
+        // Verify that record_tick() output actually changes effective_max_skew,
+        // which in turn would scale the hold threshold via effective_hold_ns().
+        let config = BackoffConfig {
+            initial_max_skew: 2,
+            backoff_factor: 2.0,
+            max_skew_cap: 10,
+            decay_rate: 60,
+            rejection_rate_threshold: 0.20,
+        };
+        let mut backoff = AdaptiveBackoff::new(&config);
+
+        // At rest: effective = initial = 2, scale ratio = 1.0
+        assert_eq!(backoff.effective_max_skew(), 2);
+
+        // After rejection: effective should increase
+        let skew = backoff.record_tick(true);
+        assert_eq!(skew, 4); // 2 * 2.0 = 4
+                             // Scale ratio: 4/2 = 2.0 — hold threshold would double
+
+        // Another rejection: 4 * 2.0 = 8
+        let skew = backoff.record_tick(true);
+        assert_eq!(skew, 8);
+        // Scale ratio: 8/2 = 4.0 — hold threshold would quadruple
+    }
+
+    #[test]
+    fn initial_max_skew_accessor() {
+        let config = BackoffConfig {
+            initial_max_skew: 5,
+            ..BackoffConfig::default()
+        };
+        let backoff = AdaptiveBackoff::new(&config);
+        assert_eq!(backoff.initial_max_skew(), 5);
     }
 }

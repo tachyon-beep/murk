@@ -36,6 +36,18 @@ impl StaticArena {
     /// The data is zero-initialised; callers should write initial values
     /// via [`StaticArena::write_field`] before sharing.
     pub fn new(static_fields: &[(FieldId, u32)]) -> Self {
+        // Reject duplicate FieldIds — duplicates cause orphaned memory regions
+        // and metadata/storage mismatches (IndexMap::insert overwrites silently).
+        for (i, &(id, _)) in static_fields.iter().enumerate() {
+            for &(other_id, _) in &static_fields[i + 1..] {
+                assert!(
+                    id != other_id,
+                    "duplicate FieldId({}) in static_fields",
+                    id.0,
+                );
+            }
+        }
+
         let total: usize = static_fields.iter().map(|(_, len)| *len as usize).sum();
         let data = vec![0.0; total];
 
@@ -175,5 +187,24 @@ mod tests {
     fn memory_bytes_accounts_for_all_fields() {
         let arena = StaticArena::new(&[(FieldId(0), 100), (FieldId(1), 50)]);
         assert_eq!(arena.memory_bytes(), 150 * 4);
+    }
+
+    #[test]
+    #[should_panic(expected = "duplicate FieldId")]
+    fn new_rejects_duplicate_field_ids() {
+        StaticArena::new(&[(FieldId(0), 100), (FieldId(0), 50)]);
+    }
+
+    #[test]
+    #[should_panic(expected = "duplicate FieldId")]
+    fn new_rejects_non_adjacent_duplicate_field_ids() {
+        StaticArena::new(&[(FieldId(0), 10), (FieldId(1), 20), (FieldId(0), 30)]);
+    }
+
+    #[test]
+    fn new_accepts_distinct_field_ids() {
+        let arena = StaticArena::new(&[(FieldId(0), 10), (FieldId(1), 20), (FieldId(2), 30)]);
+        assert_eq!(arena.field_count(), 3);
+        assert_eq!(arena.memory_bytes(), 60 * 4);
     }
 }

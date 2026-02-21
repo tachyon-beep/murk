@@ -12,6 +12,7 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 #![forbid(unsafe_code)]
 
+pub mod batched;
 pub mod config;
 pub mod egress;
 pub mod epoch;
@@ -24,6 +25,7 @@ pub mod ring;
 pub mod tick;
 pub(crate) mod tick_thread;
 
+pub use batched::{BatchError, BatchResult, BatchedEngine};
 pub use config::{AsyncConfig, BackoffConfig, ConfigError, WorldConfig};
 pub use epoch::{EpochCounter, WorkerEpoch, EPOCH_UNPINNED};
 pub use ingress::{DrainResult, DrainedCommand, IngressQueue};

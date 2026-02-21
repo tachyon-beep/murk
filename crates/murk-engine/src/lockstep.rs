@@ -46,12 +46,11 @@ const _: () = {
 pub struct StepResult<'w> {
     /// Read-only snapshot of world state after this tick.
     pub snapshot: Snapshot<'w>,
-    /// Per-command receipts from tick execution (applied, expired, rolled back).
+    /// Per-command receipts from both submission and tick execution.
     ///
-    /// Does **not** include submission-rejected receipts (e.g. `QueueFull`).
+    /// Includes submission-rejected receipts (e.g. `QueueFull`, `TickDisabled`)
+    /// followed by tick execution receipts (applied, expired, rolled back).
     /// In lockstep mode the queue is drained every tick, so rejection is rare.
-    /// If you need submission receipts, use the lower-level
-    /// [`TickEngine`] API directly.
     pub receipts: Vec<Receipt>,
     /// Performance metrics for this tick.
     pub metrics: StepMetrics,
@@ -204,7 +203,7 @@ impl std::fmt::Debug for LockstepWorld {
 mod tests {
     use super::*;
     use murk_core::command::CommandPayload;
-    use murk_core::id::{FieldId, ParameterKey};
+    use murk_core::id::{Coord, FieldId};
     use murk_core::traits::{FieldReader, SnapshotAccess};
     use murk_core::{BoundaryBehavior, FieldDef, FieldMutability, FieldType};
     use murk_propagator::propagator::WriteMode;
@@ -339,9 +338,10 @@ mod tests {
 
     fn make_cmd(expires: u64) -> Command {
         Command {
-            payload: CommandPayload::SetParameter {
-                key: ParameterKey(0),
-                value: 0.0,
+            payload: CommandPayload::SetField {
+                coord: Coord::from_elem(0, 1),
+                field_id: FieldId(0),
+                value: 1.0,
             },
             expires_after_tick: TickId(expires),
             source_id: None,

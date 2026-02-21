@@ -42,16 +42,16 @@ real-time applications. The architecture optimises for:
 
 Three principles guide every subsystem:
 
-1. **Egress Always Returns** — observation extraction never blocks
-   indefinitely, even during tick failures or shutdown. Responses may
-   indicate staleness or degraded coverage via metadata, but always
-   return data.
-2. **Tick-Expressible Time** — all engine-internal time references that
-   affect state transitions are expressed in tick counts, never wall
+1. **Egress Always Returns** — observation extraction always returns,
+   even during tick failures or shutdown. Responses may indicate
+   staleness or degraded coverage via metadata, but the caller always
+   receives data.
+2. **Tick-Expressible Time** — the engine expresses all internal time
+   references that affect state transitions in tick counts, never wall
    clocks. This prevents replay divergence.
-3. **Asymmetric Mode Dampening** — staleness and overload are handled
-   differently in each runtime mode, because Lockstep and RealtimeAsync
-   have fundamentally different dynamics.
+3. **Asymmetric Mode Dampening** — the engine handles staleness and
+   overload differently in each runtime mode, because Lockstep and
+   RealtimeAsync have fundamentally different dynamics.
 
 ---
 
@@ -208,6 +208,30 @@ let report = world.shutdown(Duration::from_secs(5))?;
 - Epoch-based memory reclamation.
 - Primary use case: live games, interactive tools, dashboards.
 
+### BatchedEngine
+
+`BatchedEngine` owns a `Vec<LockstepWorld>` and an optional `ObsPlan`.
+Its hot path, `step_and_observe()`, steps all worlds sequentially then
+calls `ObsPlan::execute_batch()` to fill a contiguous output buffer
+across all worlds.
+
+**Error model:** `BatchError` annotates failures with the world index:
+- `Step { world_index, error }` — a world's `step_sync()` failed
+- `Observe(ObsError)` — observation extraction failed
+- `Config(ConfigError)` — world creation or reset failed
+- `InvalidIndex { world_index, num_worlds }` — index out of bounds
+- `NoObsPlan` — observation requested without `ObsSpec`
+- `InvalidArgument { reason }` — argument validation failed
+
+**FFI layer:** `BATCHED: Mutex<HandleTable<BatchedEngine>>` stores
+engine instances. Nine `extern "C"` functions expose create, step,
+observe, reset, destroy, and dimension queries.
+
+**PyO3 layer:** `BatchedWorld` caches dimensions at construction time,
+validates buffer shapes eagerly, and releases the GIL via `py.detach()`
+on all hot paths. The `Ungil` boundary requires casting raw pointers to
+`usize` before entering the detached closure.
+
 ---
 
 ## Threading Model
@@ -273,6 +297,8 @@ component at a time (no diagonal cross-component adjacency).
 ---
 
 ## Field Model
+
+The field model defines how per-cell simulation data is typed, allocated, and bounded.
 
 Fields are per-cell data stored in arenas. Each field has:
 
@@ -399,7 +425,47 @@ Murk targets **Tier B determinism**: identical results within the same
 build, ISA, and toolchain, given the same initial state, seed, and
 command log.
 
-Key mechanisms:
+### Determinism Contract
+
+Determinism **holds** when all of these match between runs:
+
+- Build profile (debug/release) and optimization level
+- Compiler version (rustc, PyO3/maturin)
+- CPU ISA family (e.g., x86-64, aarch64)
+- Cargo feature flags and dependency versions
+
+Determinism is **not promised** across:
+
+- Different ISAs (x86-64 vs aarch64)
+- Different `libm` implementations (glibc vs musl vs macOS)
+- Builds with fast-math or non-default RUSTFLAGS
+- Different Murk versions (even patch releases may change propagator numerics)
+
+### Authoritative vs Non-Authoritative Paths
+
+The **authoritative path** must be deterministic — any change here requires
+determinism test verification:
+
+- `TickEngine`: propagator execution, command application, generation staging
+- Propagator `step()` implementations and pipeline ordering
+- `IngressQueue`: command sorting and expiry
+- Snapshot publish (generation swap)
+- Arena allocation and recycling patterns
+
+The **non-authoritative path** may vary between runs and must never affect
+world state:
+
+- Rendering, logging, and metrics collection
+- Wall-clock pacing and backpressure in RealtimeAsync mode
+- Egress worker scheduling and observation extraction timing
+- `StepMetrics` timing measurements
+- CLI tooling and debug output
+
+Contributors: if your change touches the authoritative path, run the full
+determinism test suite (`cargo test --test determinism`) and verify
+snapshot hashes are unchanged.
+
+### Key Mechanisms
 
 - **No `HashMap`/`HashSet`** — banned project-wide via clippy. All code
   uses `IndexMap`/`BTreeMap` for deterministic iteration.
@@ -411,6 +477,22 @@ Key mechanisms:
   class and source ordering, not arrival time.
 - **Replay support** — binary replay format records initial state, seed,
   and command log with per-tick snapshot hashes for divergence detection.
+
+### Known Footguns
+
+**Floating-point transcendentals**: Even without fast-math, `sin`, `cos`,
+`exp`, and `log` can vary across platforms and `libm` implementations.
+Propagators using transcendentals in authoritative updates remain Tier B
+(same ISA/toolchain), but this is the most likely source of cross-platform
+divergence. If tighter guarantees are needed in future, a `murk_math`
+shim can provide consistent implementations.
+
+**Parallelism introduction**: The current architecture is safe because
+propagators execute sequentially and the batched engine steps worlds in
+order. When parallel propagators or Rayon-based batched stepping are
+introduced, determinism tests must become thread-count invariant: run
+with 1, 2, and 8 threads, permute world ordering, and require identical
+snapshot hashes.
 
 See [determinism-catalogue.md](determinism-catalogue.md) for the full
 catalogue of non-determinism sources and mitigations.
@@ -436,5 +518,11 @@ PyO3/maturin native extension:
 - `MurkEnv` — single-environment Gymnasium `Env` adapter.
 - `MurkVecEnv` — vectorised environment adapter for parallel RL
   training.
+- `BatchedWorld` — batched PyO3 wrapper: steps N worlds and extracts
+  observations in a single `py.detach()` call. Pointer addresses are
+  cast to `usize` for the `Ungil` closure boundary.
+- `BatchedVecEnv` — pure-Python SB3-compatible vectorized environment
+  with pre-allocated NumPy buffers, auto-reset, and override hooks for
+  reward/termination logic.
 - Direct NumPy array filling via the C FFI path.
 - Python-defined propagators for prototyping.

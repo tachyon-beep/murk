@@ -72,7 +72,8 @@ pub fn assert_canonical_ordering_deterministic(space: &dyn Space) {
     assert_eq!(a, b, "canonical_ordering is non-deterministic");
 }
 
-/// Assert that `canonical_ordering` returns exactly `cell_count` unique coords.
+/// Assert that `canonical_ordering` returns exactly `cell_count` unique coords
+/// and that those coords match `compile_region(All)`.
 pub fn assert_canonical_ordering_complete(space: &dyn Space) {
     let ordering = space.canonical_ordering();
     assert_eq!(
@@ -82,11 +83,21 @@ pub fn assert_canonical_ordering_complete(space: &dyn Space) {
         ordering.len(),
         space.cell_count()
     );
-    let unique: IndexSet<_> = ordering.iter().collect();
+    let ordering_set: IndexSet<_> = ordering.iter().collect();
     assert_eq!(
-        unique.len(),
+        ordering_set.len(),
         space.cell_count(),
         "canonical_ordering has duplicates"
+    );
+
+    // Cross-validate: canonical_ordering coords must equal compile_region(All) coords.
+    let all_plan = space
+        .compile_region(&RegionSpec::All)
+        .expect("compile_region(All) should succeed");
+    let region_set: IndexSet<_> = all_plan.coords.iter().collect();
+    assert_eq!(
+        ordering_set, region_set,
+        "canonical_ordering and compile_region(All) must cover the same cells"
     );
 }
 
@@ -102,17 +113,24 @@ pub fn assert_compile_region_all_valid_ratio(space: &dyn Space) {
     );
 }
 
-/// Assert that `compile_region(All)` covers all cells.
+/// Assert that `compile_region(All)` covers all cells with matching coordinates.
 pub fn assert_compile_region_all_covers_all(space: &dyn Space) {
     let plan = space
         .compile_region(&RegionSpec::All)
         .expect("compile_region(All) should succeed");
     assert_eq!(
-        plan.cell_count,
+        plan.cell_count(),
         space.cell_count(),
         "compile_region(All).cell_count ({}) != space.cell_count ({})",
-        plan.cell_count,
+        plan.cell_count(),
         space.cell_count()
+    );
+    // Verify coordinate content, not just cardinality.
+    let region_set: IndexSet<_> = plan.coords.iter().collect();
+    assert_eq!(
+        region_set.len(),
+        space.cell_count(),
+        "compile_region(All) has duplicate coordinates"
     );
 }
 

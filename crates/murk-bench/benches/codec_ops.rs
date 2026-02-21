@@ -1,6 +1,6 @@
 //! Criterion micro-benchmarks for replay codec and snapshot hashing.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
 use murk_core::id::{FieldId, ParameterVersion, TickId, WorldGenerationId};
 use murk_replay::codec::{decode_frame, encode_frame};
 use murk_replay::hash::snapshot_hash;
@@ -25,6 +25,8 @@ fn make_frame(n: usize) -> Frame {
                 priority_class: 1,
                 source_id: Some(i as u64),
                 source_seq: Some(i as u64),
+                expires_after_tick: u64::MAX,
+                arrival_seq: i as u64,
             }
         })
         .collect();
@@ -56,7 +58,7 @@ fn bench_codec_encode_frame(c: &mut Criterion) {
         b.iter(|| {
             let mut buf = Vec::with_capacity(4096);
             encode_frame(&mut buf, &frame).unwrap();
-            black_box(&buf);
+            std::hint::black_box(&buf);
         });
     });
 }
@@ -73,7 +75,7 @@ fn bench_codec_decode_frame(c: &mut Criterion) {
         b.iter(|| {
             let mut cursor = encoded.as_slice();
             let decoded = decode_frame(&mut cursor).unwrap().unwrap();
-            black_box(&decoded);
+            std::hint::black_box(&decoded);
         });
     });
 }
@@ -85,7 +87,7 @@ fn bench_snapshot_hash_10k(c: &mut Criterion) {
     c.bench_function("snapshot_hash_10k", |b| {
         b.iter(|| {
             let h = snapshot_hash(&snap, 5);
-            black_box(h);
+            std::hint::black_box(h);
         });
     });
 }

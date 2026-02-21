@@ -79,6 +79,12 @@ impl PropagatorDef {
     fn register(&self, py: Python<'_>, config: &mut Config) -> PyResult<()> {
         let _ = config.require_handle()?; // Verify config still alive
 
+        // Validate the name before allocating TrampolineData — CString::new
+        // is fallible (interior NUL bytes) and we don't want to leak the Box
+        // if it fails.
+        let cname = CString::new(self.name.as_str())
+            .map_err(|_| pyo3::exceptions::PyValueError::new_err("invalid propagator name"))?;
+
         // Build TrampolineData and box it.
         let data = Box::new(TrampolineData {
             callable: self.step_fn.clone_ref(py),
@@ -97,9 +103,6 @@ impl PropagatorDef {
                 mode: *mode as i32,
             })
             .collect();
-
-        let cname = CString::new(self.name.as_str())
-            .map_err(|_| pyo3::exceptions::PyValueError::new_err("invalid propagator name"))?;
 
         let def = MurkPropagatorDef {
             name: cname.as_ptr(),
@@ -138,7 +141,13 @@ impl PropagatorDef {
         }
 
         // Add propagator to config and store trampoline data address for cleanup.
-        config.add_propagator_handle(py, prop_handle)?;
+        if let Err(e) = config.add_propagator_handle(py, prop_handle) {
+            #[allow(unsafe_code)]
+            unsafe {
+                drop(Box::from_raw(data_ptr as *mut TrampolineData));
+            }
+            return Err(e);
+        }
         config.trampoline_data.push(data_ptr as usize);
 
         Ok(())
@@ -188,13 +197,17 @@ unsafe extern "C" fn python_trampoline(user_data: *mut c_void, ctx: *const MurkS
     let data = unsafe { &*(user_data as *const TrampolineData) };
     let ctx = unsafe { &*ctx };
 
-    Python::attach(|py| match trampoline_inner(py, data, ctx) {
-        Ok(()) => 0,
-        Err(e) => {
-            e.print(py);
-            -10 // PropagatorFailed
-        }
-    })
+    // catch_unwind prevents panic from unwinding across the extern "C" boundary (UB).
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        Python::attach(|py| match trampoline_inner(py, data, ctx) {
+            Ok(()) => 0,
+            Err(e) => {
+                e.print(py);
+                -10 // PropagatorFailed
+            }
+        })
+    }))
+    .unwrap_or(-10) // Panic caught; report as PropagatorFailed
 }
 
 #[allow(unsafe_code)]

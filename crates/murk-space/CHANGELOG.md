@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.7](https://github.com/tachyon-beep/murk/compare/murk-space-v0.1.3...murk-space-v0.1.7) - 2026-02-21
+
+### Fixed
+
+- Hex2D disk overflow on large radii
+- FCC12 parity overflow
+- Product space weighted metric truncation
+- Compliance ordering for membership checks
+- `is_multiple_of` MSRV compatibility
+
 ## [0.1.3](https://github.com/tachyon-beep/murk/compare/murk-space-v0.1.2...murk-space-v0.1.3) - 2026-02-16
 
 ### Other

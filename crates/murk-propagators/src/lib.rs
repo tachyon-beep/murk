@@ -14,12 +14,35 @@
 #![deny(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]
 
+pub mod agent_emission;
+#[allow(deprecated)]
 pub mod agent_movement;
+#[allow(deprecated)]
 pub mod diffusion;
 pub mod fields;
+pub mod flow_field;
+pub mod gradient_compute;
+pub(crate) mod grid_helpers;
+pub mod identity_copy;
+pub mod morphological_op;
+pub mod noise_injection;
+pub mod resource_field;
+#[allow(deprecated)]
 pub mod reward;
+pub mod scalar_diffusion;
+pub mod wave_propagation;
 
+pub use agent_emission::{AgentEmission, EmissionMode};
 pub use agent_movement::{ActionBuffer, AgentAction, AgentMovementPropagator, Direction};
 pub use diffusion::DiffusionPropagator;
+#[allow(deprecated)]
 pub use fields::{reference_fields, AGENT_PRESENCE, HEAT, HEAT_GRADIENT, REWARD, VELOCITY};
+pub use flow_field::FlowField;
+pub use gradient_compute::GradientCompute;
+pub use identity_copy::IdentityCopy;
+pub use morphological_op::{MorphOp, MorphologicalOp};
+pub use noise_injection::{NoiseInjection, NoiseType};
+pub use resource_field::{RegrowthModel, ResourceField};
 pub use reward::RewardPropagator;
+pub use scalar_diffusion::ScalarDiffusion;
+pub use wave_propagation::WavePropagation;

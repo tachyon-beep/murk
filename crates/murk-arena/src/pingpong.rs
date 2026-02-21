@@ -33,6 +33,7 @@ use crate::write::WriteArena;
 /// Created by [`PingPongArena::begin_tick()`] and consumed before
 /// [`PingPongArena::publish()`]. Holds mutable borrows into the staging
 /// buffer, preventing any other access to the arena during the tick.
+#[must_use]
 pub struct TickGuard<'a> {
     /// Mutable write access to the staging buffer.
     pub writer: WriteArena<'a>,
@@ -73,6 +74,10 @@ pub struct PingPongArena {
     published_descriptor: FieldDescriptor,
     /// Current arena generation (incremented on publish).
     generation: u32,
+    /// Generation computed by `begin_tick()`, consumed by `publish()`.
+    next_generation: u32,
+    /// Whether a tick is in progress (`begin_tick()` called, `publish()` not yet called).
+    tick_in_progress: bool,
     /// Which buffer is currently staging (false = A staging, true = B staging).
     b_is_staging: bool,
     /// Scratch region for temporary allocations.
@@ -102,6 +107,17 @@ impl PingPongArena {
         field_defs: Vec<(FieldId, FieldDef)>,
         static_arena: SharedStaticArena,
     ) -> Result<Self, ArenaError> {
+        // Validate segment_size: must be a power of two and at least 1024,
+        // as documented on ArenaConfig::segment_size.
+        if !config.segment_size.is_power_of_two() || config.segment_size < 1024 {
+            return Err(ArenaError::InvalidConfig {
+                reason: format!(
+                    "segment_size must be a power of two and >= 1024 (got {})",
+                    config.segment_size,
+                ),
+            });
+        }
+
         // Three pools (buffer_a, buffer_b, sparse) each preallocate one
         // segment, so we need at least 3 to satisfy the budget invariant.
         if config.max_segments < 3 {
@@ -115,7 +131,7 @@ impl PingPongArena {
             });
         }
 
-        let descriptor = FieldDescriptor::from_field_defs(&field_defs, config.cell_count);
+        let descriptor = FieldDescriptor::from_field_defs(&field_defs, config.cell_count)?;
 
         // Compute per-pool segment budgets that respect the global limit.
         // Three pools share max_segments: buffer_a, buffer_b, sparse.
@@ -144,17 +160,52 @@ impl PingPongArena {
             }
         }
 
+        // Pre-allocate PerTick fields in both buffers so that reads from
+        // the published buffer at generation 0 (before any begin_tick/publish
+        // cycle) return valid zero-filled data instead of hitting unallocated
+        // memory. This fixes BUG-028 (segment slice beyond cursor) and
+        // BUG-013 (placeholder PerTick handles in snapshot).
+        let mut buffer_a = SegmentList::new(config.segment_size, per_tick_max);
+        let mut buffer_b = SegmentList::new(config.segment_size, per_tick_max);
+
+        let per_tick_fields: Vec<(FieldId, u32)> = staging_descriptor
+            .iter()
+            .filter(|(_, e)| e.meta.mutability == FieldMutability::PerTick)
+            .map(|(&id, e)| (id, e.meta.total_len))
+            .collect();
+
+        for (field_id, total_len) in &per_tick_fields {
+            // Allocate in buffer_b (initial published buffer when b_is_staging=false).
+            let (seg_idx, offset) = buffer_b.alloc(*total_len)?;
+            let handle = FieldHandle::new(
+                0,
+                offset,
+                *total_len,
+                FieldLocation::PerTick {
+                    segment_index: seg_idx,
+                },
+            );
+            staging_descriptor.update_handle(*field_id, handle);
+
+            // Also allocate in buffer_a (will become staging on first begin_tick,
+            // where it will be reset and re-allocated — but this makes both
+            // buffers consistent from the start).
+            let _ = buffer_a.alloc(*total_len)?;
+        }
+
         let published_descriptor = staging_descriptor.clone();
 
         Ok(Self {
-            buffer_a: SegmentList::new(config.segment_size, per_tick_max),
-            buffer_b: SegmentList::new(config.segment_size, per_tick_max),
+            buffer_a,
+            buffer_b,
             sparse_segments,
             sparse_slab,
             static_arena,
             staging_descriptor,
             published_descriptor,
             generation: 0,
+            next_generation: 0,
+            tick_in_progress: false,
             b_is_staging: false,
             scratch: ScratchRegion::new(config.cell_count as usize * 4),
             config,
@@ -169,7 +220,16 @@ impl PingPongArena {
     /// Returns a [`TickGuard`] providing write access to the staging buffer
     /// and scratch space. The guard must be dropped before calling `publish()`.
     pub fn begin_tick(&mut self) -> Result<TickGuard<'_>, ArenaError> {
-        let next_gen = self.generation + 1;
+        let next_gen = self
+            .generation
+            .checked_add(1)
+            .ok_or(ArenaError::InvalidConfig {
+                reason: "generation counter overflow (u32::MAX ticks reached)".into(),
+            })?;
+
+        // Promote sparse ranges retired during the previous tick. After
+        // publish(), the published descriptor no longer references them.
+        self.sparse_slab.flush_retired();
 
         // Reset the staging buffer (it was the published buffer last tick).
         if self.b_is_staging {
@@ -219,6 +279,8 @@ impl PingPongArena {
         }
 
         self.scratch.reset();
+        self.tick_in_progress = true;
+        self.next_generation = next_gen;
 
         // Construct TickGuard via helper to get clean split borrows.
         let guard = Self::make_tick_guard(
@@ -260,13 +322,27 @@ impl PingPongArena {
 
     /// Publish the staging buffer, making it the new published generation.
     ///
+    /// Returns `Err` if `begin_tick()` was not called first or if
+    /// `publish()` is called twice without an intervening `begin_tick()`.
+    ///
     /// After this call:
     /// - The staging descriptor becomes the published descriptor
     /// - The staging buffer becomes the published buffer
     /// - The old published buffer will be reset on the next `begin_tick()`
-    /// - The generation counter is incremented
-    pub fn publish(&mut self, tick_id: TickId, param_version: ParameterVersion) {
-        self.generation += 1;
+    /// - The generation counter advances to the value computed by `begin_tick()`
+    pub fn publish(
+        &mut self,
+        tick_id: TickId,
+        param_version: ParameterVersion,
+    ) -> Result<(), ArenaError> {
+        if !self.tick_in_progress {
+            return Err(ArenaError::InvalidConfig {
+                reason: "publish() called without a preceding begin_tick()".into(),
+            });
+        }
+
+        self.generation = self.next_generation;
+        self.tick_in_progress = false;
 
         // Swap descriptors.
         std::mem::swap(&mut self.staging_descriptor, &mut self.published_descriptor);
@@ -281,6 +357,7 @@ impl PingPongArena {
 
         self.last_tick_id = tick_id;
         self.last_param_version = param_version;
+        Ok(())
     }
 
     /// Get a read-only snapshot of the published generation.
@@ -345,7 +422,8 @@ impl PingPongArena {
         self.sparse_slab = SparseSlab::new();
 
         // Rebuild descriptors from field defs.
-        let descriptor = FieldDescriptor::from_field_defs(&self.field_defs, self.config.cell_count);
+        let descriptor =
+            FieldDescriptor::from_field_defs(&self.field_defs, self.config.cell_count)?;
         self.staging_descriptor = descriptor.clone();
         self.published_descriptor = descriptor;
 
@@ -371,7 +449,33 @@ impl PingPongArena {
             }
         }
 
+        // Pre-allocate PerTick fields in both buffers (same as new()) so
+        // the published buffer is valid at generation 0.
+        let per_tick_fields: Vec<(FieldId, u32)> = self
+            .staging_descriptor
+            .iter()
+            .filter(|(_, e)| e.meta.mutability == FieldMutability::PerTick)
+            .map(|(&id, e)| (id, e.meta.total_len))
+            .collect();
+
+        for (field_id, total_len) in &per_tick_fields {
+            let (seg_idx, offset) = self.buffer_b.alloc(*total_len)?;
+            let handle = FieldHandle::new(
+                0,
+                offset,
+                *total_len,
+                FieldLocation::PerTick {
+                    segment_index: seg_idx,
+                },
+            );
+            self.staging_descriptor.update_handle(*field_id, handle);
+            self.published_descriptor.update_handle(*field_id, handle);
+            let _ = self.buffer_a.alloc(*total_len)?;
+        }
+
         self.generation = 0;
+        self.next_generation = 0;
+        self.tick_in_progress = false;
         self.b_is_staging = false;
         self.last_tick_id = TickId(0);
         self.last_param_version = ParameterVersion(0);
@@ -385,6 +489,16 @@ impl PingPongArena {
             + self.sparse_segments.memory_bytes()
             + self.static_arena.memory_bytes()
             + self.scratch.memory_bytes()
+    }
+
+    /// Number of sparse segment ranges available for reuse.
+    pub fn sparse_retired_range_count(&self) -> usize {
+        self.sparse_slab.retired_range_count()
+    }
+
+    /// Number of sparse segment ranges pending promotion (freed this tick).
+    pub fn sparse_pending_retired_count(&self) -> usize {
+        self.sparse_slab.pending_retired_count()
     }
 
     /// Current generation number.
@@ -504,7 +618,7 @@ mod tests {
         let _guard = arena.begin_tick().unwrap();
         // Let _guard go out of scope (it doesn't implement Drop).
         let _ = _guard;
-        arena.publish(TickId(1), ParameterVersion(0));
+        arena.publish(TickId(1), ParameterVersion(0)).unwrap();
         assert_eq!(arena.generation(), 1);
     }
 
@@ -519,7 +633,7 @@ mod tests {
             data[0] = 42.0;
             data[99] = 99.0;
         }
-        arena.publish(TickId(1), ParameterVersion(0));
+        arena.publish(TickId(1), ParameterVersion(0)).unwrap();
 
         // Read snapshot.
         let snap = arena.snapshot();
@@ -537,7 +651,7 @@ mod tests {
         {
             let _guard = arena.begin_tick().unwrap();
         }
-        arena.publish(TickId(1), ParameterVersion(0));
+        arena.publish(TickId(1), ParameterVersion(0)).unwrap();
 
         let snap = arena.snapshot();
         let terrain = snap.read_field(FieldId(2)).unwrap();
@@ -552,7 +666,7 @@ mod tests {
         {
             let _guard = arena.begin_tick().unwrap();
         }
-        arena.publish(TickId(5), ParameterVersion(3));
+        arena.publish(TickId(5), ParameterVersion(3)).unwrap();
 
         let snap = arena.snapshot();
         assert_eq!(snap.tick_id(), TickId(5));
@@ -569,7 +683,7 @@ mod tests {
             let data = guard.writer.write(FieldId(0)).unwrap();
             data[0] = 1.0;
         }
-        arena.publish(TickId(1), ParameterVersion(0));
+        arena.publish(TickId(1), ParameterVersion(0)).unwrap();
 
         // Verify tick 1 data in snapshot.
         assert_eq!(arena.snapshot().read(FieldId(0)).unwrap()[0], 1.0);
@@ -582,7 +696,7 @@ mod tests {
             assert_eq!(data[0], 0.0);
             data[0] = 2.0;
         }
-        arena.publish(TickId(2), ParameterVersion(0));
+        arena.publish(TickId(2), ParameterVersion(0)).unwrap();
 
         // Verify tick 2 data in snapshot.
         assert_eq!(arena.snapshot().read(FieldId(0)).unwrap()[0], 2.0);
@@ -607,7 +721,7 @@ mod tests {
             guard.scratch.alloc(50).unwrap();
             assert_eq!(guard.scratch.used(), 50);
         }
-        arena.publish(TickId(1), ParameterVersion(0));
+        arena.publish(TickId(1), ParameterVersion(0)).unwrap();
 
         // Next tick: scratch should be reset.
         {
@@ -627,7 +741,7 @@ mod tests {
                 let data = guard.writer.write(FieldId(0)).unwrap();
                 data[0] = i as f32;
             }
-            arena.publish(TickId(i), ParameterVersion(0));
+            arena.publish(TickId(i), ParameterVersion(0)).unwrap();
         }
         assert_eq!(arena.generation(), 5);
 
@@ -651,7 +765,7 @@ mod tests {
                 let data = guard.writer.write(FieldId(0)).unwrap();
                 data[0] = tick as f32;
             }
-            arena.publish(TickId(tick), ParameterVersion(0));
+            arena.publish(TickId(tick), ParameterVersion(0)).unwrap();
 
             let snap = arena.snapshot();
             assert_eq!(snap.read(FieldId(0)).unwrap()[0], tick as f32);
@@ -669,13 +783,13 @@ mod tests {
             let data = guard.writer.write(FieldId(3)).unwrap();
             data[0] = 77.0;
         }
-        arena.publish(TickId(1), ParameterVersion(0));
+        arena.publish(TickId(1), ParameterVersion(0)).unwrap();
 
         // Tick 2: don't write sparse field — it should persist.
         {
             let _guard = arena.begin_tick().unwrap();
         }
-        arena.publish(TickId(2), ParameterVersion(0));
+        arena.publish(TickId(2), ParameterVersion(0)).unwrap();
 
         let snap = arena.snapshot();
         let data = snap.read(FieldId(3)).unwrap();
@@ -708,10 +822,10 @@ mod tests {
 
     #[test]
     fn new_fails_when_sparse_field_exceeds_segment_size() {
-        let cell_count = 100u32;
-        // Tiny segment that can't fit the sparse field.
+        let cell_count = 2000u32;
+        // Minimum valid segment (1024) that can't fit the sparse field (2000).
         let config = ArenaConfig {
-            segment_size: 10,
+            segment_size: 1024,
             max_segments: 16,
             max_generation_age: 1,
             cell_count,
@@ -798,7 +912,7 @@ mod tests {
             data[0] = 42.0;
             data[99] = 99.0;
         }
-        arena.publish(TickId(1), ParameterVersion(0));
+        arena.publish(TickId(1), ParameterVersion(0)).unwrap();
 
         let owned = arena.owned_snapshot();
         let data = owned.read_field(FieldId(0)).unwrap();
@@ -823,7 +937,7 @@ mod tests {
             let data = guard.writer.write(FieldId(0)).unwrap();
             data[0] = 42.0;
         }
-        arena.publish(TickId(1), ParameterVersion(0));
+        arena.publish(TickId(1), ParameterVersion(0)).unwrap();
 
         let owned = arena.owned_snapshot();
 
@@ -833,7 +947,7 @@ mod tests {
             let data = guard.writer.write(FieldId(0)).unwrap();
             data[0] = 999.0;
         }
-        arena.publish(TickId(2), ParameterVersion(0));
+        arena.publish(TickId(2), ParameterVersion(0)).unwrap();
 
         // OwnedSnapshot from tick 1 should be unaffected.
         assert_eq!(owned.read_field(FieldId(0)).unwrap()[0], 42.0);
@@ -876,5 +990,315 @@ mod tests {
         let max_allowed = 6 * 1024 * std::mem::size_of::<f32>();
         // memory_bytes includes static + scratch; just verify it's bounded.
         assert!(total_bytes <= max_allowed + arena.static_arena().memory_bytes() + 1024 * 4);
+    }
+
+    // ── segment_size validation ──────────────────────────────
+
+    #[test]
+    fn new_rejects_non_power_of_two_segment_size() {
+        let config = ArenaConfig {
+            segment_size: 1000, // not a power of two
+            max_segments: 16,
+            max_generation_age: 1,
+            cell_count: 10,
+        };
+        let static_arena = StaticArena::new(&[]).into_shared();
+        let result = PingPongArena::new(config, vec![], static_arena);
+        assert!(
+            matches!(result, Err(ArenaError::InvalidConfig { .. })),
+            "segment_size=1000 (not power of two) should be rejected"
+        );
+    }
+
+    #[test]
+    fn new_rejects_segment_size_below_1024() {
+        let config = ArenaConfig {
+            segment_size: 512, // power of two but below 1024
+            max_segments: 16,
+            max_generation_age: 1,
+            cell_count: 10,
+        };
+        let static_arena = StaticArena::new(&[]).into_shared();
+        let result = PingPongArena::new(config, vec![], static_arena);
+        assert!(
+            matches!(result, Err(ArenaError::InvalidConfig { .. })),
+            "segment_size=512 (below 1024) should be rejected"
+        );
+    }
+
+    #[test]
+    fn new_accepts_segment_size_of_1024() {
+        let config = ArenaConfig {
+            segment_size: 1024,
+            max_segments: 16,
+            max_generation_age: 1,
+            cell_count: 10,
+        };
+        let static_arena = StaticArena::new(&[]).into_shared();
+        assert!(PingPongArena::new(config, vec![], static_arena).is_ok());
+    }
+
+    // ── publish state guard (#54) ──────────────────────────────
+
+    #[test]
+    fn publish_without_begin_tick_returns_error() {
+        let mut arena = make_arena();
+        let result = arena.publish(TickId(1), ParameterVersion(0));
+        assert!(matches!(result, Err(ArenaError::InvalidConfig { .. })));
+    }
+
+    #[test]
+    fn double_publish_returns_error() {
+        let mut arena = make_arena();
+        {
+            let _guard = arena.begin_tick().unwrap();
+        }
+        arena.publish(TickId(1), ParameterVersion(0)).unwrap();
+        // Second publish without begin_tick should fail.
+        let result = arena.publish(TickId(2), ParameterVersion(0));
+        assert!(matches!(result, Err(ArenaError::InvalidConfig { .. })));
+    }
+
+    #[test]
+    fn sparse_cow_does_not_leak_segment_memory() {
+        // Regression test for arena-sparse-segment-memory-leak:
+        // Repeated sparse CoW writes must reclaim segment memory from dead
+        // allocations instead of exhausting the sparse segment pool.
+        let cell_count = 100u32;
+        let config = ArenaConfig {
+            segment_size: 1024,
+            // Tight budget: 1 segment per pool × 3 = barely enough
+            // for one live + one pending allocation per field.
+            max_segments: 6,
+            max_generation_age: 1,
+            cell_count,
+        };
+        let field_defs = vec![(
+            FieldId(0),
+            FieldDef {
+                name: "resources".into(),
+                field_type: FieldType::Scalar,
+                mutability: FieldMutability::Sparse,
+                units: None,
+                bounds: None,
+                boundary_behavior: BoundaryBehavior::Clamp,
+            },
+        )];
+        let static_arena = StaticArena::new(&[]).into_shared();
+        let mut arena = PingPongArena::new(config, field_defs, static_arena).unwrap();
+
+        // 200 ticks of per-tick sparse writes. Without reclamation this
+        // would exhaust 2 sparse segments × 1024 f32s after ~20 ticks.
+        for tick in 1u64..=200 {
+            {
+                let mut guard = arena.begin_tick().unwrap();
+                let data = guard.writer.write(FieldId(0)).unwrap();
+                data[0] = tick as f32;
+            }
+            arena.publish(TickId(tick), ParameterVersion(0)).unwrap();
+
+            // Published data must be correct.
+            let snap = arena.snapshot();
+            assert_eq!(snap.read(FieldId(0)).unwrap()[0], tick as f32);
+        }
+    }
+
+    #[test]
+    fn reset_after_near_exhaustion_allows_continued_cow() {
+        // Regression test: drive the sparse pool toward exhaustion, reset,
+        // then verify CoW writes succeed for another 200 ticks. Exercises
+        // the full 65-line reset() reconstruction sequence including fresh
+        // SparseSlab creation and sparse re-initialisation.
+        let cell_count = 100u32;
+        let config = ArenaConfig {
+            segment_size: 1024,
+            max_segments: 6,
+            max_generation_age: 1,
+            cell_count,
+        };
+        let field_defs = vec![(
+            FieldId(0),
+            FieldDef {
+                name: "resources".into(),
+                field_type: FieldType::Scalar,
+                mutability: FieldMutability::Sparse,
+                units: None,
+                bounds: None,
+                boundary_behavior: BoundaryBehavior::Clamp,
+            },
+        )];
+        let static_arena = StaticArena::new(&[]).into_shared();
+        let mut arena = PingPongArena::new(config, field_defs, static_arena).unwrap();
+
+        // Phase 1: drive sparse pool with 150 ticks of CoW writes.
+        for tick in 1u64..=150 {
+            {
+                let mut guard = arena.begin_tick().unwrap();
+                let data = guard.writer.write(FieldId(0)).unwrap();
+                data[0] = tick as f32;
+            }
+            arena.publish(TickId(tick), ParameterVersion(0)).unwrap();
+        }
+
+        // Reset: clears all reclamation state and recreates sparse pool.
+        arena.reset().unwrap();
+        assert_eq!(arena.generation(), 0);
+
+        // Phase 2: another 200 ticks must succeed — the reset released
+        // all sparse segment memory.
+        for tick in 1u64..=200 {
+            {
+                let mut guard = arena.begin_tick().unwrap();
+                let data = guard.writer.write(FieldId(0)).unwrap();
+                data[0] = (tick + 1000) as f32;
+            }
+            arena.publish(TickId(tick), ParameterVersion(0)).unwrap();
+
+            let snap = arena.snapshot();
+            assert_eq!(snap.read(FieldId(0)).unwrap()[0], (tick + 1000) as f32);
+        }
+    }
+
+    #[test]
+    fn owned_snapshot_sparse_stable_after_reuse() {
+        // Regression guard: an OwnedSnapshot taken after a sparse write must
+        // retain its data even after the next tick reuses the retired range.
+        // This proves SegmentList::clone() deep-copies segment data, which is
+        // the safety contract that protects OwnedSnapshot in RealtimeAsync mode.
+        let cell_count = 100u32;
+        let config = ArenaConfig {
+            segment_size: 1024,
+            max_segments: 6,
+            max_generation_age: 1,
+            cell_count,
+        };
+        let field_defs = vec![(
+            FieldId(0),
+            FieldDef {
+                name: "resources".into(),
+                field_type: FieldType::Scalar,
+                mutability: FieldMutability::Sparse,
+                units: None,
+                bounds: None,
+                boundary_behavior: BoundaryBehavior::Clamp,
+            },
+        )];
+        let static_arena = StaticArena::new(&[]).into_shared();
+        let mut arena = PingPongArena::new(config, field_defs, static_arena).unwrap();
+
+        // Tick 1: write sparse field with recognisable value.
+        {
+            let mut guard = arena.begin_tick().unwrap();
+            let data = guard.writer.write(FieldId(0)).unwrap();
+            data[0] = 42.0;
+            data[99] = 99.0;
+        }
+        arena.publish(TickId(1), ParameterVersion(0)).unwrap();
+
+        // Capture an OwnedSnapshot (deep clone of sparse segments).
+        let owned = arena.owned_snapshot();
+        assert_eq!(owned.read_field(FieldId(0)).unwrap()[0], 42.0);
+        assert_eq!(owned.read_field(FieldId(0)).unwrap()[99], 99.0);
+
+        // Tick 2: CoW write — old range goes to pending_retired.
+        {
+            let mut guard = arena.begin_tick().unwrap();
+            let data = guard.writer.write(FieldId(0)).unwrap();
+            data[0] = 100.0;
+            data[99] = 200.0;
+        }
+        arena.publish(TickId(2), ParameterVersion(0)).unwrap();
+
+        // Tick 3: begin_tick flushes pending → retired; alloc reuses the
+        // range that tick 1 wrote to. This overwrites the segment memory
+        // in the live arena.
+        {
+            let mut guard = arena.begin_tick().unwrap();
+            let data = guard.writer.write(FieldId(0)).unwrap();
+            data[0] = 999.0;
+            data[99] = 888.0;
+        }
+        arena.publish(TickId(3), ParameterVersion(0)).unwrap();
+
+        // The OwnedSnapshot from tick 1 must be completely unaffected.
+        assert_eq!(owned.read_field(FieldId(0)).unwrap()[0], 42.0);
+        assert_eq!(owned.read_field(FieldId(0)).unwrap()[99], 99.0);
+        assert_eq!(owned.tick_id(), TickId(1));
+
+        // Current snapshot should see tick 3 data.
+        let snap = arena.snapshot();
+        assert_eq!(snap.read_field(FieldId(0)).unwrap()[0], 999.0);
+        assert_eq!(snap.read_field(FieldId(0)).unwrap()[99], 888.0);
+    }
+
+    // ── sparse reclamation metrics (#arena-sparse-fragmentation-metric) ──
+
+    #[test]
+    fn sparse_retired_range_count_zero_at_start() {
+        let arena = make_arena();
+        assert_eq!(arena.sparse_retired_range_count(), 0);
+    }
+
+    #[test]
+    fn sparse_pending_retired_count_zero_at_start() {
+        let arena = make_arena();
+        assert_eq!(arena.sparse_pending_retired_count(), 0);
+    }
+
+    #[test]
+    fn sparse_metrics_reflect_cow_lifecycle() {
+        let cell_count = 100u32;
+        let config = ArenaConfig {
+            segment_size: 1024,
+            max_segments: 6,
+            max_generation_age: 1,
+            cell_count,
+        };
+        let field_defs = vec![(
+            FieldId(0),
+            FieldDef {
+                name: "resources".into(),
+                field_type: FieldType::Scalar,
+                mutability: FieldMutability::Sparse,
+                units: None,
+                bounds: None,
+                boundary_behavior: BoundaryBehavior::Clamp,
+            },
+        )];
+        let static_arena = StaticArena::new(&[]).into_shared();
+        let mut arena = PingPongArena::new(config, field_defs, static_arena).unwrap();
+
+        // Tick 1: write sparse field. The constructor already allocated
+        // FieldId(0), so this CoW write retires the constructor's range.
+        {
+            let mut guard = arena.begin_tick().unwrap();
+            let data = guard.writer.write(FieldId(0)).unwrap();
+            data[0] = 1.0;
+        }
+        arena.publish(TickId(1), ParameterVersion(0)).unwrap();
+        // Constructor's allocation is now pending (freed this tick).
+        assert_eq!(arena.sparse_retired_range_count(), 0);
+        assert_eq!(arena.sparse_pending_retired_count(), 1);
+
+        // Tick 2: begin_tick flushes pending → retired (1 range).
+        // Then CoW write reuses that retired range and retires tick 1's.
+        {
+            let mut guard = arena.begin_tick().unwrap();
+            let data = guard.writer.write(FieldId(0)).unwrap();
+            data[0] = 2.0;
+        }
+        arena.publish(TickId(2), ParameterVersion(0)).unwrap();
+        // Reused the 1 retired range, tick 1's allocation now pending.
+        assert_eq!(arena.sparse_retired_range_count(), 0);
+        assert_eq!(arena.sparse_pending_retired_count(), 1);
+
+        // Tick 3: begin_tick flushes pending → retired. No writes.
+        {
+            let _guard = arena.begin_tick().unwrap();
+        }
+        arena.publish(TickId(3), ParameterVersion(0)).unwrap();
+        // Flushed to retired, nothing new pending.
+        assert_eq!(arena.sparse_retired_range_count(), 1);
+        assert_eq!(arena.sparse_pending_retired_count(), 0);
     }
 }

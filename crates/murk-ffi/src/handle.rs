@@ -81,6 +81,9 @@ impl<T> HandleTable<T> {
     /// Remove the value behind a handle, returning it.
     ///
     /// Increments the generation counter and adds the slot to the free list.
+    /// If the generation has reached `u32::MAX`, the slot is permanently retired
+    /// (not returned to the free list) to prevent ABA handle resurrection after
+    /// wraparound.
     /// Returns `None` if the handle is stale (double-remove is safe).
     pub fn remove(&mut self, handle: u64) -> Option<T> {
         let (slot_idx, generation) = decode(handle);
@@ -90,7 +93,13 @@ impl<T> HandleTable<T> {
         }
         let value = slot.data.take()?;
         slot.generation = slot.generation.wrapping_add(1);
-        self.free_list.push(slot_idx);
+        // Only recycle the slot if the generation hasn't wrapped back to 0.
+        // A wrapped generation would collide with stale handles from epoch 0,
+        // enabling ABA resurrection. Retiring the slot sacrifices ~32 bytes
+        // to guarantee handle safety.
+        if slot.generation != 0 {
+            self.free_list.push(slot_idx);
+        }
         Some(value)
     }
 }
@@ -172,5 +181,51 @@ mod tests {
         let table: HandleTable<i32> = HandleTable::new();
         // Handle pointing to slot that never existed.
         assert_eq!(table.get(encode(999, 0)), None);
+    }
+
+    #[test]
+    fn generation_exhaustion_retires_slot() {
+        let mut table = HandleTable::new();
+        let h = table.insert(1i32);
+        table.remove(h);
+
+        // Fast-forward: set slot 0's generation to u32::MAX - 1 directly,
+        // then do one insert+remove cycle to reach u32::MAX, then one more
+        // remove to trigger the wrap guard.
+        table.slots[0].generation = u32::MAX - 1;
+        let h2 = table.insert(2i32);
+        let (_, gen2) = decode(h2);
+        assert_eq!(gen2, u32::MAX - 1);
+
+        // Remove bumps generation to u32::MAX, slot still recyclable.
+        table.remove(h2);
+        assert_eq!(table.slots[0].generation, u32::MAX);
+        assert!(table.free_list.contains(&0));
+
+        // Insert at generation u32::MAX.
+        let h3 = table.insert(3i32);
+        let (_, gen3) = decode(h3);
+        assert_eq!(gen3, u32::MAX);
+
+        // Remove wraps generation to 0 — slot must NOT be recycled.
+        table.remove(h3);
+        assert_eq!(table.slots[0].generation, 0);
+        assert!(
+            !table.free_list.contains(&0),
+            "slot with wrapped generation must be retired, not recycled"
+        );
+
+        // Stale handle from the first epoch must not resolve to new data.
+        let stale = encode(0, 0);
+        assert_eq!(
+            table.get(stale),
+            None,
+            "stale handle with generation 0 must not match retired slot"
+        );
+
+        // New insert must allocate a fresh slot instead of reusing slot 0.
+        let h4 = table.insert(4i32);
+        let (slot4, _) = decode(h4);
+        assert_ne!(slot4, 0, "retired slot must not be reused");
     }
 }

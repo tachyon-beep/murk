@@ -166,7 +166,7 @@ impl Fcc12 {
                 ),
             });
         }
-        if (x + y + z) % 2 != 0 {
+        if (x ^ y ^ z) & 1 != 0 {
             return Err(SpaceError::CoordOutOfBounds {
                 coord: coord.clone(),
                 bounds: "(x + y + z) must be even (FCC parity constraint)".into(),
@@ -212,7 +212,6 @@ impl Fcc12 {
         let valid_mask = vec![1u8; cell_count];
 
         RegionPlan {
-            cell_count,
             coords: result,
             tensor_indices,
             valid_mask,
@@ -268,7 +267,6 @@ impl Space for Fcc12 {
                 let tensor_indices: Vec<usize> = (0..cell_count).collect();
                 let valid_mask = vec![1u8; cell_count];
                 Ok(RegionPlan {
-                    cell_count,
                     coords,
                     tensor_indices,
                     valid_mask,
@@ -300,9 +298,8 @@ impl Space for Fcc12 {
                 for z in z_lo..=z_hi {
                     for y in y_lo..=y_hi {
                         // First valid x >= x_lo with correct parity.
-                        // (x_lo + y + z) % 2 is always 0 or 1 here because all
-                        // values are non-negative (check_bounds guarantees >= 0).
-                        let x_start = x_lo + ((x_lo + y + z) % 2);
+                        // Use XOR parity (overflow-safe) to find first valid x.
+                        let x_start = x_lo + ((x_lo ^ y ^ z) & 1);
                         let mut x = x_start;
                         while x <= x_hi {
                             coords.push(smallvec![x, y, z]);
@@ -314,7 +311,6 @@ impl Space for Fcc12 {
                 let tensor_indices: Vec<usize> = (0..cell_count).collect();
                 let valid_mask = vec![1u8; cell_count];
                 Ok(RegionPlan {
-                    cell_count,
                     coords,
                     tensor_indices,
                     valid_mask,
@@ -333,7 +329,6 @@ impl Space for Fcc12 {
                 let tensor_indices: Vec<usize> = (0..cell_count).collect();
                 let valid_mask = vec![1u8; cell_count];
                 Ok(RegionPlan {
-                    cell_count,
                     coords: sorted,
                     tensor_indices,
                     valid_mask,
@@ -347,7 +342,7 @@ impl Space for Fcc12 {
         let mut out = Vec::with_capacity(self.cell_count);
         for z in 0..self.d as i32 {
             for y in 0..self.h as i32 {
-                let x_start = (y + z) % 2;
+                let x_start = (y ^ z) & 1;
                 let mut x = x_start;
                 while x < self.w as i32 {
                     out.push(smallvec![x, y, z]);
@@ -377,8 +372,8 @@ impl Space for Fcc12 {
             return None;
         }
 
-        // Parity check.
-        if (x + y + z) % 2 != 0 {
+        // Parity check (XOR-based: overflow-safe).
+        if (x ^ y ^ z) & 1 != 0 {
             return None;
         }
 
@@ -424,6 +419,12 @@ impl Space for Fcc12 {
 
     fn instance_id(&self) -> SpaceInstanceId {
         self.instance_id
+    }
+
+    fn topology_eq(&self, other: &dyn Space) -> bool {
+        (other as &dyn std::any::Any)
+            .downcast_ref::<Self>()
+            .is_some_and(|o| self.w == o.w && self.h == o.h && self.d == o.d && self.edge == o.edge)
     }
 }
 
@@ -805,7 +806,7 @@ mod tests {
     fn compile_region_all() {
         let s = Fcc12::new(4, 4, 4, EdgeBehavior::Absorb).unwrap();
         let plan = s.compile_region(&RegionSpec::All).unwrap();
-        assert_eq!(plan.cell_count, 32);
+        assert_eq!(plan.cell_count(), 32);
         assert_eq!(plan.valid_ratio(), 1.0);
     }
 
@@ -819,7 +820,7 @@ mod tests {
                 radius: 1,
             })
             .unwrap();
-        assert_eq!(plan.cell_count, 13);
+        assert_eq!(plan.cell_count(), 13);
     }
 
     #[test]
@@ -836,7 +837,7 @@ mod tests {
         // Each r=1 neighbour has 12 neighbours, but many overlap.
         // Verified via BFS: should be 55 cells for interior r=2 on FCC.
         assert!(
-            plan.cell_count > 13,
+            plan.cell_count() > 13,
             "r=2 disk should have more than 13 cells"
         );
     }
@@ -851,8 +852,8 @@ mod tests {
                 radius: 2,
             })
             .unwrap();
-        assert!(plan.cell_count < 55, "boundary disk should be truncated");
-        assert!(plan.cell_count >= 1);
+        assert!(plan.cell_count() < 55, "boundary disk should be truncated");
+        assert!(plan.cell_count() >= 1);
     }
 
     #[test]
@@ -865,7 +866,7 @@ mod tests {
                 radius: u32::MAX,
             })
             .unwrap();
-        assert_eq!(plan.cell_count, s.cell_count());
+        assert_eq!(plan.cell_count(), s.cell_count());
     }
 
     #[test]
@@ -882,7 +883,7 @@ mod tests {
         // z=1: (1,0,1),(0,1,1),(2,1,1),(1,2,1) = 4
         // z=2: (0,0,2),(2,0,2),(1,1,2),(0,2,2),(2,2,2) = 5
         // Total = 14
-        assert_eq!(plan.cell_count, 14);
+        assert_eq!(plan.cell_count(), 14);
     }
 
     #[test]
@@ -978,7 +979,7 @@ mod tests {
         let y = y.rem_euclid(h as i32);
         let mut z = z.rem_euclid(d as i32);
         // Fix parity: if (x+y+z) is odd, bump z by 1 (wrapping).
-        if (x + y + z) % 2 != 0 {
+        if (x ^ y ^ z) & 1 != 0 {
             z = (z + 1) % d as i32;
         }
         (x, y, z)

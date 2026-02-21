@@ -18,6 +18,9 @@ use crate::types::{BuildMetadata, Frame, InitDescriptor};
 /// Generic over `W: Write` so tests can use `Vec<u8>` and production
 /// code can use `BufWriter<File>`.
 ///
+/// The writer flushes automatically on drop. For explicit error handling,
+/// call [`flush()`](Self::flush) before dropping.
+///
 /// # Examples
 ///
 /// ```
@@ -57,7 +60,7 @@ use crate::types::{BuildMetadata, Frame, InitDescriptor};
 /// assert!(reader.next_frame().unwrap().is_none());
 /// ```
 pub struct ReplayWriter<W: Write> {
-    writer: W,
+    writer: Option<W>,
     field_count: u32,
     frames_written: u64,
 }
@@ -71,10 +74,16 @@ impl<W: Write> ReplayWriter<W> {
     ) -> Result<Self, ReplayError> {
         encode_header(&mut writer, metadata, init)?;
         Ok(Self {
-            writer,
+            writer: Some(writer),
             field_count: init.field_count,
             frames_written: 0,
         })
+    }
+
+    fn writer_mut(&mut self) -> &mut W {
+        self.writer
+            .as_mut()
+            .expect("ReplayWriter used after into_inner()")
     }
 
     /// Record a frame: serialize commands, hash the snapshot, and write.
@@ -84,7 +93,10 @@ impl<W: Write> ReplayWriter<W> {
         commands: &[Command],
         snapshot: &dyn SnapshotAccess,
     ) -> Result<(), ReplayError> {
-        let serialized_commands: Vec<_> = commands.iter().map(serialize_command).collect();
+        let serialized_commands: Vec<_> = commands
+            .iter()
+            .map(serialize_command)
+            .collect::<Result<Vec<_>, _>>()?;
         let hash = snapshot_hash(snapshot, self.field_count);
 
         let frame = Frame {
@@ -92,21 +104,21 @@ impl<W: Write> ReplayWriter<W> {
             commands: serialized_commands,
             snapshot_hash: hash,
         };
-        encode_frame(&mut self.writer, &frame)?;
+        encode_frame(self.writer_mut(), &frame)?;
         self.frames_written += 1;
         Ok(())
     }
 
     /// Write a pre-built frame directly (useful for testing).
     pub fn write_raw_frame(&mut self, frame: &Frame) -> Result<(), ReplayError> {
-        encode_frame(&mut self.writer, frame)?;
+        encode_frame(self.writer_mut(), frame)?;
         self.frames_written += 1;
         Ok(())
     }
 
     /// Flush the underlying writer.
     pub fn flush(&mut self) -> Result<(), ReplayError> {
-        self.writer.flush()?;
+        self.writer_mut().flush()?;
         Ok(())
     }
 
@@ -116,7 +128,18 @@ impl<W: Write> ReplayWriter<W> {
     }
 
     /// Consume the writer and return the underlying `Write` sink.
-    pub fn into_inner(self) -> W {
-        self.writer
+    ///
+    /// The writer is flushed before returning. If you need to handle flush
+    /// errors, call [`flush()`](Self::flush) first.
+    pub fn into_inner(mut self) -> W {
+        self.writer.take().expect("into_inner called twice")
+    }
+}
+
+impl<W: Write> Drop for ReplayWriter<W> {
+    fn drop(&mut self) {
+        if let Some(ref mut w) = self.writer {
+            let _ = w.flush();
+        }
     }
 }

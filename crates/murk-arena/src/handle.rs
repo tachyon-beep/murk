@@ -11,6 +11,7 @@ use std::fmt;
 /// Handles are internal to `murk-arena` and never cross the FFI boundary.
 /// They encode enough information to resolve a `&[f32]` slice in O(1).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[must_use]
 pub struct FieldHandle {
     /// Arena generation when this allocation was made.
     pub(crate) generation: u32,

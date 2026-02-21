@@ -94,6 +94,10 @@ impl GridGeometry {
     /// `rank = a * strides[0] + b * strides[1]`.
     pub fn canonical_rank(&self, coord: &[i32]) -> usize {
         debug_assert_eq!(coord.len(), self.ndim);
+        debug_assert!(
+            coord.iter().all(|c| *c >= 0),
+            "canonical_rank called with negative coord: {coord:?}"
+        );
         let mut rank = 0usize;
         for (c, &stride) in coord.iter().zip(&self.coord_strides) {
             rank += *c as usize * stride;
@@ -122,10 +126,16 @@ impl GridGeometry {
     ///
     /// For wrapped spaces (`all_wrap == true`), every position is interior.
     pub fn is_interior(&self, center: &[i32], radius: u32) -> bool {
+        if center.len() != self.ndim {
+            return false;
+        }
         if self.all_wrap {
             return true;
         }
-        let r = radius as i32;
+        let r = match i32::try_from(radius) {
+            Ok(r) => r,
+            Err(_) => return false, // radius exceeds any i32-indexed grid
+        };
         for (c, &dim) in center.iter().zip(&self.coord_dims) {
             if *c < r || *c + r >= dim as i32 {
                 return false;
@@ -320,6 +330,37 @@ mod tests {
         assert_eq!(geo.graph_distance(&[1, 1]), 2); // max(1,1,2)=2
         assert_eq!(geo.graph_distance(&[-2, -2]), 4); // max(2,2,4)=4
         assert_eq!(geo.graph_distance(&[2, -1]), 2); // max(2,1,1)=2
+    }
+
+    #[test]
+    fn is_interior_wrong_dim_returns_false() {
+        let s = Square4::new(20, 20, EdgeBehavior::Absorb).unwrap();
+        let geo = GridGeometry::from_space(&s).unwrap();
+        // Empty center on a 2D grid must return false, not true.
+        assert!(!geo.is_interior(&[], 3));
+        // Too few dimensions.
+        assert!(!geo.is_interior(&[10], 3));
+        // Too many dimensions.
+        assert!(!geo.is_interior(&[10, 10, 10], 3));
+    }
+
+    #[test]
+    fn is_interior_huge_radius_returns_false() {
+        let s = Square4::new(20, 20, EdgeBehavior::Absorb).unwrap();
+        let geo = GridGeometry::from_space(&s).unwrap();
+        // radius > i32::MAX should never be interior on a finite grid.
+        assert!(!geo.is_interior(&[10, 10], u32::MAX));
+        assert!(!geo.is_interior(&[10, 10], i32::MAX as u32 + 1));
+    }
+
+    #[test]
+    fn canonical_rank_rejects_negative_coords() {
+        let s = Square4::new(10, 8, EdgeBehavior::Absorb).unwrap();
+        let geo = GridGeometry::from_space(&s).unwrap();
+        // Negative coords should not silently produce a bogus rank.
+        // in_bounds returns false, so callers should check first.
+        assert!(!geo.in_bounds(&[-1, 3]));
+        assert!(!geo.in_bounds(&[3, -1]));
     }
 
     #[test]

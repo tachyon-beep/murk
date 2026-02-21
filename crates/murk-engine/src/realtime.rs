@@ -48,7 +48,7 @@ use crate::tick_thread::{IngressBatch, TickThreadState};
 // ── Error types ──────────────────────────────────────────────────
 
 /// Error submitting commands to the tick thread.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum SubmitError {
     /// The tick thread has shut down.
     Shutdown,
@@ -300,6 +300,17 @@ impl RealtimeAsyncWorld {
                 output: buf,
                 mask: mbuf,
             } => {
+                if buf.len() > output.len() || mbuf.len() > mask.len() {
+                    return Err(ObsError::ExecutionFailed {
+                        reason: format!(
+                            "output buffer too small: need ({}, {}) got ({}, {})",
+                            buf.len(),
+                            mbuf.len(),
+                            output.len(),
+                            mask.len()
+                        ),
+                    });
+                }
                 output[..buf.len()].copy_from_slice(&buf);
                 mask[..mbuf.len()].copy_from_slice(&mbuf);
                 Ok(metadata)
@@ -365,10 +376,19 @@ impl RealtimeAsyncWorld {
                 output: buf,
                 mask: mbuf,
             } => {
-                let copy_out = buf.len().min(output.len());
-                output[..copy_out].copy_from_slice(&buf[..copy_out]);
-                let copy_mask = mbuf.len().min(mask.len());
-                mask[..copy_mask].copy_from_slice(&mbuf[..copy_mask]);
+                if buf.len() > output.len() || mbuf.len() > mask.len() {
+                    return Err(ObsError::ExecutionFailed {
+                        reason: format!(
+                            "output buffer too small: need ({}, {}) got ({}, {})",
+                            buf.len(),
+                            mbuf.len(),
+                            output.len(),
+                            mask.len()
+                        ),
+                    });
+                }
+                output[..buf.len()].copy_from_slice(&buf);
+                mask[..mbuf.len()].copy_from_slice(&mbuf);
                 Ok(metadata)
             }
             ObsResult::Error(e) => Err(e),
@@ -415,7 +435,8 @@ impl RealtimeAsyncWorld {
 
     /// Shutdown the world with the 4-state machine.
     ///
-    /// 1. **Running → Draining (≤33ms):** Set shutdown flag, wait for tick stop.
+    /// 1. **Running → Draining (≤33ms):** Set shutdown flag, unpark tick
+    ///    thread (wakes it from budget sleep immediately), wait for tick stop.
     /// 2. **Draining → Quiescing (≤200ms):** Cancel workers, drop obs channel.
     /// 3. **Quiescing → Dropped (≤10ms):** Join all threads.
     pub fn shutdown(&mut self) -> ShutdownReport {
@@ -434,6 +455,13 @@ impl RealtimeAsyncWorld {
         // Phase 1: Running → Draining
         self.state = ShutdownState::Draining;
         self.shutdown_flag.store(true, Ordering::Release);
+
+        // Wake the tick thread if it's parked in a budget sleep.
+        // park_timeout is used instead of thread::sleep, so unpark()
+        // provides immediate wakeup regardless of tick_rate_hz.
+        if let Some(handle) = &self.tick_thread {
+            handle.thread().unpark();
+        }
 
         // Wait for tick thread to acknowledge (≤33ms budget).
         let drain_deadline = Instant::now() + Duration::from_millis(33);
@@ -519,7 +547,7 @@ impl RealtimeAsyncWorld {
             .lock()
             .unwrap()
             .take()
-            .ok_or(ConfigError::InvalidTickRate { value: 0.0 })?;
+            .ok_or(ConfigError::EngineRecoveryFailed)?;
 
         // Reset the engine (clears arena, ingress, tick counter).
         // If reset fails, restore the engine so a subsequent reset can retry.
@@ -646,6 +674,16 @@ impl murk_space::Space for ArcSpaceWrapper {
 
     fn instance_id(&self) -> murk_core::SpaceInstanceId {
         self.0.instance_id()
+    }
+
+    fn topology_eq(&self, other: &dyn murk_space::Space) -> bool {
+        // Unwrap ArcSpaceWrapper so the inner space's downcast-based
+        // comparison sees the concrete type, not this wrapper.
+        if let Some(w) = (other as &dyn std::any::Any).downcast_ref::<ArcSpaceWrapper>() {
+            self.0.topology_eq(&*w.0)
+        } else {
+            self.0.topology_eq(other)
+        }
     }
 }
 
@@ -857,6 +895,48 @@ mod tests {
         );
     }
 
+    /// Regression test: with a very slow tick rate, shutdown must still
+    /// complete within the documented budget. Before the fix, the tick
+    /// thread used `thread::sleep` which was uninterruptible by the
+    /// shutdown flag, causing shutdown to block for the full tick budget.
+    #[test]
+    fn shutdown_fast_with_slow_tick_rate() {
+        let config = WorldConfig {
+            tick_rate_hz: Some(0.5), // 2-second tick budget
+            ..test_config()
+        };
+        let mut world = RealtimeAsyncWorld::new(config, AsyncConfig::default()).unwrap();
+
+        // Wait for at least one tick to complete so the ring is non-empty
+        // and the tick thread enters its budget sleep.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while world.latest_snapshot().is_none() {
+            if Instant::now() > deadline {
+                panic!("no snapshot produced within 5s");
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        // Give the tick thread time to enter its budget sleep.
+        std::thread::sleep(Duration::from_millis(50));
+
+        let start = Instant::now();
+        let report = world.shutdown();
+        let wall_ms = start.elapsed().as_millis();
+
+        // Shutdown should complete well under the 2-second tick budget.
+        // Allow 500ms for CI overhead; the point is it shouldn't take 2s.
+        assert!(
+            wall_ms < 500,
+            "shutdown took {wall_ms}ms with 0.5Hz tick rate \
+             (report: total={}ms, drain={}ms, quiesce={}ms)",
+            report.total_ms,
+            report.drain_ms,
+            report.quiesce_ms
+        );
+        assert!(report.tick_joined);
+    }
+
     #[test]
     fn reset_lifecycle() {
         let mut world = RealtimeAsyncWorld::new(test_config(), AsyncConfig::default()).unwrap();
@@ -889,5 +969,32 @@ mod tests {
         assert!(world.current_epoch() > 0, "should be ticking after reset");
 
         world.shutdown();
+    }
+
+    #[test]
+    fn arc_space_wrapper_topology_eq() {
+        // Two ArcSpaceWrappers around identical Line1D spaces must compare
+        // as topologically equal. Before the fix, the inner downcast saw
+        // ArcSpaceWrapper instead of Line1D and returned false.
+        let a = ArcSpaceWrapper(Arc::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()));
+        let b = ArcSpaceWrapper(Arc::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()));
+        assert!(
+            a.topology_eq(&b),
+            "identical Line1D through ArcSpaceWrapper should be topology-equal"
+        );
+
+        // Different sizes must not match.
+        let c = ArcSpaceWrapper(Arc::new(Line1D::new(20, EdgeBehavior::Absorb).unwrap()));
+        assert!(
+            !a.topology_eq(&c),
+            "different Line1D sizes should not be topology-equal"
+        );
+
+        // Comparing ArcSpaceWrapper with a bare Line1D should also work.
+        let bare = Line1D::new(10, EdgeBehavior::Absorb).unwrap();
+        assert!(
+            a.topology_eq(&bare),
+            "ArcSpaceWrapper(Line1D) vs bare Line1D should be topology-equal"
+        );
     }
 }

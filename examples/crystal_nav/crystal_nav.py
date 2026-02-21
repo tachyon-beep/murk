@@ -28,7 +28,10 @@ from stable_baselines3.common.vec_env import DummyVecEnv
 from stable_baselines3.common.utils import set_random_seed
 
 import murk
-from murk import Command, Config, ObsEntry, FieldMutability, FieldType, EdgeBehavior, WriteMode
+from murk import (
+    Command, Config, ObsEntry, FieldMutability, FieldType,
+    EdgeBehavior, ScalarDiffusion,
+)
 
 # ─── World parameters ───────────────────────────────────────────
 
@@ -220,58 +223,18 @@ if __debug__:
     assert (RADIATION_X, RADIATION_Y, RADIATION_Z) in COORD_TO_RANK, "radiation not a valid FCC cell"
 
 
-# ─── Propagator: graph Laplacian diffusion ──────────────────────
+# ─── Propagator: native Rust diffusion ───────────────────────────
 #
-# Decision: np.pad trick vs graph Laplacian.
-#   np.pad only works for rectangular grids (Square4, Square8). FCC's
-#   irregular connectivity requires a topology-agnostic approach.
+# Uses the native Rust ScalarDiffusion propagator from the library.
+# Two instances: one for beacon scent, one for radiation hazard.
+# Each runs at native speed (no GIL, no numpy copies, no Python
+# trampoline). The engine schedules them automatically based on
+# reads_previous/writes declarations.
 #
-# Decision: sentinel trick for vectorized numpy.
-#   Pad the field array with one extra element (sentinel = 0.0) at
-#   index CELL_COUNT. Missing neighbours in NBR_IDX point to this
-#   sentinel, so fancy indexing gathers 0.0 for them.
+# This replaces the Python graph-Laplacian dual_diffusion_step.
+# The Rust propagator uses the generic Space::neighbours() fallback
+# for FCC12 topology (no Square4 fast path needed).
 #
-#   This implements the combinatorial graph Laplacian on the induced
-#   subgraph: L*u = sum_nbr(u_nbr) - deg(v)*u_v.  The sentinel is
-#   a vectorisation convenience — missing neighbours are absent edges,
-#   not "outside world is zero".  DEGREE corrects the self-term
-#   (-deg * u), not a denominator.
-#
-#   This avoids Python loops over cells and runs at numpy speed.
-#
-
-def dual_diffusion_step(reads, reads_prev, writes, tick_id, dt, cell_count):
-    """Graph Laplacian diffusion for beacon and radiation fields.
-
-    Both fields use Jacobi-style reads (reads_previous) and full writes.
-    Different diffusion coefficients give different spread characteristics.
-    """
-    prev_beacon = reads_prev[0]
-    prev_radiation = reads_prev[1]
-    out_beacon = writes[0]
-    out_radiation = writes[1]
-
-    # --- Beacon scent diffusion (D=0.06, decay=0.01) ---
-    padded = np.zeros(cell_count + 1, dtype=np.float32)
-    padded[:cell_count] = prev_beacon
-    nbr_sum = padded[NBR_IDX].sum(axis=1)
-    laplacian = nbr_sum - DEGREE * prev_beacon
-    new_beacon = prev_beacon + BEACON_D * dt * laplacian - BEACON_DECAY * dt * prev_beacon
-    beacon_rank = COORD_TO_RANK[(BEACON_X, BEACON_Y, BEACON_Z)]
-    new_beacon[beacon_rank] = SOURCE_INTENSITY
-    np.maximum(new_beacon, 0.0, out=new_beacon)
-    out_beacon[:] = new_beacon
-
-    # --- Radiation hazard diffusion (D=0.04, decay=0.03) ---
-    padded[:cell_count] = prev_radiation
-    padded[cell_count] = 0.0  # re-zero the sentinel
-    nbr_sum = padded[NBR_IDX].sum(axis=1)
-    laplacian = nbr_sum - DEGREE * prev_radiation
-    new_radiation = prev_radiation + RADIATION_D * dt * laplacian - RADIATION_DECAY * dt * prev_radiation
-    radiation_rank = COORD_TO_RANK[(RADIATION_X, RADIATION_Y, RADIATION_Z)]
-    new_radiation[radiation_rank] = SOURCE_INTENSITY
-    np.maximum(new_radiation, 0.0, out=new_radiation)
-    out_radiation[:] = new_radiation
 
 
 # ─── Environment ─────────────────────────────────────────────────
@@ -312,16 +275,26 @@ class CrystalNavEnv(murk.MurkEnv):
         config.set_dt(1.0)
         config.set_seed(seed)
 
-        # Register dual diffusion propagator.
-        # Reads previous tick of both beacon and radiation (Jacobi style).
-        # Writes full to both fields.
-        murk.add_propagator(
-            config,
-            name="dual_diffusion",
-            step_fn=dual_diffusion_step,
-            reads_previous=[BEACON_FIELD, RADIATION_FIELD],
-            writes=[(BEACON_FIELD, WriteMode.Full), (RADIATION_FIELD, WriteMode.Full)],
-        )
+        # Register native diffusion propagators (Jacobi style, pure Rust).
+        beacon_rank = COORD_TO_RANK[(BEACON_X, BEACON_Y, BEACON_Z)]
+        ScalarDiffusion(
+            input_field=BEACON_FIELD,
+            output_field=BEACON_FIELD,
+            coefficient=BEACON_D,
+            decay=BEACON_DECAY,
+            sources=[(beacon_rank, SOURCE_INTENSITY)],
+            clamp_min=0.0,
+        ).register(config)
+
+        radiation_rank = COORD_TO_RANK[(RADIATION_X, RADIATION_Y, RADIATION_Z)]
+        ScalarDiffusion(
+            input_field=RADIATION_FIELD,
+            output_field=RADIATION_FIELD,
+            coefficient=RADIATION_D,
+            decay=RADIATION_DECAY,
+            sources=[(radiation_rank, SOURCE_INTENSITY)],
+            clamp_min=0.0,
+        ).register(config)
 
         # Observation plan: all three fields in full.
         obs_entries = [
@@ -375,6 +348,7 @@ class CrystalNavEnv(murk.MurkEnv):
         tick_id, age_ticks = self._obs_plan.execute(
             self._world, self._obs_buf, self._mask_buf
         )
+        self._episode_start_tick = tick_id
         obs = self._obs_buf.copy()
         return obs, {"tick_id": tick_id, "age_ticks": age_ticks}
 

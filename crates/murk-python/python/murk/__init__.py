@@ -6,6 +6,8 @@ This package provides:
 """
 
 from murk._murk import (
+    AgentEmission,
+    BatchedWorld,
     BoundaryBehavior,
     Command,
     CommandType,
@@ -14,20 +16,29 @@ from murk._murk import (
     EdgeBehavior,
     FieldMutability,
     FieldType,
+    FlowField,
+    GradientCompute,
+    IdentityCopy,
+    MorphologicalOp,
+    NoiseInjection,
     ObsEntry,
     ObsPlan,
     PoolKernel,
     PropagatorDef,
     Receipt,
     RegionType,
+    ResourceField,
+    ScalarDiffusion,
     SpaceType,
     StepMetrics,
     TransformType,
+    WavePropagation,
     World,
     WriteMode,
     add_propagator,
 )
 
+from murk.batched_vec_env import BatchedVecEnv
 from murk.env import MurkEnv
 from murk.vec_env import MurkVecEnv
 
@@ -45,6 +56,7 @@ __all__ = [
     "PoolKernel",
     "DType",
     # Core classes
+    "BatchedWorld",
     "Config",
     "Command",
     "Receipt",
@@ -53,9 +65,20 @@ __all__ = [
     "ObsPlan",
     "StepMetrics",
     "PropagatorDef",
+    # Library propagators
+    "AgentEmission",
+    "FlowField",
+    "GradientCompute",
+    "IdentityCopy",
+    "MorphologicalOp",
+    "NoiseInjection",
+    "ResourceField",
+    "ScalarDiffusion",
+    "WavePropagation",
     # Functions
     "add_propagator",
     # Gymnasium
+    "BatchedVecEnv",
     "MurkEnv",
     "MurkVecEnv",
 ]

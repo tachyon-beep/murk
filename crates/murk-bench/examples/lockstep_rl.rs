@@ -1,3 +1,4 @@
+#![allow(deprecated)] // Uses the old reference pipeline field constants.
 //! End-to-end lockstep RL loop example.
 //!
 //! Demonstrates: build config → LockstepWorld → inject actions → step → read
@@ -7,6 +8,7 @@ use murk_bench::reference_profile;
 use murk_core::FieldReader;
 use murk_engine::LockstepWorld;
 use murk_propagators::agent_movement::{new_action_buffer, AgentAction, Direction};
+#[allow(deprecated)]
 use murk_propagators::fields::{HEAT, REWARD};
 
 fn main() {

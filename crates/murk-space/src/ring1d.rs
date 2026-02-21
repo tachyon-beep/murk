@@ -113,6 +113,12 @@ impl Space for Ring1D {
     fn instance_id(&self) -> SpaceInstanceId {
         self.instance_id
     }
+
+    fn topology_eq(&self, other: &dyn Space) -> bool {
+        (other as &dyn std::any::Any)
+            .downcast_ref::<Self>()
+            .is_some_and(|o| self.len == o.len)
+    }
 }
 
 #[cfg(test)]
@@ -172,7 +178,7 @@ mod tests {
     fn compile_region_all() {
         let s = Ring1D::new(8).unwrap();
         let plan = s.compile_region(&RegionSpec::All).unwrap();
-        assert_eq!(plan.cell_count, 8);
+        assert_eq!(plan.cell_count(), 8);
         assert_eq!(plan.valid_ratio(), 1.0);
     }
 

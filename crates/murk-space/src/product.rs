@@ -126,7 +126,12 @@ impl ProductSpace {
     }
 
     /// Compute distance using an alternate metric (not the default L1).
-    pub fn metric_distance(&self, a: &Coord, b: &Coord, metric: &ProductMetric) -> f64 {
+    pub fn metric_distance(
+        &self,
+        a: &Coord,
+        b: &Coord,
+        metric: &ProductMetric,
+    ) -> Result<f64, SpaceError> {
         let per_comp: Vec<f64> = (0..self.components.len())
             .map(|i| {
                 let ca = self.split_coord(a, i);
@@ -136,10 +141,20 @@ impl ProductSpace {
             .collect();
 
         match metric {
-            ProductMetric::L1 => per_comp.iter().sum(),
-            ProductMetric::LInfinity => per_comp.iter().copied().fold(0.0f64, f64::max),
+            ProductMetric::L1 => Ok(per_comp.iter().sum()),
+            ProductMetric::LInfinity => Ok(per_comp.iter().copied().fold(0.0f64, f64::max)),
             ProductMetric::Weighted(weights) => {
-                per_comp.iter().zip(weights).map(|(d, w)| d * w).sum()
+                if weights.len() != self.components.len() {
+                    return Err(SpaceError::InvalidComposition {
+                        reason: format!(
+                            "weighted metric requires exactly one weight per component \
+                             (got {} weights for {} components)",
+                            weights.len(),
+                            self.components.len(),
+                        ),
+                    });
+                }
+                Ok(per_comp.iter().zip(weights).map(|(d, w)| d * w).sum())
             }
         }
     }
@@ -216,9 +231,7 @@ impl ProductSpace {
             }
         }
 
-        let cell_count = coords.len();
         RegionPlan {
-            cell_count,
             coords,
             tensor_indices,
             valid_mask,
@@ -339,15 +352,14 @@ impl Space for ProductSpace {
                 let mut sorted: Vec<Coord> = coords.clone();
                 self.sort_canonical(&mut sorted);
                 sorted.dedup();
-                let cell_count = sorted.len();
-                let tensor_indices: Vec<usize> = (0..cell_count).collect();
-                let valid_mask = vec![1u8; cell_count];
+                let n = sorted.len();
+                let tensor_indices: Vec<usize> = (0..n).collect();
+                let valid_mask = vec![1u8; n];
                 Ok(RegionPlan {
-                    cell_count,
                     coords: sorted,
                     tensor_indices,
                     valid_mask,
-                    bounding_shape: BoundingShape::Rect(vec![cell_count]),
+                    bounding_shape: BoundingShape::Rect(vec![n]),
                 })
             }
         }
@@ -413,6 +425,18 @@ impl Space for ProductSpace {
     fn instance_id(&self) -> SpaceInstanceId {
         self.instance_id
     }
+
+    fn topology_eq(&self, other: &dyn Space) -> bool {
+        let Some(o) = (other as &dyn std::any::Any).downcast_ref::<Self>() else {
+            return false;
+        };
+        self.components.len() == o.components.len()
+            && self
+                .components
+                .iter()
+                .zip(o.components.iter())
+                .all(|(a, b)| a.topology_eq(b.as_ref()))
+    }
 }
 
 impl ProductSpace {
@@ -457,16 +481,15 @@ impl ProductSpace {
         }
 
         self.sort_canonical(&mut result);
-        let cell_count = result.len();
-        let tensor_indices: Vec<usize> = (0..cell_count).collect();
-        let valid_mask = vec![1u8; cell_count];
+        let n = result.len();
+        let tensor_indices: Vec<usize> = (0..n).collect();
+        let valid_mask = vec![1u8; n];
 
         Ok(RegionPlan {
-            cell_count,
             coords: result,
             tensor_indices,
             valid_mask,
-            bounding_shape: BoundingShape::Rect(vec![cell_count]),
+            bounding_shape: BoundingShape::Rect(vec![n]),
         })
     }
 }
@@ -525,7 +548,11 @@ mod tests {
         let s = hex_line();
         let a: Coord = smallvec![2, 1, 5];
         let b: Coord = smallvec![4, 0, 8];
-        assert_eq!(s.metric_distance(&a, &b, &ProductMetric::LInfinity), 3.0);
+        assert_eq!(
+            s.metric_distance(&a, &b, &ProductMetric::LInfinity)
+                .unwrap(),
+            3.0
+        );
     }
 
     #[test]
@@ -535,7 +562,8 @@ mod tests {
         let b: Coord = smallvec![4, 0, 8];
         // hex_dist=2, line_dist=3, weights=[1.0, 2.0] → 2*1.0 + 3*2.0 = 8.0
         assert_eq!(
-            s.metric_distance(&a, &b, &ProductMetric::Weighted(vec![1.0, 2.0])),
+            s.metric_distance(&a, &b, &ProductMetric::Weighted(vec![1.0, 2.0]))
+                .unwrap(),
             8.0
         );
     }
@@ -571,7 +599,7 @@ mod tests {
             })
             .unwrap();
         // hex rect: 2 cols * 2 rows = 4, line rect: 3 cells → 4 * 3 = 12
-        assert_eq!(plan.cell_count, 12);
+        assert_eq!(plan.cell_count(), 12);
     }
 
     // ── Structural tests ────────────────────────────────────────
@@ -723,6 +751,40 @@ mod tests {
             radius: 1,
         });
         assert!(result.is_err());
+    }
+
+    // ── BUG-024: weighted metric must reject arity mismatch ────
+
+    #[test]
+    fn weighted_metric_too_few_weights_returns_err() {
+        let s = hex_line(); // 2 components
+        let a: Coord = smallvec![2, 1, 5];
+        let b: Coord = smallvec![4, 0, 8];
+        // Only 1 weight for 2 components — must return Err
+        let result = s.metric_distance(&a, &b, &ProductMetric::Weighted(vec![1.0]));
+        assert!(matches!(result, Err(SpaceError::InvalidComposition { .. })));
+    }
+
+    #[test]
+    fn weighted_metric_too_many_weights_returns_err() {
+        let s = hex_line(); // 2 components
+        let a: Coord = smallvec![2, 1, 5];
+        let b: Coord = smallvec![4, 0, 8];
+        // 3 weights for 2 components — must return Err
+        let result = s.metric_distance(&a, &b, &ProductMetric::Weighted(vec![1.0, 2.0, 3.0]));
+        assert!(matches!(result, Err(SpaceError::InvalidComposition { .. })));
+    }
+
+    #[test]
+    fn weighted_metric_exact_match_succeeds() {
+        let s = hex_line(); // 2 components
+        let a: Coord = smallvec![2, 1, 5];
+        let b: Coord = smallvec![4, 0, 8];
+        // Exactly 2 weights for 2 components — correct
+        let d = s
+            .metric_distance(&a, &b, &ProductMetric::Weighted(vec![1.0, 1.0]))
+            .unwrap();
+        assert_eq!(d, 5.0); // hex_dist(2) + line_dist(3) = 5
     }
 
     // ── Property tests ──────────────────────────────────────────

@@ -4,6 +4,8 @@
 //! rebuild config → replay via ReplayReader<&[u8]> through fresh LockstepWorld →
 //! compare hashes per tick.
 
+#![allow(deprecated)] // Tests use the old reference pipeline constants intentionally.
+
 use murk_core::command::{Command, CommandPayload};
 use murk_core::id::{Coord, FieldId, ParameterKey, TickId};
 use murk_core::{BoundaryBehavior, FieldDef, FieldMutability, FieldType};
@@ -11,6 +13,7 @@ use murk_engine::{BackoffConfig, LockstepWorld, WorldConfig};
 use murk_propagators::agent_movement::{
     new_action_buffer, ActionBuffer, AgentAction, AgentMovementPropagator, Direction,
 };
+#[allow(deprecated)]
 use murk_propagators::{reference_fields, DiffusionPropagator, RewardPropagator};
 use murk_replay::codec::{deserialize_command, serialize_command};
 use murk_replay::hash::snapshot_hash;
@@ -63,7 +66,7 @@ fn record_run(
 ) {
     for tick in 1..=ticks {
         let cmds = commands_per_tick(tick);
-        let serialized: Vec<_> = cmds.iter().map(serialize_command).collect();
+        let serialized: Vec<_> = cmds.iter().map(|c| serialize_command(c).unwrap()).collect();
         let result = world.step_sync(cmds).unwrap();
         let hash = snapshot_hash(&result.snapshot, field_count);
         let frame = murk_replay::Frame {

@@ -1,7 +1,7 @@
 # Murk Concepts Guide
 
 This guide explains the mental model behind Murk. It's written for someone
-who has run the [heat_seeker](../examples/heat_seeker/) example and wants
+who has run the [heat_seeker](https://github.com/tachyon-beep/murk/tree/main/examples/heat_seeker) example and wants
 to build something of their own.
 
 Every Murk simulation has five components:
@@ -123,6 +123,12 @@ regularly.
 them, at which point a new buffer is allocated (copy-on-write). Use
 these for data that changes rarely — the arena skips allocation on
 ticks where the field isn't modified.
+
+**Quick decision guide:**
+1. Does this field ever change after initialization? No --> `Static`
+2. Does it change every tick? Yes --> `PerTick`
+3. Does it change rarely (< 10% of ticks)? Yes --> `Sparse`
+4. Unsure? Default to `PerTick`
 
 ### Bounds and boundary behavior
 
@@ -375,7 +381,76 @@ let result = world.observe(&mut plan)?;
 - Epoch-based reclamation ensures snapshots aren't freed while being read
 - Command channel provides back-pressure when the queue is full
 
-The Python bindings currently only expose `LockstepWorld`.
+The Python bindings expose `LockstepWorld` via `MurkEnv`/`MurkVecEnv`, and `BatchedEngine` via `BatchedVecEnv` for high-throughput training.
+
+### BatchedEngine (high-throughput training)
+
+For RL training at scale, stepping worlds one-by-one through Python has
+a bottleneck: each `step()` call acquires and releases the GIL. With
+thousands of environments, this overhead dominates.
+
+`BatchedEngine` solves this by owning N `LockstepWorld` instances and
+stepping them all in a single Rust call. The GIL is released once,
+covering the entire step + observe operation for all worlds:
+
+```python
+from murk import BatchedVecEnv, Config, ObsEntry, RegionType
+
+def make_config(i: int) -> Config:
+    cfg = Config()
+    cfg.set_space_square4(rows=16, cols=16)
+    cfg.add_field("temperature", initial_value=0.0)
+    return cfg
+
+obs_entries = [ObsEntry(field_id=0, region_type=RegionType.All)]
+env = BatchedVecEnv(make_config, obs_entries, num_envs=64)
+
+obs, info = env.reset(seed=42)
+obs, rewards, terminateds, truncateds, info = env.step(actions)
+```
+
+**Architecture (three layers):**
+
+| Layer | Class | Role |
+|-------|-------|------|
+| Rust engine | `BatchedEngine` | Owns N `LockstepWorld`s, `step_and_observe()` |
+| PyO3 wrapper | `BatchedWorld` | Handles GIL release, buffer validation |
+| Pure Python | `BatchedVecEnv` | SB3-compatible API, auto-reset, override hooks |
+
+**Override hooks** let you customise the RL interface without touching Rust:
+
+- `_actions_to_commands(actions)` — convert action array to per-world command lists
+- `_compute_rewards(obs, tick_ids)` — compute per-world rewards
+- `_check_terminated(obs, tick_ids)` — per-world termination conditions
+- `_check_truncated(obs, tick_ids)` — per-world truncation conditions
+
+Here is a minimal example of overriding `_compute_rewards` in a
+subclass (from the
+[batched_heat_seeker](https://github.com/tachyon-beep/murk/tree/main/examples/batched_heat_seeker)
+example):
+
+```python
+class BatchedHeatSeekerEnv(BatchedVecEnv):
+    def step(self, actions):
+        # ... move agents, build commands, call step_and_observe ...
+        obs = self._obs_flat.reshape(self.num_envs, self._obs_per_world)
+
+        # Vectorized reward: index into (N, cell_count) heat matrix
+        heat = obs[:, :CELL_COUNT]
+        agent_indices = self._agent_y * GRID_W + self._agent_x
+        heat_at_agent = heat[np.arange(self.num_envs), agent_indices]
+
+        terminated = (self._agent_x == SOURCE_X) & (self._agent_y == SOURCE_Y)
+        rewards = REWARD_SCALE * heat_at_agent - STEP_PENALTY
+        rewards[terminated] += TERMINAL_BONUS
+
+        # ... auto-reset, return obs/rewards/terminated/truncated/info ...
+```
+
+**vs MurkVecEnv:** `MurkVecEnv` wraps N independent `World` objects and
+calls `step()` N times (N GIL releases). `BatchedVecEnv` calls
+`step_and_observe()` once (1 GIL release). For 1024 environments, this
+eliminates ~1023 unnecessary GIL cycles per training step.
 
 ---
 
@@ -474,7 +549,7 @@ obs, info = env.reset()
 obs, reward, terminated, truncated, info = env.step(action)
 ```
 
-For a complete working example, see [heat_seeker](../examples/heat_seeker/).
+For a complete working example, see [heat_seeker](https://github.com/tachyon-beep/murk/tree/main/examples/heat_seeker).
 
 ---
 
@@ -490,4 +565,4 @@ For a complete working example, see [heat_seeker](../examples/heat_seeker/).
 | **ObsPlan** | Compiled observation plan. Precomputes gather indices for fast extraction. |
 | **Ingress** | The command queue that feeds actions into the tick loop. |
 | **Egress** | The observation pathway that extracts state out of the simulation. |
-| **CFL condition** | Courant-Friedrichs-Lewy stability constraint: `N * D * dt < 1` where N is neighbor count. |
+| **CFL condition** | Courant-Friedrichs-Lewy stability constraint: `N * D * dt < 1`, where **N** is the neighbor count of the space (e.g., 4 for `Square4`), **D** is the diffusion coefficient, and **dt** is the simulation timestep. When this condition is violated, explicit diffusion becomes numerically unstable -- values oscillate or diverge instead of converging. Propagators can declare `max_dt()` so the engine rejects configurations that violate their CFL bound at startup. |

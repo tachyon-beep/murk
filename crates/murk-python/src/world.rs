@@ -121,7 +121,9 @@ impl World {
         });
         check_status(status)?;
 
-        let receipts: Vec<Receipt> = receipts_buf[..n_receipts]
+        // Clamp to buffer length as defense-in-depth against FFI over-reporting.
+        let n = n_receipts.min(receipts_buf.len());
+        let receipts: Vec<Receipt> = receipts_buf[..n]
             .iter()
             .map(|r| Receipt::from_ffi(*r))
             .collect();

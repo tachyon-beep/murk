@@ -8,7 +8,7 @@
 use indexmap::IndexMap;
 use murk_core::{FieldId, FieldSet};
 
-use crate::propagator::Propagator;
+use crate::propagator::{Propagator, WriteMode};
 
 use std::error::Error;
 use std::fmt;
@@ -28,14 +28,18 @@ pub enum ReadSource {
 }
 
 /// Precomputed routing table mapping each `(propagator, field)` to its
-/// [`ReadSource`].
+/// [`ReadSource`], and each written field to its [`WriteMode`].
 ///
 /// Built once by [`validate_pipeline`]. The engine consults this plan
-/// to configure each propagator's `FieldReader` before calling `step()`.
+/// to configure each propagator's `FieldReader` before calling `step()`
+/// and to seed [`WriteMode::Incremental`] buffers from the previous generation.
 #[derive(Debug)]
+#[must_use]
 pub struct ReadResolutionPlan {
     /// `routes[propagator_index]` maps `FieldId → ReadSource`.
     routes: Vec<IndexMap<FieldId, ReadSource>>,
+    /// `write_modes[propagator_index]` maps `FieldId → WriteMode`.
+    write_modes: Vec<IndexMap<FieldId, WriteMode>>,
 }
 
 impl ReadResolutionPlan {
@@ -58,12 +62,40 @@ impl ReadResolutionPlan {
     pub fn routes_for(&self, propagator_index: usize) -> Option<&IndexMap<FieldId, ReadSource>> {
         self.routes.get(propagator_index)
     }
+
+    /// Look up the write mode for a field in a given propagator's context.
+    pub fn write_mode(&self, propagator_index: usize, field: FieldId) -> Option<WriteMode> {
+        self.write_modes.get(propagator_index)?.get(&field).copied()
+    }
+
+    /// All `(field, mode)` pairs for a propagator's writes.
+    pub fn write_modes_for(
+        &self,
+        propagator_index: usize,
+    ) -> Option<&IndexMap<FieldId, WriteMode>> {
+        self.write_modes.get(propagator_index)
+    }
+
+    /// Fields declared as [`WriteMode::Incremental`] for a given propagator.
+    ///
+    /// The engine must copy previous-generation data into the write buffer
+    /// for each of these fields before calling `step()`.
+    pub fn incremental_fields_for(&self, propagator_index: usize) -> Vec<FieldId> {
+        match self.write_modes.get(propagator_index) {
+            Some(modes) => modes
+                .iter()
+                .filter(|(_, &mode)| mode == WriteMode::Incremental)
+                .map(|(&field_id, _)| field_id)
+                .collect(),
+            None => Vec::new(),
+        }
+    }
 }
 
 // ── Errors ─────────────────────────────────────────────────────────
 
 /// A detected write-write conflict between two propagators.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WriteConflict {
     /// The contested field.
     pub field_id: FieldId,
@@ -74,7 +106,7 @@ pub struct WriteConflict {
 }
 
 /// Errors from pipeline validation (startup-time, not per-tick).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum PipelineError {
     /// No propagators registered.
     EmptyPipeline,
@@ -103,6 +135,14 @@ pub enum PipelineError {
     /// The configured dt is not a valid timestep (NaN, infinity, zero, or negative).
     InvalidDt {
         /// The invalid dt value.
+        value: f64,
+    },
+
+    /// A propagator's `max_dt()` returned a non-finite or non-positive value.
+    InvalidMaxDt {
+        /// Which propagator.
+        propagator: String,
+        /// The invalid max_dt value.
         value: f64,
     },
 }
@@ -147,6 +187,13 @@ impl fmt::Display for PipelineError {
             }
             Self::InvalidDt { value } => {
                 write!(f, "dt must be finite and positive, got {value}")
+            }
+            Self::InvalidMaxDt { propagator, value } => {
+                write!(
+                    f,
+                    "propagator '{propagator}' returned invalid max_dt: {value} \
+                     (must be finite and positive)"
+                )
             }
         }
     }
@@ -237,6 +284,12 @@ pub fn validate_pipeline(
         let mut constraining = String::new();
         for prop in propagators {
             if let Some(max) = prop.max_dt() {
+                if !max.is_finite() || max <= 0.0 {
+                    return Err(PipelineError::InvalidMaxDt {
+                        propagator: prop.name().to_string(),
+                        value: max,
+                    });
+                }
                 if max < min_max_dt {
                     min_max_dt = max;
                     constraining = prop.name().to_string();
@@ -255,9 +308,11 @@ pub fn validate_pipeline(
     // 5. Build ReadResolutionPlan
     let mut last_writer: IndexMap<FieldId, usize> = IndexMap::new();
     let mut routes: Vec<IndexMap<FieldId, ReadSource>> = Vec::with_capacity(propagators.len());
+    let mut write_modes: Vec<IndexMap<FieldId, WriteMode>> = Vec::with_capacity(propagators.len());
 
     for (i, prop) in propagators.iter().enumerate() {
         let mut prop_routes = IndexMap::new();
+        let mut prop_write_modes = IndexMap::new();
 
         // Route reads() through overlay
         for field_id in prop.reads().iter() {
@@ -274,13 +329,19 @@ pub fn validate_pipeline(
 
         routes.push(prop_routes);
 
-        // Update last_writer for subsequent propagators
-        for (field_id, _mode) in prop.writes() {
+        // Record write modes and update last_writer for subsequent propagators
+        for (field_id, mode) in prop.writes() {
+            prop_write_modes.insert(field_id, mode);
             last_writer.insert(field_id, i);
         }
+
+        write_modes.push(prop_write_modes);
     }
 
-    Ok(ReadResolutionPlan { routes })
+    Ok(ReadResolutionPlan {
+        routes,
+        write_modes,
+    })
 }
 
 #[cfg(test)]
@@ -666,6 +727,79 @@ mod tests {
         assert_eq!(plan.source(0, FieldId(2)), None);
     }
 
+    // ── Write mode metadata ─────────────────────────────────────
+
+    #[test]
+    fn write_mode_full_recorded_in_plan() {
+        // PropAB writes field 1 as Full
+        let props: Vec<Box<dyn Propagator>> = vec![Box::new(PropAB)];
+        let plan = validate_pipeline(&props, &fields_0_1_2(), 0.1).unwrap();
+
+        assert_eq!(plan.write_mode(0, FieldId(1)), Some(WriteMode::Full));
+        // Field 0 is read, not written — no write mode
+        assert_eq!(plan.write_mode(0, FieldId(0)), None);
+        // No incremental fields for PropAB
+        assert!(plan.incremental_fields_for(0).is_empty());
+    }
+
+    #[test]
+    fn write_mode_incremental_recorded_in_plan() {
+        // A propagator that writes field 1 as Incremental
+        struct PropIncremental;
+        impl Propagator for PropIncremental {
+            fn name(&self) -> &str {
+                "PropIncremental"
+            }
+            fn reads(&self) -> FieldSet {
+                FieldSet::empty()
+            }
+            fn writes(&self) -> Vec<(FieldId, WriteMode)> {
+                vec![(FieldId(1), WriteMode::Incremental)]
+            }
+            fn step(&self, _ctx: &mut StepContext<'_>) -> Result<(), PropagatorError> {
+                Ok(())
+            }
+        }
+
+        let props: Vec<Box<dyn Propagator>> = vec![Box::new(PropIncremental)];
+        let plan = validate_pipeline(&props, &fields_0_1_2(), 0.1).unwrap();
+
+        assert_eq!(plan.write_mode(0, FieldId(1)), Some(WriteMode::Incremental));
+        assert_eq!(plan.incremental_fields_for(0), vec![FieldId(1)]);
+    }
+
+    #[test]
+    fn mixed_write_modes_in_multi_stage_pipeline() {
+        // PropAB writes field 1 as Full; add another propagator writing
+        // field 2 as Incremental
+        struct PropIncrC;
+        impl Propagator for PropIncrC {
+            fn name(&self) -> &str {
+                "PropIncrC"
+            }
+            fn reads(&self) -> FieldSet {
+                FieldSet::empty()
+            }
+            fn writes(&self) -> Vec<(FieldId, WriteMode)> {
+                vec![(FieldId(2), WriteMode::Incremental)]
+            }
+            fn step(&self, _ctx: &mut StepContext<'_>) -> Result<(), PropagatorError> {
+                Ok(())
+            }
+        }
+
+        let props: Vec<Box<dyn Propagator>> = vec![Box::new(PropAB), Box::new(PropIncrC)];
+        let plan = validate_pipeline(&props, &fields_0_1_2(), 0.1).unwrap();
+
+        // PropAB (index 0): Full write on field 1
+        assert_eq!(plan.write_mode(0, FieldId(1)), Some(WriteMode::Full));
+        assert!(plan.incremental_fields_for(0).is_empty());
+
+        // PropIncrC (index 1): Incremental write on field 2
+        assert_eq!(plan.write_mode(1, FieldId(2)), Some(WriteMode::Incremental));
+        assert_eq!(plan.incremental_fields_for(1), vec![FieldId(2)]);
+    }
+
     // ── Invalid dt ─────────────────────────────────────────────
 
     #[test]
@@ -701,5 +835,61 @@ mod tests {
         let props: Vec<Box<dyn Propagator>> = vec![Box::new(PropAB)];
         let result = validate_pipeline(&props, &fields_0_1_2(), -0.1);
         assert!(matches!(result, Err(PipelineError::InvalidDt { .. })));
+    }
+
+    // ── Invalid max_dt from propagator ────────────────────────
+
+    #[test]
+    fn nan_max_dt_rejected() {
+        let props: Vec<Box<dyn Propagator>> = vec![Box::new(PropDtConstrained { max: f64::NAN })];
+        let fields = [FieldId(0)].into_iter().collect();
+        let result = validate_pipeline(&props, &fields, 0.1);
+        match result {
+            Err(PipelineError::InvalidMaxDt { propagator, value }) => {
+                assert_eq!(propagator, "PropDtConstrained");
+                assert!(value.is_nan());
+            }
+            other => panic!("expected InvalidMaxDt, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn inf_max_dt_rejected() {
+        let props: Vec<Box<dyn Propagator>> =
+            vec![Box::new(PropDtConstrained { max: f64::INFINITY })];
+        let fields = [FieldId(0)].into_iter().collect();
+        let result = validate_pipeline(&props, &fields, 0.1);
+        match result {
+            Err(PipelineError::InvalidMaxDt { propagator, .. }) => {
+                assert_eq!(propagator, "PropDtConstrained");
+            }
+            other => panic!("expected InvalidMaxDt, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn neg_inf_max_dt_rejected() {
+        let props: Vec<Box<dyn Propagator>> = vec![Box::new(PropDtConstrained {
+            max: f64::NEG_INFINITY,
+        })];
+        let fields = [FieldId(0)].into_iter().collect();
+        let result = validate_pipeline(&props, &fields, 0.1);
+        assert!(matches!(result, Err(PipelineError::InvalidMaxDt { .. })));
+    }
+
+    #[test]
+    fn zero_max_dt_rejected() {
+        let props: Vec<Box<dyn Propagator>> = vec![Box::new(PropDtConstrained { max: 0.0 })];
+        let fields = [FieldId(0)].into_iter().collect();
+        let result = validate_pipeline(&props, &fields, 0.1);
+        assert!(matches!(result, Err(PipelineError::InvalidMaxDt { .. })));
+    }
+
+    #[test]
+    fn negative_max_dt_rejected() {
+        let props: Vec<Box<dyn Propagator>> = vec![Box::new(PropDtConstrained { max: -1.0 })];
+        let fields = [FieldId(0)].into_iter().collect();
+        let result = validate_pipeline(&props, &fields, 0.1);
+        assert!(matches!(result, Err(PipelineError::InvalidMaxDt { .. })));
     }
 }

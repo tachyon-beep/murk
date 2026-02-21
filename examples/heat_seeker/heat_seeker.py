@@ -22,7 +22,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv
 import murk
 from murk import (
     Command, Config, ObsEntry, FieldMutability, FieldType,
-    EdgeBehavior, WriteMode, RegionType,
+    EdgeBehavior, RegionType, ScalarDiffusion,
 )
 
 # ─── World parameters ───────────────────────────────────────────
@@ -88,47 +88,10 @@ TOTAL_TIMESTEPS = 300_000
 
 # ─── Propagator: discrete diffusion ─────────────────────────────
 #
-# Decision: Rust propagator vs Python propagator.
-#   Rust propagators are faster (no GIL round-trip), but require
-#   recompilation when you change the logic. For prototyping and
-#   demos, Python propagators let you iterate without rebuilding.
+# Uses the native Rust ScalarDiffusion propagator from the library.
+# Jacobi-style: reads frozen previous tick, writes diffused values.
+# Runs at native speed (no GIL, no numpy copies).
 #
-#   Murk's trampoline system copies field buffers to numpy arrays,
-#   calls your function, then copies results back. This means you
-#   can use any numpy operation inside a propagator.
-#
-# Decision: Euler (reads current tick) vs Jacobi (reads previous tick).
-#   Diffusion should read the *frozen* previous-tick state so that
-#   cell updates don't depend on the order cells are visited. This
-#   is the Jacobi style. We declare reads_previous=[HEAT_FIELD].
-#
-
-def diffusion_step(reads, reads_prev, writes, tick_id, dt, cell_count):
-    """Discrete Laplacian diffusion with a fixed heat source.
-
-    reads_prev[0]: previous tick's heat field (flat, row-major)
-    writes[0]:     output heat field (starts at zero for PerTick fields)
-    """
-    prev = reads_prev[0].reshape(GRID_H, GRID_W)
-    out = writes[0]
-
-    # Pad with edge values (absorb boundaries: zero flux at edges).
-    padded = np.pad(prev, 1, mode="edge")
-
-    # 4-connected discrete Laplacian.
-    laplacian = (
-        padded[:-2, 1:-1]   # north
-        + padded[2:, 1:-1]  # south
-        + padded[1:-1, :-2] # west
-        + padded[1:-1, 2:]  # east
-        - 4.0 * prev
-    )
-
-    new_heat = prev + DIFFUSION_COEFF * dt * laplacian - HEAT_DECAY * dt * prev
-    new_heat[SOURCE_Y, SOURCE_X] = SOURCE_INTENSITY
-    np.maximum(new_heat, 0.0, out=new_heat)
-
-    out[:] = new_heat.ravel()
 
 
 # ─── Environment ─────────────────────────────────────────────────
@@ -174,16 +137,17 @@ class HeatSeekerEnv(murk.MurkEnv):
         config.set_dt(1.0)
         config.set_seed(seed)
 
-        # Register the diffusion propagator.
-        #   reads_previous=[0] → Jacobi-style read of previous tick's heat
-        #   writes=[(0, WriteMode.Full)] → full-write to heat field
-        murk.add_propagator(
-            config,
-            name="diffusion",
-            step_fn=diffusion_step,
-            reads_previous=[HEAT_FIELD],
-            writes=[(HEAT_FIELD, WriteMode.Full)],
-        )
+        # Register the native diffusion propagator.
+        source_idx = SOURCE_Y * GRID_W + SOURCE_X
+        ScalarDiffusion(
+            input_field=HEAT_FIELD,
+            output_field=HEAT_FIELD,
+            coefficient=DIFFUSION_COEFF,
+            decay=HEAT_DECAY,
+            sources=[(source_idx, SOURCE_INTENSITY)],
+            clamp_min=0.0,
+            max_degree=4,  # Square4 topology has degree 4
+        ).register(config)
 
         # Observation plan: observe both fields in full.
         obs_entries = [
@@ -230,6 +194,7 @@ class HeatSeekerEnv(murk.MurkEnv):
         tick_id, age_ticks = self._obs_plan.execute(
             self._world, self._obs_buf, self._mask_buf
         )
+        self._episode_start_tick = tick_id
         obs = self._obs_buf.copy()
         return obs, {"tick_id": tick_id, "age_ticks": age_ticks}
 

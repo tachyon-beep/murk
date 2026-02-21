@@ -20,6 +20,21 @@
 // FFI functions inherently dereference raw pointers; safety is documented per-block.
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
 
+/// Lock a mutex, returning `MurkStatus::InternalError` if poisoned.
+///
+/// For use in `extern "C"` functions that return `i32`. On a poisoned
+/// mutex (caused by a prior panic), this early-returns an error status
+/// instead of panicking — preventing undefined behavior at the FFI boundary.
+macro_rules! ffi_lock {
+    ($mutex:expr) => {
+        match ($mutex).lock() {
+            Ok(guard) => guard,
+            Err(_) => return $crate::status::MurkStatus::InternalError as i32,
+        }
+    };
+}
+
+pub mod batched;
 pub mod command;
 pub mod config;
 mod handle;
@@ -30,6 +45,11 @@ pub mod status;
 pub mod types;
 pub mod world;
 
+pub use batched::{
+    murk_batched_create, murk_batched_destroy, murk_batched_num_worlds, murk_batched_obs_mask_len,
+    murk_batched_obs_output_len, murk_batched_observe_all, murk_batched_reset_all,
+    murk_batched_reset_world, murk_batched_step_and_observe,
+};
 pub use command::{MurkCommand, MurkCommandType, MurkReceipt};
 pub use config::{
     murk_config_add_field, murk_config_add_propagator, murk_config_create, murk_config_destroy,
@@ -56,11 +76,11 @@ pub use world::{
 /// ABI version: major in upper 16 bits, minor in lower 16.
 ///
 /// Bump major on breaking changes, minor on additions.
-/// Current: v1.0.
+/// Current: v2.0 (v1→v2: MurkStepMetrics layout grew from 40 to 48 bytes).
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_abi_version() -> u32 {
-    1 << 16
+    2 << 16
 }
 
 #[cfg(test)]
@@ -68,11 +88,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn abi_version_returns_v1_0() {
+    fn abi_version_returns_v2_0() {
         let v = murk_abi_version();
         let major = v >> 16;
         let minor = v & 0xFFFF;
-        assert_eq!(major, 1);
+        assert_eq!(major, 2);
         assert_eq!(minor, 0);
     }
 }

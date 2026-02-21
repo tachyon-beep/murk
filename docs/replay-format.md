@@ -6,6 +6,8 @@ Binary format for deterministic replay recording and playback. All integers are 
 **Magic:** `b"MURK"` (4 bytes)
 **Byte order:** Little-endian throughout
 
+See [Primitive Encoding](#primitive-encoding) for type definitions used throughout this document.
+
 ---
 
 ## Table of Contents

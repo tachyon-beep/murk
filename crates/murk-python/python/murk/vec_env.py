@@ -17,7 +17,14 @@ class MurkVecEnv:
     environment is automatically reset and the final observation is stored
     in ``info["final_observation"]``.
 
-    Compatible with stable-baselines3 VecEnv interface.
+    Follows **Gymnasium** vectorized-env conventions:
+
+    - ``reset()`` returns ``(obs, infos)``
+    - ``step()`` returns ``(obs, rewards, terminateds, truncateds, infos)``
+
+    This is **not** directly compatible with stable-baselines3's ``VecEnv``,
+    which expects a 4-tuple step return and obs-only reset.  Use SB3's
+    ``DummyVecEnv`` wrapper or a compatibility shim if you need SB3 integration.
 
     Args:
         env_fns: List of callables, each returning a MurkEnv instance.

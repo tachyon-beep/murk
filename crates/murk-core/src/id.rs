@@ -60,6 +60,7 @@ impl SpaceInstanceId {
     ///
     /// Each call returns a new ID that has never been returned before
     /// within this process. Thread-safe.
+    #[must_use]
     pub fn next() -> Self {
         Self(SPACE_INSTANCE_COUNTER.fetch_add(1, Ordering::Relaxed))
     }

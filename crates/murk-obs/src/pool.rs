@@ -59,6 +59,13 @@ pub fn pool_2d(
                     let idx = r * w + c;
                     if input_mask[idx] == 1 {
                         let val = input[idx];
+                        // For Max/Min, skip NaN values to avoid emitting
+                        // sentinel infinities as "valid" results.
+                        if matches!(config.kernel, PoolKernel::Max | PoolKernel::Min)
+                            && val.is_nan()
+                        {
+                            continue;
+                        }
                         valid_count += 1;
                         match config.kernel {
                             PoolKernel::Mean | PoolKernel::Sum => accum += val,

@@ -65,6 +65,7 @@ class MurkEnv(gymnasium.Env):
         self._seed = seed
         self._last_step_metrics = None
         self._tick_limit = 0  # 0 = no truncation by default
+        self._episode_start_tick = 0  # set in reset(); used for relative truncation
 
     def step(self, action: Any) -> tuple[np.ndarray, float, bool, bool, dict]:
         """Execute one environment step.
@@ -111,6 +112,7 @@ class MurkEnv(gymnasium.Env):
         tick_id, age_ticks = self._obs_plan.execute(
             self._world, self._obs_buf, self._mask_buf
         )
+        self._episode_start_tick = tick_id
         obs = self._obs_buf.copy()
         info: dict[str, Any] = {"tick_id": tick_id, "age_ticks": age_ticks}
         return obs, info
@@ -146,13 +148,20 @@ class MurkEnv(gymnasium.Env):
     def _check_truncated(self, obs: np.ndarray, info: dict) -> bool:
         """Check if the episode should be truncated (time limit, etc.).
 
-        Override this in your subclass. The default checks tick_limit.
+        Override this in your subclass. The default uses episode-relative
+        tick counting: ``(tick_id - _episode_start_tick) >= _tick_limit``.
+        This correctly handles warmup ticks consumed during reset().
         """
         if self._tick_limit > 0:
-            return info.get("tick_id", 0) >= self._tick_limit
+            elapsed = info.get("tick_id", 0) - self._episode_start_tick
+            return elapsed >= self._tick_limit
         return False
 
     def close(self):
-        """Clean up resources."""
+        """Clean up resources (ObsPlan before World, since ObsPlan may reference World data)."""
+        if hasattr(self, "_obs_plan") and self._obs_plan is not None:
+            self._obs_plan.destroy()
+            self._obs_plan = None
         if hasattr(self, "_world") and self._world is not None:
             self._world.destroy()
+            self._world = None

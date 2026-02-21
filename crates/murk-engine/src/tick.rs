@@ -20,7 +20,7 @@ use murk_arena::static_arena::StaticArena;
 use murk_core::command::{Command, CommandPayload, Receipt};
 use murk_core::error::{IngressError, StepError};
 use murk_core::id::{FieldId, ParameterVersion, TickId};
-use murk_core::traits::FieldWriter;
+use murk_core::traits::{FieldReader, FieldWriter};
 use murk_core::FieldMutability;
 use murk_propagator::pipeline::{ReadResolutionPlan, ReadSource};
 use murk_propagator::propagator::Propagator;
@@ -49,7 +49,7 @@ pub struct TickResult {
 /// Wraps the underlying [`StepError`] and any receipts that were produced
 /// before the failure. On rollback, receipts carry `TickRollback` reason
 /// codes; callers must not discard them.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct TickError {
     /// The underlying error.
     pub kind: StepError,
@@ -109,14 +109,21 @@ impl TickEngine {
             murk_propagator::validate_pipeline(&config.propagators, &defined_fields, config.dt)?;
 
         // Build arena field defs.
+        // Safety: validate() already checked fields.len() fits in u32.
         let arena_field_defs: Vec<(FieldId, murk_core::FieldDef)> = config
             .fields
             .iter()
             .enumerate()
-            .map(|(i, def)| (FieldId(i as u32), def.clone()))
+            .map(|(i, def)| {
+                (
+                    FieldId(u32::try_from(i).expect("field count validated")),
+                    def.clone(),
+                )
+            })
             .collect();
 
-        let cell_count = config.space.cell_count() as u32;
+        // Safety: validate() already checked cell_count fits in u32.
+        let cell_count = u32::try_from(config.space.cell_count()).expect("cell count validated");
         let arena_config = ArenaConfig::new(cell_count);
 
         // Build static arena for any Static fields.
@@ -214,20 +221,31 @@ impl TickEngine {
                 command_index: dc.command_index,
             });
         }
-        // 3b. Apply SetField commands to the staging writer.
-        for dc in &commands {
-            if let CommandPayload::SetField {
-                ref coord,
-                field_id,
-                value,
-            } = dc.command.payload
-            {
-                if let Some(rank) = self.space.canonical_rank(coord) {
-                    if let Some(buf) = guard.writer.write(field_id) {
-                        if rank < buf.len() {
-                            buf[rank] = value;
+        // 3b. Apply commands to the staging writer.
+        for (i, dc) in commands.iter().enumerate() {
+            let receipt = &mut receipts[accepted_receipt_start + i];
+            match &dc.command.payload {
+                CommandPayload::SetField {
+                    ref coord,
+                    field_id,
+                    value,
+                } => {
+                    if let Some(rank) = self.space.canonical_rank(coord) {
+                        if let Some(buf) = guard.writer.write(*field_id) {
+                            if rank < buf.len() {
+                                buf[rank] = *value;
+                            }
                         }
                     }
+                }
+                CommandPayload::SetParameter { .. }
+                | CommandPayload::SetParameterBatch { .. }
+                | CommandPayload::Move { .. }
+                | CommandPayload::Spawn { .. }
+                | CommandPayload::Despawn { .. }
+                | CommandPayload::Custom { .. } => {
+                    receipt.accepted = false;
+                    receipt.reason_code = Some(IngressError::UnsupportedCommand);
                 }
             }
         }
@@ -255,10 +273,23 @@ impl TickEngine {
             let routes = self.plan.routes_for(i).unwrap_or(&empty_routes);
             let overlay = OverlayReader::new(routes, &self.base_cache, &self.staged_cache);
 
-            // 4c. Reset propagator scratch.
+            // 4c. Seed WriteMode::Incremental buffers from previous generation.
+            for field in self.plan.incremental_fields_for(i) {
+                if let Some(prev_data) = self.base_cache.read(field) {
+                    // Copy through a temp buffer: base_cache borrows &self,
+                    // guard.writer.write() borrows &mut guard.
+                    let prev: Vec<f32> = prev_data.to_vec();
+                    if let Some(write_buf) = guard.writer.write(field) {
+                        let copy_len = prev.len().min(write_buf.len());
+                        write_buf[..copy_len].copy_from_slice(&prev[..copy_len]);
+                    }
+                }
+            }
+
+            // 4d. Reset propagator scratch.
             self.propagator_scratch.reset();
 
-            // 4d. Construct StepContext and call step().
+            // 4e. Construct StepContext and call step().
             {
                 let mut ctx = murk_propagator::StepContext::new(
                     &overlay,
@@ -270,7 +301,7 @@ impl TickEngine {
                     self.dt,
                 );
 
-                // 4e. Call propagator step.
+                // 4f. Call propagator step.
                 if let Err(reason) = prop.step(&mut ctx) {
                     // 4g. Rollback on error — guard goes out of scope,
                     // abandoning the staging buffer (free rollback).
@@ -294,16 +325,23 @@ impl TickEngine {
 
         // 6. Publish.
         let publish_start = Instant::now();
-        self.arena.publish(next_tick, self.param_version);
+        self.arena
+            .publish(next_tick, self.param_version)
+            .map_err(|_| TickError {
+                kind: StepError::AllocationFailed,
+                receipts: vec![],
+            })?;
         let snapshot_publish_us = publish_start.elapsed().as_micros() as u64;
 
         // 7. Update state.
         self.current_tick = next_tick;
         self.consecutive_rollback_count = 0;
 
-        // 8. Finalize receipts with applied_tick_id.
+        // 8. Finalize receipts with applied_tick_id (only for actually executed commands).
         for receipt in &mut receipts[accepted_receipt_start..] {
-            receipt.applied_tick_id = Some(next_tick);
+            if receipt.accepted {
+                receipt.applied_tick_id = Some(next_tick);
+            }
         }
 
         // 9. Build metrics.
@@ -314,6 +352,8 @@ impl TickEngine {
             propagator_us,
             snapshot_publish_us,
             memory_bytes: self.arena.memory_bytes(),
+            sparse_retired_ranges: self.arena.sparse_retired_range_count() as u32,
+            sparse_pending_retired: self.arena.sparse_pending_retired_count() as u32,
         };
         self.last_metrics = metrics.clone();
 
@@ -337,11 +377,14 @@ impl TickEngine {
             self.tick_disabled = true;
         }
 
-        // Mark accepted command receipts as rolled back.
+        // Mark accepted command receipts as rolled back, but preserve
+        // receipts that were already rejected (e.g. unsupported command
+        // types) so callers see the original rejection reason.
         for receipt in &mut receipts[accepted_start..] {
-            receipt.accepted = true;
-            receipt.applied_tick_id = None;
-            receipt.reason_code = Some(IngressError::TickRollback);
+            if receipt.accepted {
+                receipt.applied_tick_id = None;
+                receipt.reason_code = Some(IngressError::TickRollback);
+            }
         }
 
         Err(TickError {
@@ -408,8 +451,8 @@ impl TickEngine {
 mod tests {
     use super::*;
     use murk_core::command::CommandPayload;
-    use murk_core::id::ParameterKey;
-    use murk_core::traits::{FieldReader, SnapshotAccess};
+    use murk_core::id::{Coord, ParameterKey};
+    use murk_core::traits::SnapshotAccess;
     use murk_core::{BoundaryBehavior, FieldDef, FieldMutability, FieldType};
     use murk_propagator::propagator::WriteMode;
     use murk_space::{EdgeBehavior, Line1D};
@@ -737,7 +780,45 @@ mod tests {
     fn rollback_receipts_generated() {
         let mut engine = failing_engine(0);
 
-        // Submit commands before the failing tick.
+        // Submit an accepted command (SetField) before the failing tick.
+        let cmd = Command {
+            payload: CommandPayload::SetField {
+                coord: smallvec::smallvec![0],
+                field_id: FieldId(0),
+                value: 1.0,
+            },
+            expires_after_tick: TickId(100),
+            source_id: None,
+            source_seq: None,
+            priority_class: 1,
+            arrival_seq: 0,
+        };
+        engine.submit_commands(vec![cmd]);
+
+        let result = engine.execute_tick();
+        match result {
+            Err(TickError {
+                kind: StepError::PropagatorFailed { .. },
+                receipts,
+            }) => {
+                // Accepted receipts must be surfaced with TickRollback.
+                assert_eq!(receipts.len(), 1);
+                assert!(receipts[0].accepted);
+                assert_eq!(receipts[0].reason_code, Some(IngressError::TickRollback));
+            }
+            other => panic!("expected PropagatorFailed with receipts, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rollback_preserves_rejected_receipts() {
+        // Submit an unsupported command (SetParameter → rejected) alongside
+        // the tick. When the propagator fails and triggers rollback, the
+        // rejected receipt must stay accepted=false, not be overwritten
+        // with TickRollback.
+        let mut engine = failing_engine(0);
+
+        // SetParameter is unsupported → should be rejected (accepted=false).
         engine.submit_commands(vec![make_cmd(100)]);
 
         let result = engine.execute_tick();
@@ -746,9 +827,18 @@ mod tests {
                 kind: StepError::PropagatorFailed { .. },
                 receipts,
             }) => {
-                // Receipts must be surfaced, not silently dropped.
                 assert_eq!(receipts.len(), 1);
-                assert_eq!(receipts[0].reason_code, Some(IngressError::TickRollback));
+                // The receipt must remain rejected, NOT overwritten with
+                // accepted=true + TickRollback.
+                assert!(
+                    !receipts[0].accepted,
+                    "rejected receipt should stay rejected after rollback"
+                );
+                assert_eq!(
+                    receipts[0].reason_code,
+                    Some(IngressError::UnsupportedCommand),
+                    "rejected receipt must preserve UnsupportedCommand reason after rollback"
+                );
             }
             other => panic!("expected PropagatorFailed with receipts, got {other:?}"),
         }
@@ -849,7 +939,35 @@ mod tests {
     fn commands_flow_through_to_receipts() {
         let mut engine = simple_engine();
 
-        let submit_receipts = engine.submit_commands(vec![make_cmd(100), make_cmd(100)]);
+        // Use SetField commands — the only command type currently executed.
+        let coord: Coord = vec![0i32].into();
+        let cmds = vec![
+            Command {
+                payload: CommandPayload::SetField {
+                    coord: coord.clone(),
+                    field_id: FieldId(0),
+                    value: 1.0,
+                },
+                expires_after_tick: TickId(100),
+                source_id: None,
+                source_seq: None,
+                priority_class: 1,
+                arrival_seq: 0,
+            },
+            Command {
+                payload: CommandPayload::SetField {
+                    coord: coord.clone(),
+                    field_id: FieldId(0),
+                    value: 2.0,
+                },
+                expires_after_tick: TickId(100),
+                source_id: None,
+                source_seq: None,
+                priority_class: 1,
+                arrival_seq: 0,
+            },
+        ];
+        let submit_receipts = engine.submit_commands(cmds);
         assert_eq!(submit_receipts.len(), 2);
         assert!(submit_receipts.iter().all(|r| r.accepted));
 
@@ -862,6 +980,37 @@ mod tests {
             .collect();
         assert_eq!(applied.len(), 2);
         assert!(applied.iter().all(|r| r.applied_tick_id == Some(TickId(1))));
+    }
+
+    #[test]
+    fn non_setfield_commands_rejected_honestly() {
+        let mut engine = simple_engine();
+
+        // Submit SetParameter commands — not yet implemented.
+        let submit_receipts = engine.submit_commands(vec![make_cmd(100), make_cmd(100)]);
+        assert_eq!(submit_receipts.len(), 2);
+        assert!(submit_receipts.iter().all(|r| r.accepted));
+
+        let result = engine.execute_tick().unwrap();
+        assert_eq!(result.receipts.len(), 2);
+
+        // Non-SetField commands must NOT report as applied and must carry
+        // UnsupportedCommand reason so callers can distinguish the failure mode.
+        for receipt in &result.receipts {
+            assert!(
+                !receipt.accepted,
+                "unimplemented command type must be rejected"
+            );
+            assert_eq!(
+                receipt.applied_tick_id, None,
+                "unimplemented command must not have applied_tick_id"
+            );
+            assert_eq!(
+                receipt.reason_code,
+                Some(IngressError::UnsupportedCommand),
+                "rejected unsupported command must carry UnsupportedCommand reason"
+            );
+        }
     }
 
     // ── Metrics tests ────────────────────────────────────────
@@ -942,5 +1091,90 @@ mod tests {
         assert_eq!(result.receipts.len(), 2);
         assert_eq!(result.receipts[0].command_index, 1); // was batch[1]
         assert_eq!(result.receipts[1].command_index, 0); // was batch[0]
+    }
+
+    #[test]
+    fn writemode_incremental_seeds_from_previous_gen() {
+        // Regression test for BUG-015: WriteMode::Incremental buffers must
+        // be pre-seeded with previous-generation data, not zero-filled.
+        //
+        // An incremental propagator writes cell 0 on tick 1 and then does
+        // nothing on tick 2. Cell 0 must retain its value across ticks.
+        struct IncrementalOnce {
+            written: std::cell::Cell<bool>,
+        }
+        impl IncrementalOnce {
+            fn new() -> Self {
+                Self {
+                    written: std::cell::Cell::new(false),
+                }
+            }
+        }
+        impl Propagator for IncrementalOnce {
+            fn name(&self) -> &str {
+                "incr_once"
+            }
+            fn reads(&self) -> murk_core::FieldSet {
+                murk_core::FieldSet::empty()
+            }
+            fn writes(&self) -> Vec<(FieldId, WriteMode)> {
+                vec![(FieldId(0), WriteMode::Incremental)]
+            }
+            fn step(
+                &self,
+                ctx: &mut murk_propagator::StepContext<'_>,
+            ) -> Result<(), murk_core::PropagatorError> {
+                let buf = ctx.writes().write(FieldId(0)).unwrap();
+                if !self.written.get() {
+                    // First tick: write a distinctive value.
+                    buf[0] = 42.0;
+                    buf[1] = 99.0;
+                    self.written.set(true);
+                }
+                // Second tick onward: do nothing — rely on incremental seeding.
+                Ok(())
+            }
+        }
+
+        let config = WorldConfig {
+            space: Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()),
+            fields: vec![scalar_field("state")],
+            propagators: vec![Box::new(IncrementalOnce::new())],
+            dt: 0.1,
+            seed: 42,
+            ring_buffer_size: 8,
+            max_ingress_queue: 1024,
+            tick_rate_hz: None,
+            backoff: crate::config::BackoffConfig::default(),
+        };
+        let mut engine = TickEngine::new(config).unwrap();
+
+        // Tick 1: propagator writes 42.0 and 99.0.
+        engine.execute_tick().unwrap();
+        let snap = engine.snapshot();
+        assert_eq!(snap.read(FieldId(0)).unwrap()[0], 42.0);
+        assert_eq!(snap.read(FieldId(0)).unwrap()[1], 99.0);
+
+        // Tick 2: propagator does nothing — incremental seeding must preserve values.
+        engine.execute_tick().unwrap();
+        let snap = engine.snapshot();
+        assert_eq!(
+            snap.read(FieldId(0)).unwrap()[0],
+            42.0,
+            "BUG-015: incremental field lost data across ticks"
+        );
+        assert_eq!(
+            snap.read(FieldId(0)).unwrap()[1],
+            99.0,
+            "BUG-015: incremental field lost data across ticks"
+        );
+        // Unwritten cells should remain zero (seeded from previous gen which was zero).
+        assert_eq!(snap.read(FieldId(0)).unwrap()[2], 0.0);
+
+        // Tick 3: still preserved.
+        engine.execute_tick().unwrap();
+        let snap = engine.snapshot();
+        assert_eq!(snap.read(FieldId(0)).unwrap()[0], 42.0);
+        assert_eq!(snap.read(FieldId(0)).unwrap()[1], 99.0);
     }
 }

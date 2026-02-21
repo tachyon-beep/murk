@@ -60,7 +60,7 @@ pub extern "C" fn murk_config_create(out: *mut u64) -> i32 {
     if out.is_null() {
         return MurkStatus::InvalidArgument as i32;
     }
-    let handle = CONFIGS.lock().unwrap().insert(ConfigBuilder::default());
+    let handle = ffi_lock!(CONFIGS).insert(ConfigBuilder::default());
     unsafe { *out = handle };
     MurkStatus::Ok as i32
 }
@@ -69,10 +69,28 @@ pub extern "C" fn murk_config_create(out: *mut u64) -> i32 {
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_config_destroy(handle: u64) -> i32 {
-    match CONFIGS.lock().unwrap().remove(handle) {
+    match ffi_lock!(CONFIGS).remove(handle) {
         Some(_) => MurkStatus::Ok as i32,
         None => MurkStatus::InvalidHandle as i32,
     }
+}
+
+/// Safely convert an f64 FFI parameter to u32.
+/// Rejects non-finite, negative, non-integer, and out-of-range values.
+fn f64_to_u32(v: f64) -> Option<u32> {
+    if !v.is_finite() || v < 0.0 || v > u32::MAX as f64 || v != v.trunc() {
+        return None;
+    }
+    Some(v as u32)
+}
+
+/// Safely convert an f64 FFI parameter to usize.
+/// Rejects non-finite, negative, non-integer, and overly large values.
+fn f64_to_usize(v: f64) -> Option<usize> {
+    if !v.is_finite() || v < 0.0 || v > (isize::MAX as f64) || v != v.trunc() {
+        return None;
+    }
+    Some(v as usize)
 }
 
 /// Parse a space from its type tag and parameter slice.
@@ -84,7 +102,7 @@ fn parse_space(space_type: i32, p: &[f64]) -> Option<Box<dyn Space>> {
             if p.len() < 2 {
                 return None;
             }
-            let len = p[0] as u32;
+            let len = f64_to_u32(p[0])?;
             let edge = parse_edge_behavior(p[1] as i32)?;
             Line1D::new(len, edge)
                 .ok()
@@ -94,15 +112,15 @@ fn parse_space(space_type: i32, p: &[f64]) -> Option<Box<dyn Space>> {
             if p.is_empty() {
                 return None;
             }
-            let len = p[0] as u32;
+            let len = f64_to_u32(p[0])?;
             Ring1D::new(len).ok().map(|s| Box::new(s) as Box<dyn Space>)
         }
         x if x == MurkSpaceType::Square4 as i32 => {
             if p.len() < 3 {
                 return None;
             }
-            let w = p[0] as u32;
-            let h = p[1] as u32;
+            let w = f64_to_u32(p[0])?;
+            let h = f64_to_u32(p[1])?;
             let edge = parse_edge_behavior(p[2] as i32)?;
             Square4::new(w, h, edge)
                 .ok()
@@ -112,8 +130,8 @@ fn parse_space(space_type: i32, p: &[f64]) -> Option<Box<dyn Space>> {
             if p.len() < 3 {
                 return None;
             }
-            let w = p[0] as u32;
-            let h = p[1] as u32;
+            let w = f64_to_u32(p[0])?;
+            let h = f64_to_u32(p[1])?;
             let edge = parse_edge_behavior(p[2] as i32)?;
             Square8::new(w, h, edge)
                 .ok()
@@ -124,8 +142,8 @@ fn parse_space(space_type: i32, p: &[f64]) -> Option<Box<dyn Space>> {
             if p.len() < 2 {
                 return None;
             }
-            let cols = p[0] as u32;
-            let rows = p[1] as u32;
+            let cols = f64_to_u32(p[0])?;
+            let rows = f64_to_u32(p[1])?;
             Hex2D::new(rows, cols)
                 .ok()
                 .map(|s| Box::new(s) as Box<dyn Space>)
@@ -135,9 +153,9 @@ fn parse_space(space_type: i32, p: &[f64]) -> Option<Box<dyn Space>> {
             if p.len() < 4 {
                 return None;
             }
-            let w = p[0] as u32;
-            let h = p[1] as u32;
-            let d = p[2] as u32;
+            let w = f64_to_u32(p[0])?;
+            let h = f64_to_u32(p[1])?;
+            let d = f64_to_u32(p[2])?;
             let edge = parse_edge_behavior(p[3] as i32)?;
             Fcc12::new(w, h, d, edge)
                 .ok()
@@ -148,8 +166,8 @@ fn parse_space(space_type: i32, p: &[f64]) -> Option<Box<dyn Space>> {
             if p.is_empty() {
                 return None;
             }
-            let n_components = p[0] as usize;
-            if n_components == 0 {
+            let n_components = f64_to_usize(p[0])?;
+            if n_components == 0 || n_components > p.len() {
                 return None;
             }
             let mut components: Vec<Box<dyn Space>> = Vec::with_capacity(n_components);
@@ -159,9 +177,12 @@ fn parse_space(space_type: i32, p: &[f64]) -> Option<Box<dyn Space>> {
                     return None;
                 }
                 let comp_type = p[offset] as i32;
-                let n_comp_params = p[offset + 1] as usize;
+                let n_comp_params = f64_to_usize(p[offset + 1])?;
                 offset += 2;
-                if offset + n_comp_params > p.len() {
+                if offset
+                    .checked_add(n_comp_params)
+                    .is_none_or(|end| end > p.len())
+                {
                     return None;
                 }
                 let comp_params = &p[offset..offset + n_comp_params];
@@ -211,7 +232,7 @@ pub extern "C" fn murk_config_set_space(
         None => return MurkStatus::InvalidArgument as i32,
     };
 
-    let mut table = CONFIGS.lock().unwrap();
+    let mut table = ffi_lock!(CONFIGS);
     match table.get_mut(handle) {
         Some(cfg) => {
             cfg.space = Some(space);
@@ -278,7 +299,7 @@ pub extern "C" fn murk_config_add_field(
         boundary_behavior: bb,
     };
 
-    let mut table = CONFIGS.lock().unwrap();
+    let mut table = ffi_lock!(CONFIGS);
     match table.get_mut(handle) {
         Some(cfg) => {
             cfg.fields.push(def);
@@ -303,7 +324,7 @@ pub extern "C" fn murk_config_add_propagator(handle: u64, prop_ptr: u64) -> i32 
     // and is consumed exactly once here.
     let prop: Box<dyn Propagator> = *unsafe { Box::from_raw(prop_ptr as *mut Box<dyn Propagator>) };
 
-    let mut table = CONFIGS.lock().unwrap();
+    let mut table = ffi_lock!(CONFIGS);
     match table.get_mut(handle) {
         Some(cfg) => {
             cfg.propagators.push(prop);
@@ -317,7 +338,7 @@ pub extern "C" fn murk_config_add_propagator(handle: u64, prop_ptr: u64) -> i32 
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_config_set_dt(handle: u64, dt: f64) -> i32 {
-    let mut table = CONFIGS.lock().unwrap();
+    let mut table = ffi_lock!(CONFIGS);
     match table.get_mut(handle) {
         Some(cfg) => {
             cfg.dt = dt;
@@ -331,7 +352,7 @@ pub extern "C" fn murk_config_set_dt(handle: u64, dt: f64) -> i32 {
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_config_set_seed(handle: u64, seed: u64) -> i32 {
-    let mut table = CONFIGS.lock().unwrap();
+    let mut table = ffi_lock!(CONFIGS);
     match table.get_mut(handle) {
         Some(cfg) => {
             cfg.seed = seed;
@@ -345,7 +366,7 @@ pub extern "C" fn murk_config_set_seed(handle: u64, seed: u64) -> i32 {
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_config_set_ring_buffer_size(handle: u64, size: usize) -> i32 {
-    let mut table = CONFIGS.lock().unwrap();
+    let mut table = ffi_lock!(CONFIGS);
     match table.get_mut(handle) {
         Some(cfg) => {
             cfg.ring_buffer_size = size;
@@ -359,7 +380,7 @@ pub extern "C" fn murk_config_set_ring_buffer_size(handle: u64, size: usize) -> 
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_config_set_max_ingress_queue(handle: u64, size: usize) -> i32 {
-    let mut table = CONFIGS.lock().unwrap();
+    let mut table = ffi_lock!(CONFIGS);
     match table.get_mut(handle) {
         Some(cfg) => {
             cfg.max_ingress_queue = size;
@@ -457,6 +478,107 @@ mod tests {
         let params = [5.0f64, 5.0, 0.0]; // 5x5, Absorb
         assert_eq!(
             murk_config_set_space(h, MurkSpaceType::Square4 as i32, params.as_ptr(), 3),
+            MurkStatus::Ok as i32
+        );
+        murk_config_destroy(h);
+    }
+
+    #[test]
+    fn null_params_with_count_returns_invalid_argument() {
+        let mut h: u64 = 0;
+        murk_config_create(&mut h);
+        assert_eq!(
+            murk_config_set_space(h, MurkSpaceType::Line1D as i32, std::ptr::null(), 2),
+            MurkStatus::InvalidArgument as i32
+        );
+        murk_config_destroy(h);
+    }
+
+    #[test]
+    fn null_field_name_returns_invalid_argument() {
+        let mut h: u64 = 0;
+        murk_config_create(&mut h);
+        assert_eq!(
+            murk_config_add_field(
+                h,
+                std::ptr::null(),
+                MurkFieldType::Scalar as i32,
+                MurkFieldMutability::PerTick as i32,
+                0,
+                MurkBoundaryBehavior::Clamp as i32,
+            ),
+            MurkStatus::InvalidArgument as i32
+        );
+        murk_config_destroy(h);
+    }
+
+    #[test]
+    fn invalid_handle_set_seed_returns_invalid_handle() {
+        assert_eq!(
+            murk_config_set_seed(9999, 42),
+            MurkStatus::InvalidHandle as i32
+        );
+    }
+
+    #[test]
+    fn invalid_handle_set_ring_buffer_returns_invalid_handle() {
+        assert_eq!(
+            murk_config_set_ring_buffer_size(9999, 8),
+            MurkStatus::InvalidHandle as i32
+        );
+    }
+
+    #[test]
+    fn invalid_handle_set_max_ingress_returns_invalid_handle() {
+        assert_eq!(
+            murk_config_set_max_ingress_queue(9999, 1024),
+            MurkStatus::InvalidHandle as i32
+        );
+    }
+
+    #[test]
+    fn hex2d_space_params() {
+        let mut h: u64 = 0;
+        murk_config_create(&mut h);
+        let params = [3.0f64, 3.0]; // cols=3, rows=3
+        assert_eq!(
+            murk_config_set_space(h, MurkSpaceType::Hex2D as i32, params.as_ptr(), 2),
+            MurkStatus::Ok as i32
+        );
+        murk_config_destroy(h);
+    }
+
+    #[test]
+    fn ring1d_space_params() {
+        let mut h: u64 = 0;
+        murk_config_create(&mut h);
+        let params = [10.0f64]; // len=10
+        assert_eq!(
+            murk_config_set_space(h, MurkSpaceType::Ring1D as i32, params.as_ptr(), 1),
+            MurkStatus::Ok as i32
+        );
+        murk_config_destroy(h);
+    }
+
+    #[test]
+    fn square8_space_params() {
+        let mut h: u64 = 0;
+        murk_config_create(&mut h);
+        let params = [4.0f64, 4.0, 1.0]; // 4x4, Wrap
+        assert_eq!(
+            murk_config_set_space(h, MurkSpaceType::Square8 as i32, params.as_ptr(), 3),
+            MurkStatus::Ok as i32
+        );
+        murk_config_destroy(h);
+    }
+
+    #[test]
+    fn fcc12_space_params() {
+        let mut h: u64 = 0;
+        murk_config_create(&mut h);
+        let params = [3.0f64, 3.0, 3.0, 0.0]; // 3x3x3, Absorb
+        assert_eq!(
+            murk_config_set_space(h, MurkSpaceType::Fcc12 as i32, params.as_ptr(), 4),
             MurkStatus::Ok as i32
         );
         murk_config_destroy(h);

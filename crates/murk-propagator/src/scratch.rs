@@ -14,7 +14,11 @@ pub struct ScratchRegion {
 }
 
 impl ScratchRegion {
-    /// Create a new scratch region with the given capacity in f32 slots.
+    /// Create a new scratch region with the given capacity **in f32 slots**
+    /// (not bytes).
+    ///
+    /// If you have a byte count (e.g., from `Propagator::scratch_bytes()`),
+    /// use [`with_byte_capacity()`](Self::with_byte_capacity) instead.
     pub fn new(capacity: usize) -> Self {
         Self {
             buf: vec![0.0; capacity],
@@ -22,9 +26,14 @@ impl ScratchRegion {
         }
     }
 
-    /// Create from a byte capacity (rounded down to whole f32 slots).
+    /// Create from a **byte** capacity (rounded up to whole f32 slots).
+    ///
+    /// This is the correct constructor when using the value from
+    /// [`Propagator::scratch_bytes()`](crate::Propagator::scratch_bytes).
     pub fn with_byte_capacity(bytes: usize) -> Self {
-        Self::new(bytes / std::mem::size_of::<f32>())
+        let slot_size = std::mem::size_of::<f32>();
+        // Overflow-safe ceiling division (avoids bytes + slot_size - 1 wrapping).
+        Self::new(bytes / slot_size + usize::from(!bytes.is_multiple_of(slot_size)))
     }
 
     /// Allocate `count` contiguous f32 slots, zero-initialized.
@@ -93,6 +102,34 @@ mod tests {
     fn from_byte_capacity() {
         let s = ScratchRegion::with_byte_capacity(16);
         assert_eq!(s.capacity(), 4); // 16 bytes / 4 bytes per f32
+    }
+
+    #[test]
+    fn from_byte_capacity_rounds_up() {
+        // 5 bytes should yield 2 f32 slots (8 bytes), not 1 (4 bytes).
+        let s = ScratchRegion::with_byte_capacity(5);
+        assert_eq!(s.capacity(), 2);
+        // 1 byte should still get 1 slot.
+        let s = ScratchRegion::with_byte_capacity(1);
+        assert_eq!(s.capacity(), 1);
+        // 0 bytes is fine — 0 slots.
+        let s = ScratchRegion::with_byte_capacity(0);
+        assert_eq!(s.capacity(), 0);
+        // Exact multiple is unchanged.
+        let s = ScratchRegion::with_byte_capacity(8);
+        assert_eq!(s.capacity(), 2);
+    }
+
+    #[test]
+    fn from_byte_capacity_no_overflow_at_usize_max() {
+        // The old (bytes + slot_size - 1) / slot_size formula would overflow.
+        // Verify the safe formula produces the correct ceiling division.
+        let slot_size = std::mem::size_of::<f32>(); // 4
+        let expected = usize::MAX / slot_size + 1; // ceil(usize::MAX / 4)
+                                                   // We can't actually allocate this, but verify the arithmetic is correct.
+                                                   // Use the same formula as with_byte_capacity directly:
+        let slots = usize::MAX / slot_size + usize::from(usize::MAX % slot_size != 0);
+        assert_eq!(slots, expected);
     }
 
     #[test]

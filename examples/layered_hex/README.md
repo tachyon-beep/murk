@@ -81,7 +81,11 @@ For a 6x6 hex grid with 3 floors, the product space has `36 * 3 = 108` cells.
 ### Python API
 
 There is no typed `set_space_product()` method. ProductSpace uses the
-low-level `set_space()` with a flat parameter array:
+low-level `set_space()` with a flat parameter array. Flat encoding is
+necessary because ProductSpace supports variable-length nesting -- each
+component can have a different number of parameters, so a fixed-signature
+method cannot represent all possible compositions. Here is what that
+looks like in code:
 
 ```python
 config.set_space(

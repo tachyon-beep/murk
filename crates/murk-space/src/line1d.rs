@@ -136,7 +136,6 @@ pub(crate) fn compile_region_1d(
             let tensor_indices: Vec<usize> = (0..cell_count).collect();
             let valid_mask = vec![1u8; cell_count];
             Ok(RegionPlan {
-                cell_count,
                 coords,
                 tensor_indices,
                 valid_mask,
@@ -167,7 +166,6 @@ pub(crate) fn compile_region_1d(
             let tensor_indices: Vec<usize> = (0..cell_count).collect();
             let valid_mask = vec![1u8; cell_count];
             Ok(RegionPlan {
-                cell_count,
                 coords,
                 tensor_indices,
                 valid_mask,
@@ -187,7 +185,6 @@ pub(crate) fn compile_region_1d(
             let tensor_indices: Vec<usize> = (0..cell_count).collect();
             let valid_mask = vec![1u8; cell_count];
             Ok(RegionPlan {
-                cell_count,
                 coords: sorted,
                 tensor_indices,
                 valid_mask,
@@ -247,7 +244,6 @@ fn compile_disk_1d(
     let valid_mask = vec![1u8; cell_count];
 
     Ok(RegionPlan {
-        cell_count,
         coords,
         tensor_indices,
         valid_mask,
@@ -319,6 +315,12 @@ impl Space for Line1D {
 
     fn instance_id(&self) -> SpaceInstanceId {
         self.instance_id
+    }
+
+    fn topology_eq(&self, other: &dyn Space) -> bool {
+        (other as &dyn std::any::Any)
+            .downcast_ref::<Self>()
+            .is_some_and(|o| self.len == o.len && self.edge == o.edge)
     }
 }
 
@@ -447,7 +449,7 @@ mod tests {
     fn compile_region_all() {
         let s = Line1D::new(5, EdgeBehavior::Absorb).unwrap();
         let plan = s.compile_region(&RegionSpec::All).unwrap();
-        assert_eq!(plan.cell_count, 5);
+        assert_eq!(plan.cell_count(), 5);
         assert_eq!(plan.coords.len(), 5);
         assert_eq!(plan.valid_ratio(), 1.0);
     }
@@ -461,7 +463,7 @@ mod tests {
                 radius: 2,
             })
             .unwrap();
-        assert_eq!(plan.cell_count, 5); // cells 3,4,5,6,7
+        assert_eq!(plan.cell_count(), 5); // cells 3,4,5,6,7
         assert_eq!(plan.coords, vec![c(3), c(4), c(5), c(6), c(7)]);
     }
 
@@ -475,7 +477,7 @@ mod tests {
             })
             .unwrap();
         // Should include 8, 9, 0, 1, 2 (wrapping around)
-        assert_eq!(plan.cell_count, 5);
+        assert_eq!(plan.cell_count(), 5);
         assert!(plan.coords.contains(&c(8)));
         assert!(plan.coords.contains(&c(9)));
         assert!(plan.coords.contains(&c(0)));
@@ -492,7 +494,7 @@ mod tests {
                 max: c(5),
             })
             .unwrap();
-        assert_eq!(plan.cell_count, 4);
+        assert_eq!(plan.cell_count(), 4);
         assert_eq!(plan.coords, vec![c(2), c(3), c(4), c(5)]);
     }
 

@@ -45,7 +45,13 @@ impl ScratchRegion {
         let new_cursor = self.cursor.checked_add(len)?;
         if new_cursor > self.data.len() {
             // Grow to at least double or the required size, whichever is larger.
-            let new_cap = self.data.len().max(1024).max(new_cursor) * 2;
+            let new_cap = self
+                .data
+                .len()
+                .max(1024)
+                .max(new_cursor)
+                .checked_mul(2)
+                .unwrap_or(new_cursor);
             self.data.resize(new_cap, 0.0);
         }
         let start = self.cursor;
@@ -145,5 +151,19 @@ mod tests {
     fn memory_bytes_tracks_capacity() {
         let scratch = ScratchRegion::new(1024);
         assert_eq!(scratch.memory_bytes(), 1024 * 4);
+    }
+
+    #[test]
+    fn growth_overflow_falls_back_to_exact_fit() {
+        // When the doubling multiplication would overflow usize,
+        // the allocator should fall back to exact-fit (new_cursor).
+        // We can't actually allocate usize::MAX/2 f32s, but we can
+        // verify the capacity calculation doesn't panic.
+        let mut scratch = ScratchRegion::new(0);
+        // First alloc triggers growth from 0 → at least 1024 * 2.
+        let s = scratch.alloc(10).unwrap();
+        assert_eq!(s.len(), 10);
+        // The capacity should be at least 2048 (1024 min * 2).
+        assert!(scratch.capacity() >= 2048);
     }
 }

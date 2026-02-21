@@ -3,17 +3,38 @@
 use murk_core::{BoundaryBehavior, FieldDef, FieldId, FieldMutability, FieldType};
 
 /// Heat scalar field (1 component/cell).
+#[deprecated(
+    since = "0.1.7",
+    note = "use user-defined FieldId with ScalarDiffusion instead"
+)]
 pub const HEAT: FieldId = FieldId(0);
 /// Velocity vector field (2 components/cell).
+#[deprecated(
+    since = "0.1.7",
+    note = "use user-defined FieldId with ScalarDiffusion instead"
+)]
 pub const VELOCITY: FieldId = FieldId(1);
 /// Agent presence scalar field (1 component/cell).
+#[deprecated(
+    since = "0.1.7",
+    note = "use user-defined FieldId with AgentMovementPropagator instead"
+)]
 pub const AGENT_PRESENCE: FieldId = FieldId(2);
 /// Heat gradient vector field (2 components/cell).
+#[deprecated(
+    since = "0.1.7",
+    note = "use user-defined FieldId with GradientCompute instead"
+)]
 pub const HEAT_GRADIENT: FieldId = FieldId(3);
 /// Reward scalar field (1 component/cell).
+#[deprecated(
+    since = "0.1.7",
+    note = "use user-defined FieldId with RewardPropagator instead"
+)]
 pub const REWARD: FieldId = FieldId(4);
 
 /// Returns the 5 field definitions for the reference pipeline in order.
+#[deprecated(since = "0.1.7", note = "define fields in your own Config instead")]
 pub fn reference_fields() -> Vec<FieldDef> {
     vec![
         FieldDef {
@@ -37,7 +58,7 @@ pub fn reference_fields() -> Vec<FieldDef> {
             field_type: FieldType::Scalar,
             mutability: FieldMutability::PerTick,
             units: None,
-            bounds: Some((0.0, 1.0)),
+            bounds: None,
             boundary_behavior: BoundaryBehavior::Clamp,
         },
         FieldDef {
@@ -60,6 +81,7 @@ pub fn reference_fields() -> Vec<FieldDef> {
 }
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use super::*;
 
@@ -79,5 +101,19 @@ mod tests {
         let fields = reference_fields();
         let total: u32 = fields.iter().map(|f| f.field_type.components()).sum();
         assert_eq!(total, 7); // 1 + 2 + 1 + 2 + 1
+    }
+
+    #[test]
+    fn agent_presence_bounds_accommodate_marker_values() {
+        // AgentMovementPropagator writes (agent_id as f32) + 1.0 as markers.
+        // Bounds must not restrict these values.
+        let fields = reference_fields();
+        let ap = &fields[2];
+        assert_eq!(ap.name, "agent_presence");
+        assert!(
+            ap.bounds.is_none(),
+            "agent_presence bounds should be None (markers exceed [0,1]), got {:?}",
+            ap.bounds
+        );
     }
 }

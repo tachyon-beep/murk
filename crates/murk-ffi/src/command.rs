@@ -64,6 +64,13 @@ pub struct MurkReceipt {
     pub command_index: u32,
 }
 
+// Compile-time layout assertions for ABI stability.
+// MurkCommand: all fixed-width types, no usize.
+const _: () = assert!(std::mem::align_of::<MurkCommand>() == 8);
+// MurkReceipt: u8 + u64 + i32 + u32 = 24 bytes (with alignment padding).
+const _: () = assert!(std::mem::align_of::<MurkReceipt>() == 8);
+const _: () = assert!(std::mem::size_of::<MurkReceipt>() == 24);
+
 /// Convert a C `MurkCommand` to a Rust `Command`.
 pub(crate) fn convert_command(cmd: &MurkCommand, index: usize) -> Result<Command, MurkStatus> {
     let payload = match cmd.command_type {

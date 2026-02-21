@@ -170,6 +170,24 @@ impl ObsPlan {
             });
         }
 
+        // Validate transform parameters.
+        for (i, entry) in spec.entries.iter().enumerate() {
+            if let ObsTransform::Normalize { min, max } = &entry.transform {
+                if !min.is_finite() || !max.is_finite() {
+                    return Err(ObsError::InvalidObsSpec {
+                        reason: format!(
+                            "entry {i}: Normalize min/max must be finite, got min={min}, max={max}"
+                        ),
+                    });
+                }
+                if min > max {
+                    return Err(ObsError::InvalidObsSpec {
+                        reason: format!("entry {i}: Normalize min ({min}) must be <= max ({max})"),
+                    });
+                }
+            }
+        }
+
         let has_agent = spec.entries.iter().any(|e| {
             matches!(
                 e.region,
@@ -215,7 +233,7 @@ impl ObsPlan {
                 });
             }
 
-            let region_plan =
+            let mut region_plan =
                 space
                     .compile_region(fixed_region)
                     .map_err(|e| ObsError::InvalidObsSpec {
@@ -236,23 +254,23 @@ impl ObsPlan {
                 );
             }
 
-            let mut gather_ops = Vec::with_capacity(region_plan.coords.len());
-            for (coord_idx, coord) in region_plan.coords.iter().enumerate() {
+            let mut gather_ops = Vec::with_capacity(region_plan.coords().len());
+            for (coord_idx, coord) in region_plan.coords().iter().enumerate() {
                 let field_data_idx =
                     *coord_to_field_idx
                         .get(coord)
                         .ok_or_else(|| ObsError::InvalidObsSpec {
                             reason: format!("entry {i}: coord {coord:?} not in canonical ordering"),
                         })?;
-                let tensor_idx = region_plan.tensor_indices[coord_idx];
+                let tensor_idx = region_plan.tensor_indices()[coord_idx];
                 gather_ops.push(GatherOp {
                     field_data_idx,
                     tensor_idx,
                 });
             }
 
-            let element_count = region_plan.bounding_shape.total_elements();
-            let shape = match &region_plan.bounding_shape {
+            let element_count = region_plan.bounding_shape().total_elements();
+            let shape = match region_plan.bounding_shape() {
                 murk_space::BoundingShape::Rect(dims) => dims.clone(),
             };
             entry_shapes.push(shape);
@@ -265,7 +283,7 @@ impl ObsPlan {
                 mask_offset,
                 element_count,
                 gather_ops,
-                valid_mask: region_plan.valid_mask,
+                valid_mask: region_plan.take_valid_mask(),
                 valid_ratio: ratio,
             });
 
@@ -318,7 +336,7 @@ impl ObsPlan {
                         });
                     }
 
-                    let region_plan = space.compile_region(region_spec).map_err(|e| {
+                    let mut region_plan = space.compile_region(region_spec).map_err(|e| {
                         ObsError::InvalidObsSpec {
                             reason: format!("entry {i}: region compile failed: {e}"),
                         }
@@ -333,8 +351,8 @@ impl ObsPlan {
                         });
                     }
 
-                    let mut gather_ops = Vec::with_capacity(region_plan.coords.len());
-                    for (coord_idx, coord) in region_plan.coords.iter().enumerate() {
+                    let mut gather_ops = Vec::with_capacity(region_plan.coords().len());
+                    for (coord_idx, coord) in region_plan.coords().iter().enumerate() {
                         let field_data_idx = *coord_to_field_idx.get(coord).ok_or_else(|| {
                             ObsError::InvalidObsSpec {
                                 reason: format!(
@@ -342,15 +360,15 @@ impl ObsPlan {
                                 ),
                             }
                         })?;
-                        let tensor_idx = region_plan.tensor_indices[coord_idx];
+                        let tensor_idx = region_plan.tensor_indices()[coord_idx];
                         gather_ops.push(GatherOp {
                             field_data_idx,
                             tensor_idx,
                         });
                     }
 
-                    let element_count = region_plan.bounding_shape.total_elements();
-                    let shape = match &region_plan.bounding_shape {
+                    let element_count = region_plan.bounding_shape().total_elements();
+                    let shape = match region_plan.bounding_shape() {
                         murk_space::BoundingShape::Rect(dims) => dims.clone(),
                     };
                     entry_shapes.push(shape);
@@ -363,7 +381,7 @@ impl ObsPlan {
                         mask_offset,
                         element_count,
                         gather_ops,
-                        valid_mask: region_plan.valid_mask,
+                        valid_mask: region_plan.take_valid_mask(),
                         valid_ratio: ratio,
                     });
 
@@ -804,6 +822,53 @@ impl ObsPlan {
             }
         }
 
+        // ── Compute fixed entries ONCE (identical for all agents) ──
+        // Allocate scratch buffers for the fixed-entry output and mask, gather
+        // into them, then memcpy per agent. This avoids redundant N*M gathers.
+        let mut fixed_out_scratch = vec![0.0f32; self.output_len];
+        let mut fixed_mask_scratch = vec![0u8; self.mask_len];
+        let mut fixed_valid = 0usize;
+        let mut fixed_elements = 0usize;
+
+        for entry in &standard.fixed_entries {
+            let field_data = field_data_map[&entry.field_id];
+            let out_slice = &mut fixed_out_scratch
+                [entry.output_offset..entry.output_offset + entry.element_count];
+            let mask_slice =
+                &mut fixed_mask_scratch[entry.mask_offset..entry.mask_offset + entry.element_count];
+
+            mask_slice.copy_from_slice(&entry.valid_mask);
+            for op in &entry.gather_ops {
+                let raw = *field_data.get(op.field_data_idx).ok_or_else(|| {
+                    ObsError::ExecutionFailed {
+                        reason: format!(
+                            "field {:?} has {} elements but gather requires index {}",
+                            entry.field_id,
+                            field_data.len(),
+                            op.field_data_idx,
+                        ),
+                    }
+                })?;
+                out_slice[op.tensor_idx] = apply_transform(raw, &entry.transform);
+            }
+
+            fixed_valid += entry.valid_mask.iter().filter(|&&v| v == 1).count();
+            fixed_elements += entry.element_count;
+        }
+
+        // ── Pre-allocate pooling scratch buffers ──────────────────
+        // Find the maximum pre_pool_element_count across all pooled entries
+        // so we can allocate once and reuse across agents (sequential processing).
+        let max_pool_scratch = standard
+            .agent_entries
+            .iter()
+            .filter(|e| e.pool.is_some())
+            .map(|e| e.pre_pool_element_count)
+            .max()
+            .unwrap_or(0);
+        let mut pool_scratch = vec![0.0f32; max_pool_scratch];
+        let mut pool_scratch_mask = vec![0u8; max_pool_scratch];
+
         let mut metadata = Vec::with_capacity(n_agents);
 
         for (agent_i, center) in agent_centers.iter().enumerate() {
@@ -812,38 +877,12 @@ impl ObsPlan {
             let agent_output = &mut output[out_start..out_start + self.output_len];
             let agent_mask = &mut mask[mask_start..mask_start + self.mask_len];
 
-            agent_output.fill(0.0);
-            agent_mask.fill(0);
+            // Stamp fixed entries from pre-computed scratch (memcpy, not re-gather).
+            agent_output[..self.output_len].copy_from_slice(&fixed_out_scratch);
+            agent_mask[..self.mask_len].copy_from_slice(&fixed_mask_scratch);
 
-            let mut total_valid = 0usize;
-            let mut total_elements = 0usize;
-
-            // ── Fixed entries (same for all agents) ──────────────
-            for entry in &standard.fixed_entries {
-                let field_data = field_data_map[&entry.field_id];
-                let out_slice = &mut agent_output
-                    [entry.output_offset..entry.output_offset + entry.element_count];
-                let mask_slice =
-                    &mut agent_mask[entry.mask_offset..entry.mask_offset + entry.element_count];
-
-                mask_slice.copy_from_slice(&entry.valid_mask);
-                for op in &entry.gather_ops {
-                    let raw = *field_data.get(op.field_data_idx).ok_or_else(|| {
-                        ObsError::ExecutionFailed {
-                            reason: format!(
-                                "field {:?} has {} elements but gather requires index {}",
-                                entry.field_id,
-                                field_data.len(),
-                                op.field_data_idx,
-                            ),
-                        }
-                    })?;
-                    out_slice[op.tensor_idx] = apply_transform(raw, &entry.transform);
-                }
-
-                total_valid += entry.valid_mask.iter().filter(|&&v| v == 1).count();
-                total_elements += entry.element_count;
-            }
+            let mut total_valid = fixed_valid;
+            let mut total_elements = fixed_elements;
 
             // ── Agent-relative entries ───────────────────────────
             for entry in &standard.agent_entries {
@@ -858,6 +897,12 @@ impl ObsPlan {
                     .map(|geo| !geo.all_wrap && geo.is_interior(center, entry.radius))
                     .unwrap_or(false);
 
+                // Zero the pooling scratch region for this entry before reuse.
+                if entry.pool.is_some() {
+                    pool_scratch[..entry.pre_pool_element_count].fill(0.0);
+                    pool_scratch_mask[..entry.pre_pool_element_count].fill(0);
+                }
+
                 let valid = execute_agent_entry(
                     entry,
                     center,
@@ -867,6 +912,8 @@ impl ObsPlan {
                     use_fast_path,
                     agent_output,
                     agent_mask,
+                    &mut pool_scratch,
+                    &mut pool_scratch_mask,
                 );
 
                 total_valid += valid;
@@ -904,6 +951,10 @@ impl ObsPlan {
 
 /// Execute a single agent-relative entry for one agent.
 ///
+/// For pooled entries, `pool_scratch` and `pool_scratch_mask` must be
+/// provided with sufficient capacity (zeroed by the caller). For
+/// non-pooled entries these are ignored.
+///
 /// Returns the number of valid cells written.
 #[allow(clippy::too_many_arguments)]
 fn execute_agent_entry(
@@ -915,6 +966,8 @@ fn execute_agent_entry(
     use_fast_path: bool,
     agent_output: &mut [f32],
     agent_mask: &mut [u8],
+    pool_scratch: &mut [f32],
+    pool_scratch_mask: &mut [u8],
 ) -> usize {
     if entry.pool.is_some() {
         execute_agent_entry_pooled(
@@ -926,6 +979,8 @@ fn execute_agent_entry(
             use_fast_path,
             agent_output,
             agent_mask,
+            &mut pool_scratch[..entry.pre_pool_element_count],
+            &mut pool_scratch_mask[..entry.pre_pool_element_count],
         )
     } else {
         execute_agent_entry_direct(
@@ -967,9 +1022,11 @@ fn execute_agent_entry_direct(
                 continue;
             }
             let field_idx = (base_rank + op.stride_offset) as usize;
-            out_slice[op.tensor_idx] = apply_transform(field_data[field_idx], &entry.transform);
-            mask_slice[op.tensor_idx] = 1;
-            valid += 1;
+            if let Some(&val) = field_data.get(field_idx) {
+                out_slice[op.tensor_idx] = apply_transform(val, &entry.transform);
+                mask_slice[op.tensor_idx] = 1;
+                valid += 1;
+            }
         }
         valid
     } else {
@@ -993,6 +1050,11 @@ fn execute_agent_entry_direct(
 }
 
 /// Pooled gather: gather → scratch → pool → transform → output.
+///
+/// `scratch` and `scratch_mask` are caller-provided buffers that must be
+/// at least `entry.pre_pool_element_count` long. They are zeroed by the
+/// caller before each invocation. This avoids per-agent heap allocation
+/// when processing many agents sequentially (bug #83).
 #[allow(clippy::too_many_arguments)]
 fn execute_agent_entry_pooled(
     entry: &AgentCompiledEntry,
@@ -1003,10 +1065,9 @@ fn execute_agent_entry_pooled(
     use_fast_path: bool,
     agent_output: &mut [f32],
     agent_mask: &mut [u8],
+    scratch: &mut [f32],
+    scratch_mask: &mut [u8],
 ) -> usize {
-    let mut scratch = vec![0.0f32; entry.pre_pool_element_count];
-    let mut scratch_mask = vec![0u8; entry.pre_pool_element_count];
-
     if use_fast_path {
         let geo = geometry.as_ref().unwrap();
         let base_rank = geo.canonical_rank(center) as isize;
@@ -1015,8 +1076,10 @@ fn execute_agent_entry_pooled(
                 continue;
             }
             let field_idx = (base_rank + op.stride_offset) as usize;
-            scratch[op.tensor_idx] = field_data[field_idx];
-            scratch_mask[op.tensor_idx] = 1;
+            if let Some(&val) = field_data.get(field_idx) {
+                scratch[op.tensor_idx] = val;
+                scratch_mask[op.tensor_idx] = 1;
+            }
         }
     } else {
         for op in &entry.template_ops {
@@ -1035,7 +1098,7 @@ fn execute_agent_entry_pooled(
 
     let pool_config = entry.pool.as_ref().unwrap();
     let (pooled, pooled_mask, _) =
-        pool_2d(&scratch, &scratch_mask, &entry.pre_pool_shape, pool_config);
+        pool_2d(scratch, scratch_mask, &entry.pre_pool_shape, pool_config);
 
     let out_slice =
         &mut agent_output[entry.output_offset..entry.output_offset + entry.element_count];
@@ -2402,5 +2465,42 @@ mod tests {
         // Chebyshev distance <= 1 covers full 3x3 = 9 cells (all corners included).
         let valid_count = mask.iter().filter(|&&v| v == 1).count();
         assert_eq!(valid_count, 9, "Chebyshev disk radius=1 = full 3x3");
+    }
+
+    #[test]
+    fn compile_rejects_inverted_normalize_range() {
+        let space = square4_space();
+        let spec = ObsSpec {
+            entries: vec![ObsEntry {
+                field_id: FieldId(0),
+                region: ObsRegion::Fixed(RegionSpec::All),
+                pool: None,
+                transform: ObsTransform::Normalize {
+                    min: 10.0,
+                    max: 5.0,
+                },
+                dtype: ObsDtype::F32,
+            }],
+        };
+        let err = ObsPlan::compile(&spec, &space).unwrap_err();
+        assert!(matches!(err, ObsError::InvalidObsSpec { .. }));
+    }
+
+    #[test]
+    fn compile_rejects_nan_normalize() {
+        let space = square4_space();
+        let spec = ObsSpec {
+            entries: vec![ObsEntry {
+                field_id: FieldId(0),
+                region: ObsRegion::Fixed(RegionSpec::All),
+                pool: None,
+                transform: ObsTransform::Normalize {
+                    min: f64::NAN,
+                    max: 1.0,
+                },
+                dtype: ObsDtype::F32,
+            }],
+        };
+        assert!(ObsPlan::compile(&spec, &space).is_err());
     }
 }

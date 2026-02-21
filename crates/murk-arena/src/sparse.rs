@@ -11,6 +11,18 @@ use crate::segment::SegmentList;
 
 use murk_core::FieldId;
 
+/// A segment range that has been freed and is available for reuse.
+///
+/// Field sizes are fixed for the arena's lifetime (sealed at `Config` time),
+/// so reuse is exact-size: `alloc()` searches for a `RetiredRange` whose `len`
+/// matches the requested allocation. This eliminates fragmentation by design.
+#[derive(Clone, Copy, Debug)]
+struct RetiredRange {
+    segment_index: u16,
+    offset: u32,
+    len: u32,
+}
+
 /// A single sparse allocation slot.
 #[derive(Clone, Debug)]
 pub struct SparseSlot {
@@ -36,6 +48,12 @@ pub struct SparseSlot {
 ///
 /// Reclamation in Lockstep mode is immediate (`&mut self` guarantees no
 /// readers). In RealtimeAsync mode, reclamation is epoch-gated.
+///
+/// Segment memory reclamation uses a two-phase scheme:
+/// - Ranges freed during the current tick go into `pending_retired` (the
+///   published descriptor may still reference them).
+/// - At the start of the next tick (after `publish()`), `flush_retired()`
+///   moves them into `retired_ranges`, where they become available for reuse.
 pub struct SparseSlab {
     /// All allocation slots (live and dead).
     slots: Vec<SparseSlot>,
@@ -43,6 +61,23 @@ pub struct SparseSlab {
     free_list: Vec<usize>,
     /// Current mapping: FieldId → slot index (the live slot for each field).
     live_map: indexmap::IndexMap<FieldId, usize>,
+    /// Segment ranges that are safe to reuse (freed in previous ticks).
+    ///
+    /// Reuse relies on exact-size matching: `alloc()` searches for a retired
+    /// range whose `len` equals the requested allocation length. This is correct
+    /// because field sizes are fixed for the arena's lifetime — the same field
+    /// CoW'd repeatedly always produces the same `len`. The fixed-size invariant
+    /// is enforced at three independent layers:
+    ///   1. `PingPongArena` exposes no `resize_field()` API.
+    ///   2. `Config` is build-then-consume: field defs are sealed at `World` construction.
+    ///   3. Per-world isolation: `reset()` replaces the entire `SparseSlab`,
+    ///      so stale ranges from a previous schema cannot accumulate.
+    ///
+    /// If dynamic schema support is ever added, `retired_ranges` must be cleared
+    /// on field resize or replaced with a best-fit allocator.
+    retired_ranges: Vec<RetiredRange>,
+    /// Segment ranges freed during the current tick (not yet safe to reuse).
+    pending_retired: Vec<RetiredRange>,
 }
 
 impl SparseSlab {
@@ -52,6 +87,8 @@ impl SparseSlab {
             slots: Vec::new(),
             free_list: Vec::new(),
             live_map: indexmap::IndexMap::new(),
+            retired_ranges: Vec::new(),
+            pending_retired: Vec::new(),
         }
     }
 
@@ -66,10 +103,25 @@ impl SparseSlab {
         generation: u32,
         segments: &mut SegmentList,
     ) -> Result<FieldHandle, ArenaError> {
-        let (segment_index, offset) = segments.alloc(len)?;
+        // Try to reuse a retired segment range of the exact size before
+        // bump-allocating. Retired ranges are guaranteed safe (freed in a
+        // previous tick, after publish).
+        let (segment_index, offset) =
+            if let Some(pos) = self.retired_ranges.iter().position(|r| r.len == len) {
+                let r = self.retired_ranges.swap_remove(pos);
+                (r.segment_index, r.offset)
+            } else {
+                segments.alloc(len)?
+            };
 
         // Mark old allocation as dead if it exists.
         if let Some(&old_idx) = self.live_map.get(&field) {
+            let old = &self.slots[old_idx];
+            self.pending_retired.push(RetiredRange {
+                segment_index: old.segment_index,
+                offset: old.offset,
+                len: old.len,
+            });
             self.slots[old_idx].live = false;
             self.free_list.push(old_idx);
         }
@@ -136,6 +188,25 @@ impl SparseSlab {
         self.free_list.len()
     }
 
+    /// Promote pending retired ranges to the reusable pool.
+    ///
+    /// Must be called after `publish()` and before the next round of
+    /// `alloc()` calls. At this point the published descriptor no longer
+    /// references the pending ranges, so they are safe to hand out.
+    pub fn flush_retired(&mut self) {
+        self.retired_ranges.append(&mut self.pending_retired);
+    }
+
+    /// Number of segment ranges available for reuse.
+    pub fn retired_range_count(&self) -> usize {
+        self.retired_ranges.len()
+    }
+
+    /// Number of segment ranges pending promotion (freed this tick).
+    pub fn pending_retired_count(&self) -> usize {
+        self.pending_retired.len()
+    }
+
     /// Iterate over all live field → slot index mappings.
     pub fn live_fields(&self) -> impl Iterator<Item = (&FieldId, &SparseSlot)> {
         self.live_map
@@ -198,8 +269,8 @@ mod tests {
         let mut slab = SparseSlab::new();
         let mut segs = make_segments();
 
-        slab.alloc(FieldId(0), 50, 1, &mut segs).unwrap();
-        slab.alloc(FieldId(1), 75, 1, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(0), 50, 1, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(1), 75, 1, &mut segs).unwrap();
 
         assert_eq!(slab.live_count(), 2);
         assert_eq!(slab.get_handle(FieldId(0)).unwrap().len(), 50);
@@ -212,13 +283,163 @@ mod tests {
         let mut segs = make_segments();
 
         // First alloc creates slot 0.
-        slab.alloc(FieldId(0), 50, 1, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(0), 50, 1, &mut segs).unwrap();
         // Realloc kills slot 0, but it gets reused for the new allocation.
-        slab.alloc(FieldId(0), 50, 2, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(0), 50, 2, &mut segs).unwrap();
 
         // The dead slot was immediately reused, so total slots should stay at 1.
         // (free_list pops the old slot, then it's reused for the new one.)
         assert_eq!(slab.total_slots(), 1);
+    }
+
+    #[test]
+    fn retired_range_reused_after_flush() {
+        let mut slab = SparseSlab::new();
+        let mut segs = make_segments();
+
+        // Gen 0: initial allocation.
+        let _ = slab.alloc(FieldId(0), 100, 0, &mut segs).unwrap();
+        let used_after_init = segs.total_used();
+
+        // Gen 1: CoW write — old range goes to pending_retired.
+        let _ = slab.alloc(FieldId(0), 100, 1, &mut segs).unwrap();
+        let used_after_cow1 = segs.total_used();
+        assert!(used_after_cow1 > used_after_init);
+        assert_eq!(slab.pending_retired_count(), 1);
+        assert_eq!(slab.retired_range_count(), 0);
+
+        // Simulate publish + begin_tick: flush pending → retired.
+        slab.flush_retired();
+        assert_eq!(slab.pending_retired_count(), 0);
+        assert_eq!(slab.retired_range_count(), 1);
+
+        // Gen 2: CoW write — should reuse the retired range.
+        let _ = slab.alloc(FieldId(0), 100, 2, &mut segs).unwrap();
+        assert_eq!(
+            segs.total_used(),
+            used_after_cow1,
+            "no new segment memory consumed"
+        );
+        assert_eq!(slab.retired_range_count(), 0, "retired range was consumed");
+    }
+
+    #[test]
+    fn pending_retired_not_reused_before_flush() {
+        let mut slab = SparseSlab::new();
+        let mut segs = make_segments();
+
+        // Gen 0: initial allocation.
+        let _ = slab.alloc(FieldId(0), 100, 0, &mut segs).unwrap();
+        // Gen 1: CoW — range goes to pending_retired.
+        let _ = slab.alloc(FieldId(0), 100, 1, &mut segs).unwrap();
+        let used_before = segs.total_used();
+
+        // Gen 2: another CoW WITHOUT flush — must bump-allocate.
+        let _ = slab.alloc(FieldId(0), 100, 2, &mut segs).unwrap();
+        assert!(
+            segs.total_used() > used_before,
+            "should bump-allocate because pending ranges are not reusable"
+        );
+    }
+
+    #[test]
+    fn many_cow_writes_with_flush_stays_bounded() {
+        let mut slab = SparseSlab::new();
+        // Small segments to make exhaustion easy to detect.
+        let mut segs = SegmentList::new(1024, 2);
+
+        let _ = slab.alloc(FieldId(0), 100, 0, &mut segs).unwrap();
+
+        // 50 ticks of CoW writes with flush between each — should never
+        // exhaust the pool (only 200 f32s ever live at once).
+        for gen in 1..=50u32 {
+            slab.flush_retired();
+            let _ = slab.alloc(FieldId(0), 100, gen, &mut segs).unwrap();
+        }
+        // Pool should still be well within bounds.
+        assert!(segs.total_used() <= 300);
+    }
+
+    #[test]
+    fn alloc_falls_back_to_bump_when_no_size_match() {
+        let mut slab = SparseSlab::new();
+        let mut segs = make_segments();
+
+        // Gen 0: allocate two fields of size 100.
+        let _ = slab.alloc(FieldId(0), 100, 0, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(1), 100, 0, &mut segs).unwrap();
+
+        // Gen 1: CoW both — their ranges go to pending_retired.
+        let _ = slab.alloc(FieldId(0), 100, 1, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(1), 100, 1, &mut segs).unwrap();
+        slab.flush_retired();
+        assert_eq!(slab.retired_range_count(), 2);
+
+        let used_before = segs.total_used();
+
+        // Request size 200 — no retired range matches, must bump-allocate.
+        let _ = slab.alloc(FieldId(2), 200, 2, &mut segs).unwrap();
+        assert!(
+            segs.total_used() > used_before,
+            "should bump-allocate when no retired range matches the requested size"
+        );
+        // Both size-100 retired ranges should be untouched.
+        assert_eq!(slab.retired_range_count(), 2);
+    }
+
+    #[test]
+    fn three_fields_same_size_all_ranges_retired() {
+        let mut slab = SparseSlab::new();
+        let mut segs = make_segments();
+
+        // Gen 0: allocate three fields of equal size.
+        let _ = slab.alloc(FieldId(0), 100, 0, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(1), 100, 0, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(2), 100, 0, &mut segs).unwrap();
+
+        // Gen 1: CoW all three — old ranges go to pending_retired.
+        let _ = slab.alloc(FieldId(0), 100, 1, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(1), 100, 1, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(2), 100, 1, &mut segs).unwrap();
+        slab.flush_retired();
+        assert_eq!(slab.retired_range_count(), 3);
+
+        let used_before = segs.total_used();
+
+        // Gen 2: CoW all three again — should reuse all three retired ranges.
+        let _ = slab.alloc(FieldId(0), 100, 2, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(1), 100, 2, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(2), 100, 2, &mut segs).unwrap();
+
+        assert_eq!(
+            segs.total_used(),
+            used_before,
+            "no new segment memory consumed — all retired ranges reused"
+        );
+        assert_eq!(slab.retired_range_count(), 0, "all retired ranges consumed");
+    }
+
+    #[test]
+    fn different_size_ranges_not_mixed() {
+        let mut slab = SparseSlab::new();
+        let mut segs = make_segments();
+
+        // Two fields with different sizes.
+        let _ = slab.alloc(FieldId(0), 100, 0, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(1), 200, 0, &mut segs).unwrap();
+
+        // CoW both — retire both ranges.
+        let _ = slab.alloc(FieldId(0), 100, 1, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(1), 200, 1, &mut segs).unwrap();
+        slab.flush_retired();
+
+        let used_before = segs.total_used();
+
+        // Request size 200 — should reuse the size-200 range, not size-100.
+        let _ = slab.alloc(FieldId(1), 200, 2, &mut segs).unwrap();
+        assert_eq!(segs.total_used(), used_before);
+        // The size-100 range should still be available.
+        assert_eq!(slab.retired_range_count(), 1);
     }
 
     #[cfg(not(miri))]
@@ -237,7 +458,7 @@ mod tests {
                     let _ = slab.alloc(FieldId(fid), 10, gen as u32, &mut segs);
                 }
                 // Live count = number of distinct field IDs allocated.
-                let distinct: std::collections::HashSet<_> = field_ids.iter().collect();
+                let distinct: indexmap::IndexSet<_> = field_ids.iter().collect();
                 prop_assert_eq!(slab.live_count(), distinct.len());
             }
 

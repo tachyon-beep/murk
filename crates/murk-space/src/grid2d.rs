@@ -127,7 +127,6 @@ pub(crate) fn compile_disk_2d(
     let valid_mask = vec![1u8; cell_count];
 
     RegionPlan {
-        cell_count,
         coords,
         tensor_indices,
         valid_mask,
@@ -150,7 +149,6 @@ pub(crate) fn compile_region_2d(
             let tensor_indices: Vec<usize> = (0..cell_count).collect();
             let valid_mask = vec![1u8; cell_count];
             Ok(RegionPlan {
-                cell_count,
                 coords,
                 tensor_indices,
                 valid_mask,
@@ -195,7 +193,6 @@ pub(crate) fn compile_region_2d(
             let shape_rows = (r_hi - r_lo + 1) as usize;
             let shape_cols = (c_hi - c_lo + 1) as usize;
             Ok(RegionPlan {
-                cell_count,
                 coords,
                 tensor_indices,
                 valid_mask,
@@ -214,7 +211,6 @@ pub(crate) fn compile_region_2d(
             let tensor_indices: Vec<usize> = (0..cell_count).collect();
             let valid_mask = vec![1u8; cell_count];
             Ok(RegionPlan {
-                cell_count,
                 coords: sorted,
                 tensor_indices,
                 valid_mask,

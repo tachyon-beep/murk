@@ -3,13 +3,17 @@
 //! These tests exercise the full pipeline through LockstepWorld, not
 //! just individual propagators in isolation.
 
+#![allow(deprecated)] // Tests use the old hardcoded field constants intentionally.
+
 use murk_core::FieldReader;
 use murk_engine::{BackoffConfig, LockstepWorld, WorldConfig};
 use murk_propagators::agent_movement::{new_action_buffer, AgentAction, Direction};
+#[allow(deprecated)]
 use murk_propagators::fields::{AGENT_PRESENCE, HEAT, HEAT_GRADIENT, REWARD, VELOCITY};
 use murk_propagators::{AgentMovementPropagator, DiffusionPropagator, RewardPropagator};
 use murk_space::{EdgeBehavior, Square4};
 
+#[allow(deprecated)]
 fn small_config(rows: u32, cols: u32, seed: u64) -> (WorldConfig, murk_propagators::ActionBuffer) {
     let ab = new_action_buffer();
     let cell_count = (rows * cols) as usize;
@@ -126,6 +130,7 @@ fn agents_stay_in_bounds() {
 }
 
 #[test]
+#[allow(deprecated)]
 fn diffusion_convergence() {
     // With no agents and initial heat at center, diffusion should
     // converge towards uniform heat over many ticks.

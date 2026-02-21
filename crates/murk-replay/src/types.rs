@@ -83,6 +83,10 @@ pub struct SerializedCommand {
     pub source_id: Option<u64>,
     /// Per-source sequence number (`None` if not set).
     pub source_seq: Option<u64>,
+    /// Tick after which the command expires (raw `TickId` value).
+    pub expires_after_tick: u64,
+    /// Monotonic arrival sequence number for deterministic ordering.
+    pub arrival_seq: u64,
 }
 
 /// A single tick's worth of recorded data.
