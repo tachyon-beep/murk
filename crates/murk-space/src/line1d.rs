@@ -320,7 +320,7 @@ impl Space for Line1D {
     fn topology_eq(&self, other: &dyn Space) -> bool {
         (other as &dyn std::any::Any)
             .downcast_ref::<Self>()
-            .map_or(false, |o| self.len == o.len && self.edge == o.edge)
+            .is_some_and(|o| self.len == o.len && self.edge == o.edge)
     }
 }
 

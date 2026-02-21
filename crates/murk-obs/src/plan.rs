@@ -1098,7 +1098,7 @@ fn execute_agent_entry_pooled(
 
     let pool_config = entry.pool.as_ref().unwrap();
     let (pooled, pooled_mask, _) =
-        pool_2d(&scratch, &scratch_mask, &entry.pre_pool_shape, pool_config);
+        pool_2d(scratch, scratch_mask, &entry.pre_pool_shape, pool_config);
 
     let out_slice =
         &mut agent_output[entry.output_offset..entry.output_offset + entry.element_count];

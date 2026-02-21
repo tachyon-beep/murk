@@ -182,7 +182,7 @@ impl Propagator for MorphologicalOp {
         let mut visited = HashSet::new();
         let mut queue = VecDeque::new();
 
-        for i in 0..cell_count {
+        for (i, out_cell) in out_buf.iter_mut().enumerate() {
             visited.clear();
             queue.clear();
             visited.insert(i);
@@ -209,7 +209,7 @@ impl Propagator for MorphologicalOp {
                 }
             }
 
-            out_buf[i] = match self.op {
+            *out_cell = match self.op {
                 MorphOp::Dilate => {
                     if any_present {
                         1.0

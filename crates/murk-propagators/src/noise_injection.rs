@@ -114,7 +114,7 @@ impl NoiseInjectionBuilder {
     pub fn build(self) -> Result<NoiseInjection, String> {
         let field = self.field.ok_or_else(|| "field is required".to_string())?;
 
-        if !(self.scale >= 0.0) {
+        if !self.scale.is_finite() || self.scale < 0.0 {
             return Err(format!("scale must be finite and >= 0, got {}", self.scale));
         }
 

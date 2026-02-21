@@ -33,7 +33,7 @@ impl ScratchRegion {
     pub fn with_byte_capacity(bytes: usize) -> Self {
         let slot_size = std::mem::size_of::<f32>();
         // Overflow-safe ceiling division (avoids bytes + slot_size - 1 wrapping).
-        Self::new(bytes / slot_size + usize::from(bytes % slot_size != 0))
+        Self::new(bytes / slot_size + usize::from(!bytes.is_multiple_of(slot_size)))
     }
 
     /// Allocate `count` contiguous f32 slots, zero-initialized.

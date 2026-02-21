@@ -405,13 +405,13 @@ impl ScalarDiffusionBuilder {
             .output_field
             .ok_or_else(|| "output_field is required".to_string())?;
 
-        if !(self.coefficient >= 0.0) || !self.coefficient.is_finite() {
+        if !self.coefficient.is_finite() || self.coefficient < 0.0 {
             return Err(format!(
                 "coefficient must be finite and >= 0, got {}",
                 self.coefficient
             ));
         }
-        if !(self.decay >= 0.0) || !self.decay.is_finite() {
+        if !self.decay.is_finite() || self.decay < 0.0 {
             return Err(format!("decay must be finite and >= 0, got {}", self.decay));
         }
         if let (Some(lo), Some(hi)) = (self.clamp_min, self.clamp_max) {

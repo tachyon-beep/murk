@@ -70,6 +70,7 @@ impl PyScalarDiffusion {
     /// Create a new ScalarDiffusion propagator.
     #[new]
     #[pyo3(signature = (input_field, output_field, coefficient=0.0, decay=0.0, sources=vec![], clamp_min=None, clamp_max=None, gradient_field=None, max_degree=12))]
+    #[allow(clippy::too_many_arguments)]
     fn new(
         input_field: u32,
         output_field: u32,

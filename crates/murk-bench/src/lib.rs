@@ -20,7 +20,8 @@ use murk_space::{EdgeBehavior, Square4};
 /// Build a reference benchmark profile: 100x100 grid (10K cells).
 ///
 /// Pipeline: ScalarDiffusion(heat, D=0.1) + ScalarDiffusion(velocity, D=0.1)
-///   + GradientCompute(heat→gradient) → AgentMovement → Reward(bonus=1.0, cost=-0.01).
+/// + GradientCompute(heat→gradient) → AgentMovement → Reward(bonus=1.0, cost=-0.01).
+///
 /// dt=0.1 (within CFL limit of 1/(4*0.1) = 2.5).
 #[allow(deprecated)] // reference_fields() — will be removed when bench defines its own fields
 pub fn reference_profile(seed: u64, action_buffer: ActionBuffer) -> WorldConfig {

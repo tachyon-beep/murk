@@ -118,19 +118,19 @@ impl ResourceFieldBuilder {
             .presence_field
             .ok_or_else(|| "presence_field is required".to_string())?;
 
-        if !(self.consumption_rate >= 0.0) {
+        if !self.consumption_rate.is_finite() || self.consumption_rate < 0.0 {
             return Err(format!(
                 "consumption_rate must be finite and >= 0, got {}",
                 self.consumption_rate
             ));
         }
-        if !(self.regrowth_rate >= 0.0) {
+        if !self.regrowth_rate.is_finite() || self.regrowth_rate < 0.0 {
             return Err(format!(
                 "regrowth_rate must be finite and >= 0, got {}",
                 self.regrowth_rate
             ));
         }
-        if !(self.capacity > 0.0) {
+        if !self.capacity.is_finite() || self.capacity <= 0.0 {
             return Err(format!(
                 "capacity must be finite and > 0, got {}",
                 self.capacity

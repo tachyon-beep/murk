@@ -126,7 +126,7 @@ impl AgentEmissionBuilder {
             .emission_field
             .ok_or_else(|| "emission_field is required".to_string())?;
 
-        if !(self.intensity > 0.0) {
+        if !self.intensity.is_finite() || self.intensity <= 0.0 {
             return Err(format!(
                 "intensity must be finite and > 0, got {}",
                 self.intensity

@@ -257,13 +257,13 @@ impl WavePropagationBuilder {
             .velocity_field
             .ok_or_else(|| "velocity_field is required".to_string())?;
 
-        if !(self.wave_speed > 0.0) {
+        if !self.wave_speed.is_finite() || self.wave_speed <= 0.0 {
             return Err(format!(
                 "wave_speed must be finite and > 0, got {}",
                 self.wave_speed
             ));
         }
-        if !(self.damping >= 0.0) {
+        if !self.damping.is_finite() || self.damping < 0.0 {
             return Err(format!(
                 "damping must be finite and >= 0, got {}",
                 self.damping
