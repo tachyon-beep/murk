@@ -24,6 +24,10 @@ pub struct StepMetrics {
     pub sparse_retired_ranges: u32,
     /// Number of sparse segment ranges pending promotion (freed this tick).
     pub sparse_pending_retired: u32,
+    /// Number of sparse alloc() calls that reused a retired range this tick.
+    pub sparse_reuse_hits: u32,
+    /// Number of sparse alloc() calls that fell through to bump allocation this tick.
+    pub sparse_reuse_misses: u32,
 }
 
 #[cfg(test)]
@@ -40,6 +44,8 @@ mod tests {
         assert_eq!(m.memory_bytes, 0);
         assert_eq!(m.sparse_retired_ranges, 0);
         assert_eq!(m.sparse_pending_retired, 0);
+        assert_eq!(m.sparse_reuse_hits, 0);
+        assert_eq!(m.sparse_reuse_misses, 0);
     }
 
     #[test]
@@ -52,6 +58,8 @@ mod tests {
             memory_bytes: 4096,
             sparse_retired_ranges: 3,
             sparse_pending_retired: 1,
+            sparse_reuse_hits: 5,
+            sparse_reuse_misses: 2,
         };
         assert_eq!(m.total_us, 100);
         assert_eq!(m.command_processing_us, 20);
@@ -62,5 +70,7 @@ mod tests {
         assert_eq!(m.memory_bytes, 4096);
         assert_eq!(m.sparse_retired_ranges, 3);
         assert_eq!(m.sparse_pending_retired, 1);
+        assert_eq!(m.sparse_reuse_hits, 5);
+        assert_eq!(m.sparse_reuse_misses, 2);
     }
 }

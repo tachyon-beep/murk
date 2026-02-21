@@ -17,6 +17,8 @@ pub(crate) struct StepMetrics {
     pub(crate) propagator_us: Vec<(String, u64)>,
     pub(crate) sparse_retired_ranges: u32,
     pub(crate) sparse_pending_retired: u32,
+    pub(crate) sparse_reuse_hits: u32,
+    pub(crate) sparse_reuse_misses: u32,
 }
 
 #[pymethods]
@@ -63,6 +65,18 @@ impl StepMetrics {
         self.sparse_pending_retired
     }
 
+    /// Number of sparse alloc() calls that reused a retired range this tick.
+    #[getter]
+    fn sparse_reuse_hits(&self) -> u32 {
+        self.sparse_reuse_hits
+    }
+
+    /// Number of sparse alloc() calls that fell through to bump allocation this tick.
+    #[getter]
+    fn sparse_reuse_misses(&self) -> u32 {
+        self.sparse_reuse_misses
+    }
+
     /// Convert to a plain Python dict.
     fn to_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
         let d = PyDict::new(py);
@@ -73,17 +87,21 @@ impl StepMetrics {
         d.set_item("propagator_us", &self.propagator_us)?;
         d.set_item("sparse_retired_ranges", self.sparse_retired_ranges)?;
         d.set_item("sparse_pending_retired", self.sparse_pending_retired)?;
+        d.set_item("sparse_reuse_hits", self.sparse_reuse_hits)?;
+        d.set_item("sparse_reuse_misses", self.sparse_reuse_misses)?;
         Ok(d)
     }
 
     fn __repr__(&self) -> String {
         format!(
-            "StepMetrics(total={}us, mem={}B, propagators={}, sparse_retired={}, sparse_pending={})",
+            "StepMetrics(total={}us, mem={}B, propagators={}, sparse_retired={}, sparse_pending={}, reuse_hits={}, reuse_misses={})",
             self.total_us,
             self.memory_bytes,
             self.propagator_us.len(),
             self.sparse_retired_ranges,
             self.sparse_pending_retired,
+            self.sparse_reuse_hits,
+            self.sparse_reuse_misses,
         )
     }
 }
@@ -117,6 +135,8 @@ impl StepMetrics {
             propagator_us,
             sparse_retired_ranges: m.sparse_retired_ranges,
             sparse_pending_retired: m.sparse_pending_retired,
+            sparse_reuse_hits: m.sparse_reuse_hits,
+            sparse_reuse_misses: m.sparse_reuse_misses,
         }
     }
 }
@@ -135,8 +155,12 @@ mod tests {
             propagator_us: vec![],
             sparse_retired_ranges: 5,
             sparse_pending_retired: 3,
+            sparse_reuse_hits: 10,
+            sparse_reuse_misses: 4,
         };
         assert_eq!(m.sparse_retired_ranges, 5);
         assert_eq!(m.sparse_pending_retired, 3);
+        assert_eq!(m.sparse_reuse_hits, 10);
+        assert_eq!(m.sparse_reuse_misses, 4);
     }
 }

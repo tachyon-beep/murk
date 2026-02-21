@@ -501,6 +501,21 @@ impl PingPongArena {
         self.sparse_slab.pending_retired_count()
     }
 
+    /// Number of sparse `alloc()` calls that reused a retired range.
+    pub fn sparse_reuse_hits(&self) -> u32 {
+        self.sparse_slab.reuse_hits()
+    }
+
+    /// Number of sparse `alloc()` calls that fell through to bump allocation.
+    pub fn sparse_reuse_misses(&self) -> u32 {
+        self.sparse_slab.reuse_misses()
+    }
+
+    /// Reset the sparse reuse hit/miss counters to zero.
+    pub fn reset_sparse_reuse_counters(&mut self) {
+        self.sparse_slab.reset_reuse_counters();
+    }
+
     /// Current generation number.
     pub fn generation(&self) -> u32 {
         self.generation

@@ -45,11 +45,15 @@ pub struct MurkStepMetrics {
     pub sparse_retired_ranges: u32,
     /// Number of sparse segment ranges pending promotion (freed this tick).
     pub sparse_pending_retired: u32,
+    /// Number of sparse alloc() calls that reused a retired range this tick.
+    pub sparse_reuse_hits: u32,
+    /// Number of sparse alloc() calls that fell through to bump allocation this tick.
+    pub sparse_reuse_misses: u32,
 }
 
 // Compile-time layout assertions for ABI stability.
-// 3×u64 + 1×u64 + 3×u32 + 4 bytes padding = 48 bytes, align 8.
-const _: () = assert!(std::mem::size_of::<MurkStepMetrics>() == 48);
+// 3×u64 + 1×u64 + 5×u32 + 4 bytes padding = 56 bytes, align 8.
+const _: () = assert!(std::mem::size_of::<MurkStepMetrics>() == 56);
 const _: () = assert!(std::mem::align_of::<MurkStepMetrics>() == 8);
 
 impl MurkStepMetrics {
@@ -62,6 +66,8 @@ impl MurkStepMetrics {
             n_propagators: m.propagator_us.len() as u32,
             sparse_retired_ranges: m.sparse_retired_ranges,
             sparse_pending_retired: m.sparse_pending_retired,
+            sparse_reuse_hits: m.sparse_reuse_hits,
+            sparse_reuse_misses: m.sparse_reuse_misses,
         }
     }
 }
@@ -159,10 +165,14 @@ mod tests {
             memory_bytes: 8192,
             sparse_retired_ranges: 7,
             sparse_pending_retired: 2,
+            sparse_reuse_hits: 5,
+            sparse_reuse_misses: 3,
         };
         let ffi = MurkStepMetrics::from_rust(&rust_metrics);
         assert_eq!(ffi.sparse_retired_ranges, 7);
         assert_eq!(ffi.sparse_pending_retired, 2);
+        assert_eq!(ffi.sparse_reuse_hits, 5);
+        assert_eq!(ffi.sparse_reuse_misses, 3);
     }
 
     #[test]
@@ -170,5 +180,7 @@ mod tests {
         let m = MurkStepMetrics::default();
         assert_eq!(m.sparse_retired_ranges, 0);
         assert_eq!(m.sparse_pending_retired, 0);
+        assert_eq!(m.sparse_reuse_hits, 0);
+        assert_eq!(m.sparse_reuse_misses, 0);
     }
 }

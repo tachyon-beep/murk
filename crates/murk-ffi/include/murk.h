@@ -411,6 +411,14 @@ typedef struct MurkStepMetrics {
    * Number of sparse segment ranges pending promotion (freed this tick).
    */
   uint32_t sparse_pending_retired;
+  /**
+   * Number of sparse alloc() calls that reused a retired range this tick.
+   */
+  uint32_t sparse_reuse_hits;
+  /**
+   * Number of sparse alloc() calls that fell through to bump allocation this tick.
+   */
+  uint32_t sparse_reuse_misses;
 } MurkStepMetrics;
 
 /**
