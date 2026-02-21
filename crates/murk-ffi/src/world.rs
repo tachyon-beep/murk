@@ -945,6 +945,97 @@ mod tests {
     }
 
     #[test]
+    fn ffi_guard_catches_panic_and_stores_message() {
+        // Clear any previous panic message on this thread.
+        crate::LAST_PANIC.with(|cell| cell.borrow_mut().clear());
+
+        // Simulate a panic inside an FFI-guarded function body.
+        // This is the same mechanism that protects every extern "C" entry point
+        // (murk_lockstep_step, murk_lockstep_create, etc.) — ffi_guard! wraps
+        // their entire body in catch_unwind.
+        let status = ffi_guard!({
+            panic!("deliberate test panic from world integration test");
+        });
+
+        // ffi_guard! must convert the panic into MurkStatus::Panicked (-128).
+        assert_eq!(
+            status,
+            MurkStatus::Panicked as i32,
+            "ffi_guard! must return Panicked (-128) when the body panics"
+        );
+
+        // The panic message must be retrievable via murk_last_panic_message.
+        // First, query the length by passing null buf.
+        let len = crate::murk_last_panic_message(std::ptr::null_mut(), 0);
+        assert!(
+            len > 0,
+            "murk_last_panic_message must return non-zero length after a panic"
+        );
+
+        // Now read the full message into a buffer.
+        let mut buf = vec![0u8; (len as usize) + 1];
+        let len2 = crate::murk_last_panic_message(
+            buf.as_mut_ptr() as *mut std::ffi::c_char,
+            buf.len(),
+        );
+        assert_eq!(len, len2, "length must be consistent between calls");
+
+        let msg = std::str::from_utf8(&buf[..len2 as usize]).unwrap();
+        assert!(
+            msg.contains("deliberate test panic from world integration test"),
+            "panic message must contain the original panic string, got: {msg:?}"
+        );
+    }
+
+    #[test]
+    fn ffi_guard_end_to_end_with_world_lifecycle() {
+        // This test proves that ffi_guard! does not interfere with normal
+        // world operations: create a world, trigger a guarded panic, verify
+        // the panic is caught, then step the world normally to show it is
+        // still usable (the panic was contained, not propagated).
+        let world_h = create_test_world();
+
+        // Clear previous panic state.
+        crate::LAST_PANIC.with(|cell| cell.borrow_mut().clear());
+
+        // A guarded panic in an unrelated call does not corrupt the world.
+        let panic_status = ffi_guard!({
+            panic!("boom during world test");
+        });
+        assert_eq!(panic_status, MurkStatus::Panicked as i32);
+
+        // Verify the message is stored.
+        let mut buf = [0u8; 128];
+        let len = crate::murk_last_panic_message(
+            buf.as_mut_ptr() as *mut std::ffi::c_char,
+            buf.len(),
+        );
+        assert!(len > 0);
+        let msg = std::str::from_utf8(&buf[..len as usize]).unwrap();
+        assert!(msg.contains("boom during world test"));
+
+        // The world must still be fully operational after the caught panic.
+        let mut n_receipts: usize = 0;
+        let step_status = murk_lockstep_step(
+            world_h,
+            std::ptr::null(),
+            0,
+            std::ptr::null_mut(),
+            0,
+            &mut n_receipts,
+            std::ptr::null_mut(),
+        );
+        assert_eq!(
+            step_status,
+            MurkStatus::Ok as i32,
+            "world must remain usable after a caught panic in an unrelated ffi_guard! call"
+        );
+        assert_eq!(murk_current_tick(world_h), 1);
+
+        murk_lockstep_destroy(world_h);
+    }
+
+    #[test]
     fn accessor_get_variants_null_out_returns_invalid_argument() {
         let world_h = create_test_world();
 

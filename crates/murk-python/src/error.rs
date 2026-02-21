@@ -7,12 +7,42 @@ use pyo3::PyResult;
 const ERROR_REF_URL: &str =
     "https://github.com/tachyon-beep/murk/blob/main/docs/error-reference.md";
 
+/// Retrieve the last panic message from the FFI layer (thread-local).
+///
+/// Returns `None` if no panic has been recorded.
+fn last_panic_message() -> Option<String> {
+    // First call with null buf to get the length.
+    let len = murk_ffi::murk_last_panic_message(std::ptr::null_mut(), 0);
+    if len <= 0 {
+        return None;
+    }
+    let cap = (len as usize) + 1; // +1 for null terminator
+    let mut buf: Vec<u8> = vec![0u8; cap];
+    murk_ffi::murk_last_panic_message(buf.as_mut_ptr() as *mut std::ffi::c_char, cap);
+    // The function null-terminates; take only the message bytes.
+    buf.truncate(len as usize);
+    String::from_utf8(buf).ok()
+}
+
 /// Check an FFI status code. Returns `Ok(())` on success, raises a typed
 /// Python exception with recovery hints on error.
 pub(crate) fn check_status(code: i32) -> PyResult<()> {
     if code == 0 {
         return Ok(());
     }
+
+    // Panicked (-128): retrieve the panic message from the FFI boundary.
+    if code == -128 {
+        let panic_msg = last_panic_message()
+            .unwrap_or_else(|| "unknown panic".to_owned());
+        let full = format!(
+            "murk: Rust panic caught at FFI boundary: {panic_msg}\n\
+             \x20 Hint: This is a bug in murk or a propagator. Please report it.\n\
+             \x20 Ref:  {ERROR_REF_URL}#panicked"
+        );
+        return Err(PyRuntimeError::new_err(full));
+    }
+
     let (msg, hint, section) = error_detail(code);
     let full =
         format!("murk error {code}: {msg}\n  Hint: {hint}\n  Ref:  {ERROR_REF_URL}#{section}");
@@ -182,6 +212,12 @@ fn error_detail(code: i32) -> (&'static str, &'static str, &'static str) {
              plan.mask_len to allocate correctly sized arrays.",
             "configerror",
         ),
+        -128 => (
+            "Rust panic caught at FFI boundary",
+            "A Rust panic was caught by ffi_guard!. This is a bug in murk \
+             or a propagator. Please report it with the panic message.",
+            "panicked",
+        ),
         _ => (
             "unknown murk error",
             "An unrecognized error code was returned from the FFI layer. \
@@ -218,5 +254,13 @@ mod tests {
     fn error_ref_url_is_valid() {
         assert!(ERROR_REF_URL.starts_with("https://"));
         assert!(ERROR_REF_URL.contains("error-reference.md"));
+    }
+
+    #[test]
+    fn panicked_code_has_detail() {
+        let (msg, hint, section) = error_detail(-128);
+        assert!(msg.contains("panic"), "msg should mention panic: {msg}");
+        assert!(hint.contains("ffi_guard"), "hint should mention ffi_guard: {hint}");
+        assert_eq!(section, "panicked");
     }
 }

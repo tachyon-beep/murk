@@ -241,6 +241,10 @@ enum MurkStatus {
    * Command type not supported by the tick executor.
    */
   UnsupportedCommand = -21,
+  /**
+   * A Rust panic was caught at the FFI boundary.
+   */
+  Panicked = -128,
 };
 typedef int32_t MurkStatus;
 
@@ -550,10 +554,21 @@ typedef struct MurkReceipt {
 } MurkReceipt;
 
 /**
+ * Retrieve the panic message stored by the most recent [`ffi_guard!`] catch
+ * on this thread.
+ *
+ * - If `buf` is null, returns the full message length (in bytes) without
+ *   copying anything. Returns `0` if no panic has been recorded.
+ * - Otherwise copies up to `cap - 1` bytes into `buf`, null-terminates, and
+ *   returns the full message length.
+ */
+int32_t murk_last_panic_message(char *buf, uintptr_t cap);
+
+/**
  * ABI version: major in upper 16 bits, minor in lower 16.
  *
  * Bump major on breaking changes, minor on additions.
- * Current: v2.0 (v1→v2: MurkStepMetrics layout grew from 40 to 48 bytes).
+ * Current: v2.1 (v2.0→v2.1: ffi_guard! panic safety, murk_last_panic_message, MurkStatus::Panicked)
  */
 uint32_t murk_abi_version(void);
 
