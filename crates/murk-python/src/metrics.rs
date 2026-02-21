@@ -15,6 +15,8 @@ pub(crate) struct StepMetrics {
     pub(crate) snapshot_publish_us: u64,
     pub(crate) memory_bytes: usize,
     pub(crate) propagator_us: Vec<(String, u64)>,
+    pub(crate) sparse_retired_ranges: u32,
+    pub(crate) sparse_pending_retired: u32,
 }
 
 #[pymethods]
@@ -49,6 +51,18 @@ impl StepMetrics {
         self.propagator_us.clone()
     }
 
+    /// Number of sparse segment ranges available for reuse.
+    #[getter]
+    fn sparse_retired_ranges(&self) -> u32 {
+        self.sparse_retired_ranges
+    }
+
+    /// Number of sparse segment ranges pending promotion (freed this tick).
+    #[getter]
+    fn sparse_pending_retired(&self) -> u32 {
+        self.sparse_pending_retired
+    }
+
     /// Convert to a plain Python dict.
     fn to_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
         let d = PyDict::new(py);
@@ -57,16 +71,40 @@ impl StepMetrics {
         d.set_item("snapshot_publish_us", self.snapshot_publish_us)?;
         d.set_item("memory_bytes", self.memory_bytes)?;
         d.set_item("propagator_us", &self.propagator_us)?;
+        d.set_item("sparse_retired_ranges", self.sparse_retired_ranges)?;
+        d.set_item("sparse_pending_retired", self.sparse_pending_retired)?;
         Ok(d)
     }
 
     fn __repr__(&self) -> String {
         format!(
-            "StepMetrics(total={}us, mem={}B, propagators={})",
+            "StepMetrics(total={}us, mem={}B, propagators={}, sparse_retired={}, sparse_pending={})",
             self.total_us,
             self.memory_bytes,
-            self.propagator_us.len()
+            self.propagator_us.len(),
+            self.sparse_retired_ranges,
+            self.sparse_pending_retired,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn struct_has_sparse_fields() {
+        let m = StepMetrics {
+            total_us: 0,
+            command_processing_us: 0,
+            snapshot_publish_us: 0,
+            memory_bytes: 0,
+            propagator_us: vec![],
+            sparse_retired_ranges: 5,
+            sparse_pending_retired: 3,
+        };
+        assert_eq!(m.sparse_retired_ranges, 5);
+        assert_eq!(m.sparse_pending_retired, 3);
     }
 }
 
@@ -97,6 +135,8 @@ impl StepMetrics {
             snapshot_publish_us: m.snapshot_publish_us,
             memory_bytes: m.memory_bytes as usize,
             propagator_us,
+            sparse_retired_ranges: m.sparse_retired_ranges,
+            sparse_pending_retired: m.sparse_pending_retired,
         }
     }
 }

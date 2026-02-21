@@ -351,6 +351,8 @@ impl TickEngine {
             propagator_us,
             snapshot_publish_us,
             memory_bytes: self.arena.memory_bytes(),
+            sparse_retired_ranges: self.arena.sparse_retired_range_count() as u32,
+            sparse_pending_retired: self.arena.sparse_pending_retired_count() as u32,
         };
         self.last_metrics = metrics.clone();
 

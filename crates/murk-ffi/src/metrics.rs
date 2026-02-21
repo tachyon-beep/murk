@@ -41,11 +41,15 @@ pub struct MurkStepMetrics {
     pub memory_bytes: u64,
     /// Number of propagators executed.
     pub n_propagators: u32,
+    /// Number of sparse segment ranges available for reuse.
+    pub sparse_retired_ranges: u32,
+    /// Number of sparse segment ranges pending promotion (freed this tick).
+    pub sparse_pending_retired: u32,
 }
 
 // Compile-time layout assertions for ABI stability.
-// 3×u64 + 1×u64 + 1×u32 + 4 bytes padding = 40 bytes, align 8.
-const _: () = assert!(std::mem::size_of::<MurkStepMetrics>() == 40);
+// 3×u64 + 1×u64 + 3×u32 + 4 bytes padding = 48 bytes, align 8.
+const _: () = assert!(std::mem::size_of::<MurkStepMetrics>() == 48);
 const _: () = assert!(std::mem::align_of::<MurkStepMetrics>() == 8);
 
 impl MurkStepMetrics {
@@ -56,6 +60,8 @@ impl MurkStepMetrics {
             snapshot_publish_us: m.snapshot_publish_us,
             memory_bytes: m.memory_bytes as u64,
             n_propagators: m.propagator_us.len() as u32,
+            sparse_retired_ranges: m.sparse_retired_ranges,
+            sparse_pending_retired: m.sparse_pending_retired,
         }
     }
 }
@@ -108,6 +114,34 @@ pub extern "C" fn murk_step_metrics_propagator(
 
         MurkStatus::Ok as i32
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn from_rust_converts_sparse_metrics() {
+        let rust_metrics = murk_engine::StepMetrics {
+            total_us: 500,
+            command_processing_us: 100,
+            propagator_us: vec![("heat".to_string(), 200)],
+            snapshot_publish_us: 50,
+            memory_bytes: 8192,
+            sparse_retired_ranges: 7,
+            sparse_pending_retired: 2,
+        };
+        let ffi = MurkStepMetrics::from_rust(&rust_metrics);
+        assert_eq!(ffi.sparse_retired_ranges, 7);
+        assert_eq!(ffi.sparse_pending_retired, 2);
+    }
+
+    #[test]
+    fn default_sparse_fields_are_zero() {
+        let m = MurkStepMetrics::default();
+        assert_eq!(m.sparse_retired_ranges, 0);
+        assert_eq!(m.sparse_pending_retired, 0);
+    }
 }
 
 /// Retrieve latest metrics for a world.

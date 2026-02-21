@@ -483,6 +483,16 @@ impl PingPongArena {
             + self.scratch.memory_bytes()
     }
 
+    /// Number of sparse segment ranges available for reuse.
+    pub fn sparse_retired_range_count(&self) -> usize {
+        self.sparse_slab.retired_range_count()
+    }
+
+    /// Number of sparse segment ranges pending promotion (freed this tick).
+    pub fn sparse_pending_retired_count(&self) -> usize {
+        self.sparse_slab.pending_retired_count()
+    }
+
     /// Current generation number.
     pub fn generation(&self) -> u32 {
         self.generation
@@ -1211,5 +1221,76 @@ mod tests {
         let snap = arena.snapshot();
         assert_eq!(snap.read_field(FieldId(0)).unwrap()[0], 999.0);
         assert_eq!(snap.read_field(FieldId(0)).unwrap()[99], 888.0);
+    }
+
+    // ── sparse reclamation metrics (#arena-sparse-fragmentation-metric) ──
+
+    #[test]
+    fn sparse_retired_range_count_zero_at_start() {
+        let arena = make_arena();
+        assert_eq!(arena.sparse_retired_range_count(), 0);
+    }
+
+    #[test]
+    fn sparse_pending_retired_count_zero_at_start() {
+        let arena = make_arena();
+        assert_eq!(arena.sparse_pending_retired_count(), 0);
+    }
+
+    #[test]
+    fn sparse_metrics_reflect_cow_lifecycle() {
+        let cell_count = 100u32;
+        let config = ArenaConfig {
+            segment_size: 1024,
+            max_segments: 6,
+            max_generation_age: 1,
+            cell_count,
+        };
+        let field_defs = vec![(
+            FieldId(0),
+            FieldDef {
+                name: "resources".into(),
+                field_type: FieldType::Scalar,
+                mutability: FieldMutability::Sparse,
+                units: None,
+                bounds: None,
+                boundary_behavior: BoundaryBehavior::Clamp,
+            },
+        )];
+        let static_arena = StaticArena::new(&[]).into_shared();
+        let mut arena = PingPongArena::new(config, field_defs, static_arena).unwrap();
+
+        // Tick 1: write sparse field. The constructor already allocated
+        // FieldId(0), so this CoW write retires the constructor's range.
+        {
+            let mut guard = arena.begin_tick().unwrap();
+            let data = guard.writer.write(FieldId(0)).unwrap();
+            data[0] = 1.0;
+        }
+        arena.publish(TickId(1), ParameterVersion(0)).unwrap();
+        // Constructor's allocation is now pending (freed this tick).
+        assert_eq!(arena.sparse_retired_range_count(), 0);
+        assert_eq!(arena.sparse_pending_retired_count(), 1);
+
+        // Tick 2: begin_tick flushes pending → retired (1 range).
+        // Then CoW write reuses that retired range and retires tick 1's.
+        {
+            let mut guard = arena.begin_tick().unwrap();
+            let data = guard.writer.write(FieldId(0)).unwrap();
+            data[0] = 2.0;
+        }
+        arena.publish(TickId(2), ParameterVersion(0)).unwrap();
+        // Reused the 1 retired range, tick 1's allocation now pending.
+        assert_eq!(arena.sparse_retired_range_count(), 0);
+        assert_eq!(arena.sparse_pending_retired_count(), 1);
+
+        // Tick 3: begin_tick flushes pending → retired. No writes.
+        {
+            let _guard = arena.begin_tick().unwrap();
+        }
+        arena.publish(TickId(3), ParameterVersion(0)).unwrap();
+        // Flushed to retired, nothing new pending.
+        assert_eq!(arena.sparse_retired_range_count(), 1);
+        assert_eq!(arena.sparse_pending_retired_count(), 0);
     }
 }
