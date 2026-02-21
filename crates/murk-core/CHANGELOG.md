@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.7](https://github.com/tachyon-beep/murk/compare/murk-core-v0.1.2...murk-core-v0.1.7) - 2026-02-21
+
+### Added
+
+- `UnsupportedCommand` error variant for rejected command types
+
+### Fixed
+
+- Field type zero-dims constructible
+- Error types missing `PartialEq`
+- Missing `#[must_use]` attributes
+
 ## [0.1.2](https://github.com/tachyon-beep/murk/compare/murk-core-v0.1.1...murk-core-v0.1.2) - 2026-02-16
 
 ### Other

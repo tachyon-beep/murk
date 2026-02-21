@@ -7,23 +7,153 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-02-21
+
+Major stabilisation release: 90+ bug fixes across all crates, 6 new library
+propagators, cbindgen C header generation, and sparse reclamation observability.
+
 ### Added
 
+#### BatchedEngine
 - `BatchedEngine` for high-throughput parallel world stepping with a single GIL release
 - `BatchedVecEnv` SB3-compatible Python interface for batched training
 - `batched_heat_seeker` example: BatchedVecEnv migration with vectorized state
 - `batched_cookbook` example: low-level BatchedWorld API recipes
 - `batched_benchmark` example: performance comparison of BatchedVecEnv vs MurkVecEnv
+- Batched topology validation: reject incompatible space topologies and validate obs before stepping
+
+#### Library Propagators
+- `ScalarDiffusion` with builder pattern and configurable parameters
+- `GradientCompute` standalone propagator with buffer bounds guarding
+- `IdentityCopy` propagator for field mirroring
+- `FlowField` propagator for vector field advection
+- `AgentEmission` propagator for agent-driven field writes
+- `ResourceField` propagator for resource dynamics
+- `MorphologicalOp` propagator for spatial erosion/dilation
+- `WavePropagation` propagator for wave equation simulation
+- `NoiseInjection` propagator with `rand` dependency
+- PyO3 bindings for all new propagators
+- Integration tests through `LockstepWorld` for all propagators
+- Parity test between old and new diffusion implementations
+
+#### FFI & Observability
+- Auto-generated `include/murk.h` C header via cbindgen (42 functions, 8 structs, 8 enums)
+- Sparse reclamation metrics: `sparse_retired_ranges` and `sparse_pending_retired`
+  exposed through `StepMetrics` → `MurkStepMetrics` → Python `StepMetrics`
+- `UnsupportedCommand` error variant for rejected command types
+
+#### Documentation
 - Modeling concepts section in README with 20+ domain-specific simulation patterns
+- Explicit determinism contract and authoritative surface area documentation
+- BatchedEngine documentation across all guides (CONCEPTS.md, ARCHITECTURE.md, etc.)
+- Comprehensive documentation review and fixes for 0.1.7
 - Bug hunt script for automated issue discovery
 
 ### Changed
 
-- BatchedEngine documentation added across all guides (CONCEPTS.md, ARCHITECTURE.md, etc.)
+- ABI version bumped from v1.0 to v2.0 (`MurkStepMetrics` layout: 40 → 48 bytes)
+- `MurkStepMetrics` `#[repr(C)]` struct extended with sparse reclamation fields
+- Examples migrated from hardcoded propagators to library propagators
+  (`heat_seeker`, `crystal_nav`, `hex_pursuit`)
+- Benchmark profiles switched to library propagators
+- Hardcoded field constants in propagators deprecated
+- Retired range tuple replaced with named `RetiredRange` struct in arena internals
 
 ### Fixed
 
-- Review issues and documentation corrections across examples and guides
+#### Critical
+- Receipt buffer out-of-bounds panic in Python `step()` (BUG-001)
+- Sparse segment memory leak from unbounded CoW allocations
+- FFI metrics race condition in concurrent world stepping
+
+#### Arena (murk-arena)
+- Per-tick allocation undercount in memory reporting
+- Scratch region reuse across ticks
+- Segment slice beyond cursor panic
+- Missing segment size validation
+- Publish-without-begin-tick state guard
+- Static arena duplicate field ID acceptance
+- Descriptor clone-per-tick overhead
+- Cell count components overflow
+- Generation counter overflow handling
+- Sparse CoW generation rollover
+
+#### Engine (murk-engine)
+- SetField command visibility across tick boundary
+- Ring buffer spurious `None` on latest snapshot
+- Shutdown blocks on slow tick in RealtimeAsync mode
+- Backoff config not validated at construction
+- Adaptive backoff output unused
+- Egress epoch/tick mismatch
+- Observe buffer bounds check
+- Reset returns wrong error variant
+- Tick accepts non-SetField commands silently
+- Cell count u32 truncation
+
+#### FFI (murk-ffi)
+- Mutex poisoning panics across FFI boundary (3 fixes)
+- Obs conversion duplicated across modules
+- ObsPlan lock ordering inconsistency
+- Trampoline null pointer dereference
+- Config not consumed on null output pointer
+- Inconsistent mutex poisoning handling
+- `usize` in `#[repr(C)]` struct
+- Handle accessor ambiguity (returns 0 for both success and invalid handle)
+- Generation wraparound safety
+
+#### Python (murk-python)
+- CString from raw pointer potential UB
+- Trampoline panic across FFI boundary
+- Missing type stubs for library propagators
+- Close skips ObsPlan destroy
+- Batched VecEnv missing spaces property
+- Command docstring expiry default mismatch
+- Error hints reference unexposed config
+- Reset-all no-seeds validation
+- VecEnv false SB3 compatibility claim
+- Auto-reset hook, priority derivation, path crash
+
+#### Propagators
+- Diffusion CFL uses hardcoded degree instead of space connectivity
+- Scratch bytes/slots mismatch in capacity calculation
+- Agent presence issues with tick-0 actions
+- NaN/infinity validation gaps
+- Resolve-axis duplicated computation
+- Reward stale heat gradient dependency
+- Pipeline NaN max_dt bypass
+- Performance hotspots in inner loops
+
+#### Observation (murk-obs)
+- FlatBuffer silent u16 truncation
+- FlatBuffer signed/unsigned cast corruption
+- Per-agent scratch allocation overflow
+- Normalize inverted range
+- Canonical rank negative coordinate handling
+- Pool NaN produces infinity
+- Plan fast-path unchecked index panic
+- Geometry `is_interior` missing dimension check
+
+#### Replay (murk-replay)
+- Unbounded allocation from wire data
+- Compare sentinel zero divergence false positive
+- Hash of empty snapshot returns nonzero
+- Writer no flush on drop
+- Write path u32 truncation
+- Expires/arrival_seq not serialized
+
+#### Space (murk-space)
+- Hex2D disk overflow on large radii
+- FCC12 parity overflow
+- Product space weighted metric truncation
+- Compliance ordering for membership checks
+- `is_multiple_of` MSRV compatibility
+
+#### Cross-cutting
+- Workspace unused `indexmap` dependencies
+- Missing `#[must_use]` attributes
+- Error types missing `PartialEq`
+- Field type zero-dims constructible
+- Umbrella snapshot not importable
 
 ## [0.1.0] - 2026-02-15
 
@@ -137,5 +267,6 @@ for reinforcement learning and real-time applications.
 - Miri verification for `murk-arena` memory safety.
 - CI: check, test, clippy, rustfmt, and Miri on every push and PR.
 
-[unreleased]: https://github.com/tachyon-beep/murk/compare/v0.1.0...HEAD
+[unreleased]: https://github.com/tachyon-beep/murk/compare/v0.1.7...HEAD
+[0.1.7]: https://github.com/tachyon-beep/murk/compare/v0.1.0...v0.1.7
 [0.1.0]: https://github.com/tachyon-beep/murk/releases/tag/v0.1.0
