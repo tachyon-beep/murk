@@ -105,8 +105,12 @@ impl TickEngine {
         // Validate and build read resolution plan.
         config.validate()?;
         let defined_fields = config.defined_field_set();
-        let plan =
-            murk_propagator::validate_pipeline(&config.propagators, &defined_fields, config.dt)?;
+        let plan = murk_propagator::validate_pipeline(
+            &config.propagators,
+            &defined_fields,
+            config.dt,
+            &*config.space,
+        )?;
 
         // Build arena field defs.
         // Safety: validate() already checked fields.len() fits in u32.
@@ -354,7 +358,10 @@ impl TickEngine {
             memory_bytes: self.arena.memory_bytes(),
             sparse_retired_ranges: self.arena.sparse_retired_range_count() as u32,
             sparse_pending_retired: self.arena.sparse_pending_retired_count() as u32,
+            sparse_reuse_hits: self.arena.sparse_reuse_hits(),
+            sparse_reuse_misses: self.arena.sparse_reuse_misses(),
         };
+        self.arena.reset_sparse_reuse_counters();
         self.last_metrics = metrics.clone();
 
         Ok(TickResult { receipts, metrics })

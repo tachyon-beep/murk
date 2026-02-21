@@ -301,7 +301,7 @@ impl Propagator for DiffusionPropagator {
         ]
     }
 
-    fn max_dt(&self) -> Option<f64> {
+    fn max_dt(&self, _space: &dyn murk_space::Space) -> Option<f64> {
         if self.diffusivity > 0.0 {
             // CFL stability constraint: dt <= 1 / (max_degree * D)
             // Use 12 (Fcc12) as worst-case to be safe for all space topologies.
@@ -457,14 +457,15 @@ mod tests {
 
     #[test]
     fn max_dt_constraint() {
+        let space = Square4::new(4, 4, EdgeBehavior::Wrap).unwrap();
         let prop = DiffusionPropagator::new(0.25);
         // 1 / (12 * 0.25) ≈ 0.333...
-        let dt = prop.max_dt().unwrap();
+        let dt = prop.max_dt(&space).unwrap();
         assert!((dt - 1.0 / 3.0).abs() < 1e-10);
 
         let prop2 = DiffusionPropagator::new(1.0);
         // 1 / (12 * 1.0) ≈ 0.0833...
-        let dt2 = prop2.max_dt().unwrap();
+        let dt2 = prop2.max_dt(&space).unwrap();
         assert!((dt2 - 1.0 / 12.0).abs() < 1e-10);
     }
 
@@ -875,11 +876,12 @@ mod tests {
 
     #[test]
     fn zero_diffusivity_max_dt_is_none() {
+        let space = Square4::new(4, 4, EdgeBehavior::Wrap).unwrap();
         let prop = DiffusionPropagator::new(0.0);
         assert!(
-            prop.max_dt().is_none(),
+            prop.max_dt(&space).is_none(),
             "zero diffusivity should give max_dt=None, got {:?}",
-            prop.max_dt()
+            prop.max_dt(&space)
         );
     }
 

@@ -144,7 +144,7 @@ impl Propagator for MorphologicalOp {
         vec![(self.output_field, WriteMode::Full)]
     }
 
-    fn max_dt(&self) -> Option<f64> {
+    fn max_dt(&self, _space: &dyn murk_space::Space) -> Option<f64> {
         None
     }
 
@@ -272,7 +272,8 @@ mod tests {
 
         assert_eq!(prop.name(), "MorphologicalOp");
         assert!(prop.reads().is_empty(), "reads() should be empty");
-        assert!(prop.max_dt().is_none());
+        let space = murk_space::Square4::new(4, 4, murk_space::EdgeBehavior::Wrap).unwrap();
+        assert!(prop.max_dt(&space).is_none());
 
         let rp = prop.reads_previous();
         assert!(rp.contains(F_IN));

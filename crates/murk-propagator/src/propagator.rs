@@ -95,9 +95,13 @@ pub trait Propagator: Send + 'static {
 
     /// Maximum stable timestep for this propagator (e.g., CFL).
     ///
+    /// The `space` parameter provides topology information (e.g., neighbor
+    /// degree) so propagators can compute tighter stability bounds instead
+    /// of assuming worst-case connectivity.
+    ///
     /// The pipeline validates `dt <= min(max_dt)` across all propagators.
     /// Return `None` to impose no constraint.
-    fn max_dt(&self) -> Option<f64> {
+    fn max_dt(&self, _space: &dyn murk_space::Space) -> Option<f64> {
         None
     }
 

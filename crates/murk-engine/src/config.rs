@@ -303,7 +303,7 @@ impl WorldConfig {
         //    The plan is intentionally discarded here — the world constructor
         //    calls validate_pipeline() again to obtain it.
         let defined = self.defined_field_set();
-        let _ = validate_pipeline(&self.propagators, &defined, self.dt)?;
+        let _ = validate_pipeline(&self.propagators, &defined, self.dt, &*self.space)?;
 
         Ok(())
     }
@@ -424,7 +424,7 @@ mod tests {
             fn writes(&self) -> Vec<(FieldId, WriteMode)> {
                 vec![(FieldId(0), WriteMode::Full)]
             }
-            fn max_dt(&self) -> Option<f64> {
+            fn max_dt(&self, _space: &dyn murk_space::Space) -> Option<f64> {
                 Some(0.01)
             }
             fn step(&self, _ctx: &mut StepContext<'_>) -> Result<(), PropagatorError> {

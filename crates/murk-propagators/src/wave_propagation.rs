@@ -301,7 +301,7 @@ impl Propagator for WavePropagation {
         ]
     }
 
-    fn max_dt(&self) -> Option<f64> {
+    fn max_dt(&self, _space: &dyn murk_space::Space) -> Option<f64> {
         // CFL: dt <= 1 / (wave_speed * sqrt(max_degree))
         // Worst case: FCC-12 with degree 12.
         Some(1.0 / (self.wave_speed * 12.0_f64.sqrt()))
@@ -365,8 +365,9 @@ mod tests {
         assert_eq!(w[1], (F_VEL, WriteMode::Full));
 
         // CFL check for default wave_speed=1.0
+        let space = Square4::new(4, 4, EdgeBehavior::Wrap).unwrap();
         let expected_dt = 1.0 / 12.0_f64.sqrt();
-        let actual_dt = prop.max_dt().unwrap();
+        let actual_dt = prop.max_dt(&space).unwrap();
         assert!((actual_dt - expected_dt).abs() < 1e-10);
     }
 
@@ -421,6 +422,7 @@ mod tests {
 
     #[test]
     fn max_dt_is_cfl() {
+        let space = Square4::new(4, 4, EdgeBehavior::Wrap).unwrap();
         let prop = WavePropagation::builder()
             .displacement_field(F_DISP)
             .velocity_field(F_VEL)
@@ -428,7 +430,7 @@ mod tests {
             .build()
             .unwrap();
         let expected = 1.0 / (2.0 * 12.0_f64.sqrt());
-        let actual = prop.max_dt().unwrap();
+        let actual = prop.max_dt(&space).unwrap();
         assert!(
             (actual - expected).abs() < 1e-10,
             "CFL: expected {expected}, got {actual}"

@@ -55,7 +55,7 @@ impl Propagator for DiffusionPropagator {
         vec![(HEAT, WriteMode::Full)]
     }
 
-    fn max_dt(&self) -> Option<f64> {
+    fn max_dt(&self, _space: &dyn murk_space::Space) -> Option<f64> {
         Some(1.0 / (4.0 * DIFFUSION))
     }
 

@@ -455,16 +455,37 @@ impl Propagator for ScalarDiffusion {
         w
     }
 
-    fn max_dt(&self) -> Option<f64> {
-        if self.coefficient > 0.0 {
-            // CFL stability constraint: dt <= 1 / (max_degree * D)
-            // Default max_degree is 12 (worst-case Fcc12). Users can lower
-            // this via the builder when the topology is known (e.g. 4 for
-            // Square4, 6 for Hex2D).
-            Some(1.0 / (self.max_degree as f64 * self.coefficient))
-        } else {
-            None
+    fn max_dt(&self, space: &dyn murk_space::Space) -> Option<f64> {
+        if self.coefficient <= 0.0 {
+            return None;
         }
+        let n = space.cell_count();
+        if n == 0 {
+            return None;
+        }
+        let ordering = space.canonical_ordering();
+
+        // Sample several cells spread across the grid and take the
+        // *maximum* neighbour degree.  CFL safety requires the worst-case
+        // (highest-degree) cell, so under-sampling is conservative in the
+        // wrong direction.  Five evenly-spaced probes cover interior cells
+        // on all regular grids while staying O(1).
+        let probes: &[usize] = if n < 5 {
+            // Tiny grid: just check all cells.
+            &[0, 1, 2, 3, 4]
+        } else {
+            &[n / 4, n / 3, n / 2, 2 * n / 3, 3 * n / 4]
+        };
+        let mut space_degree: u32 = 0;
+        for &idx in probes {
+            if idx < n {
+                let deg = space.neighbours(&ordering[idx]).len() as u32;
+                space_degree = space_degree.max(deg);
+            }
+        }
+
+        let effective_degree = space_degree.max(self.max_degree);
+        Some(1.0 / (effective_degree as f64 * self.coefficient))
     }
 
     fn step(&self, ctx: &mut StepContext<'_>) -> Result<(), PropagatorError> {
@@ -740,6 +761,8 @@ mod tests {
 
     #[test]
     fn max_dt_constraint() {
+        // Default max_degree=12, Square4 has degree 4 → effective_degree = max(4, 12) = 12
+        let space = Square4::new(8, 8, EdgeBehavior::Wrap).unwrap();
         let prop = ScalarDiffusion::builder()
             .input_field(F_HEAT)
             .output_field(F_HEAT)
@@ -747,7 +770,7 @@ mod tests {
             .build()
             .unwrap();
         // 1 / (12 * 0.25) = 1/3
-        let dt = prop.max_dt().unwrap();
+        let dt = prop.max_dt(&space).unwrap();
         assert!((dt - 1.0 / 3.0).abs() < 1e-10);
 
         let prop2 = ScalarDiffusion::builder()
@@ -757,7 +780,7 @@ mod tests {
             .build()
             .unwrap();
         // 1 / (12 * 1.0) = 1/12
-        let dt2 = prop2.max_dt().unwrap();
+        let dt2 = prop2.max_dt(&space).unwrap();
         assert!((dt2 - 1.0 / 12.0).abs() < 1e-10);
 
         // Zero coefficient -> no constraint
@@ -767,7 +790,7 @@ mod tests {
             .coefficient(0.0)
             .build()
             .unwrap();
-        assert!(prop3.max_dt().is_none());
+        assert!(prop3.max_dt(&space).is_none());
     }
 
     #[test]
@@ -1131,5 +1154,53 @@ mod tests {
             "source should override diffusion+decay, got {}",
             result[4]
         );
+    }
+
+    // ---------------------------------------------------------------
+    // Topology-aware CFL tests
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn max_dt_uses_space_degree_for_square4() {
+        let prop = ScalarDiffusion::builder()
+            .input_field(F_HEAT)
+            .output_field(F_HEAT)
+            .coefficient(1.0)
+            .max_degree(0) // no floor — use space degree only
+            .build()
+            .unwrap();
+        let space = murk_space::Square4::new(8, 8, murk_space::EdgeBehavior::Wrap).unwrap();
+        // Square4 interior cell has degree 4 → max_dt = 1 / (4 * 1.0) = 0.25
+        assert_eq!(prop.max_dt(&space), Some(0.25));
+    }
+
+    #[test]
+    fn max_dt_uses_space_degree_for_hex2d() {
+        let prop = ScalarDiffusion::builder()
+            .input_field(F_HEAT)
+            .output_field(F_HEAT)
+            .coefficient(1.0)
+            .max_degree(0)
+            .build()
+            .unwrap();
+        // Use 8x8 so sampled cells include interior cells with full degree 6.
+        // (Hex2D uses Absorb boundaries, so small grids may only sample edge cells.)
+        let space = murk_space::Hex2D::new(8, 8).unwrap();
+        // Hex2D interior cell has degree 6 → max_dt = 1 / (6 * 1.0) ≈ 0.1667
+        assert!((prop.max_dt(&space).unwrap() - 1.0 / 6.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn max_degree_builder_acts_as_floor() {
+        let prop = ScalarDiffusion::builder()
+            .input_field(F_HEAT)
+            .output_field(F_HEAT)
+            .coefficient(1.0)
+            .max_degree(8)
+            .build()
+            .unwrap();
+        let space = murk_space::Square4::new(8, 8, murk_space::EdgeBehavior::Wrap).unwrap();
+        // Square4 degree=4, max_degree=8 → effective=max(4,8)=8 → max_dt = 1/8 = 0.125
+        assert_eq!(prop.max_dt(&space), Some(1.0 / 8.0));
     }
 }

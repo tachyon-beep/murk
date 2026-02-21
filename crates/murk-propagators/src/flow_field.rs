@@ -281,7 +281,7 @@ impl Propagator for FlowField {
         vec![(self.flow_field, WriteMode::Full)]
     }
 
-    fn max_dt(&self) -> Option<f64> {
+    fn max_dt(&self, _space: &dyn murk_space::Space) -> Option<f64> {
         None // flow field computation has no stability constraint
     }
 
@@ -341,7 +341,8 @@ mod tests {
         assert_eq!(w.len(), 1);
         assert_eq!(w[0], (F_FLOW, WriteMode::Full));
 
-        assert!(prop.max_dt().is_none());
+        let space = murk_space::Square4::new(4, 4, murk_space::EdgeBehavior::Wrap).unwrap();
+        assert!(prop.max_dt(&space).is_none());
     }
 
     #[test]
