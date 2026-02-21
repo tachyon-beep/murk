@@ -278,7 +278,9 @@ pub extern "C" fn murk_config_add_field(
         let ft = match field_type {
             x if x == MurkFieldType::Scalar as i32 => FieldType::Scalar,
             x if x == MurkFieldType::Vector as i32 => FieldType::Vector { dims },
-            x if x == MurkFieldType::Categorical as i32 => FieldType::Categorical { n_values: dims },
+            x if x == MurkFieldType::Categorical as i32 => {
+                FieldType::Categorical { n_values: dims }
+            }
             _ => return MurkStatus::InvalidArgument as i32,
         };
 
@@ -331,7 +333,8 @@ pub extern "C" fn murk_config_add_propagator(handle: u64, prop_ptr: u64) -> i32 
         // SAFETY: prop_ptr was produced by Box::into_raw(Box::new(boxed)) in
         // murk_propagator_create. It's a thin pointer to a Box<dyn Propagator>
         // and is consumed exactly once here.
-        let prop: Box<dyn Propagator> = *unsafe { Box::from_raw(prop_ptr as *mut Box<dyn Propagator>) };
+        let prop: Box<dyn Propagator> =
+            *unsafe { Box::from_raw(prop_ptr as *mut Box<dyn Propagator>) };
 
         let mut table = ffi_lock!(CONFIGS);
         match table.get_mut(handle) {

@@ -486,6 +486,9 @@ mod tests {
         murk_propagator_create, MurkPropagatorDef, MurkStepContext, MurkWriteDecl,
     };
     use crate::types::*;
+    use murk_core::{FieldId, FieldSet, PropagatorError};
+    use murk_propagator::propagator::WriteMode;
+    use murk_propagator::StepContext;
     use std::ffi::{c_void, CString};
 
     // Test step function: writes constant 7.0 to field 0.
@@ -508,8 +511,35 @@ mod tests {
         0
     }
 
-    /// Helper: build a world with a constant propagator writing 7.0 to field 0.
-    fn create_test_world() -> u64 {
+    struct PanickingRustPropagator;
+
+    impl murk_propagator::Propagator for PanickingRustPropagator {
+        fn name(&self) -> &str {
+            "panic_prop"
+        }
+
+        fn reads(&self) -> FieldSet {
+            FieldSet::empty()
+        }
+
+        fn reads_previous(&self) -> FieldSet {
+            FieldSet::empty()
+        }
+
+        fn writes(&self) -> Vec<(FieldId, WriteMode)> {
+            vec![(FieldId(0), WriteMode::Full)]
+        }
+
+        fn step(&self, _ctx: &mut StepContext<'_>) -> Result<(), PropagatorError> {
+            panic!("panicking propagator test");
+        }
+    }
+
+    /// Helper: build a world with a callback propagator.
+    fn create_test_world_with_step(
+        propagator_name: &str,
+        step_fn: unsafe extern "C" fn(*mut c_void, *const MurkStepContext) -> i32,
+    ) -> u64 {
         let mut cfg_h: u64 = 0;
         murk_config_create(&mut cfg_h);
 
@@ -530,7 +560,7 @@ mod tests {
         murk_config_set_seed(cfg_h, 42);
 
         // Create propagator.
-        let prop_name = CString::new("const7").unwrap();
+        let prop_name = CString::new(propagator_name).unwrap();
         let writes = [MurkWriteDecl {
             field_id: 0,
             mode: MurkWriteMode::Full as i32,
@@ -543,13 +573,51 @@ mod tests {
             n_reads_previous: 0,
             writes: writes.as_ptr(),
             n_writes: 1,
-            step_fn: Some(const_step_fn),
+            step_fn: Some(step_fn),
             user_data: std::ptr::null_mut(),
             scratch_bytes: 0,
         };
         let mut prop_h: u64 = 0;
         murk_propagator_create(&def, &mut prop_h);
         crate::config::murk_config_add_propagator(cfg_h, prop_h);
+
+        let mut world_h: u64 = 0;
+        let status = murk_lockstep_create(cfg_h, &mut world_h);
+        assert_eq!(status, MurkStatus::Ok as i32, "world creation failed");
+        world_h
+    }
+
+    /// Helper: build a world with a constant propagator writing 7.0 to field 0.
+    fn create_test_world() -> u64 {
+        create_test_world_with_step("const7", const_step_fn)
+    }
+
+    fn create_test_world_with_panicking_rust_propagator() -> u64 {
+        let mut cfg_h: u64 = 0;
+        murk_config_create(&mut cfg_h);
+
+        let params = [10.0f64, 0.0]; // Line1D, len=10, Absorb
+        murk_config_set_space(cfg_h, MurkSpaceType::Line1D as i32, params.as_ptr(), 2);
+
+        let name = CString::new("energy").unwrap();
+        murk_config_add_field(
+            cfg_h,
+            name.as_ptr(),
+            MurkFieldType::Scalar as i32,
+            MurkFieldMutability::PerTick as i32,
+            0,
+            MurkBoundaryBehavior::Clamp as i32,
+        );
+
+        murk_config_set_dt(cfg_h, 0.1);
+        murk_config_set_seed(cfg_h, 42);
+
+        let mut table = crate::config::configs().lock().unwrap();
+        let cfg = table
+            .get_mut(cfg_h)
+            .expect("config handle must be present before world creation");
+        cfg.propagators.push(Box::new(PanickingRustPropagator));
+        drop(table);
 
         let mut world_h: u64 = 0;
         let status = murk_lockstep_create(cfg_h, &mut world_h);
@@ -974,10 +1042,8 @@ mod tests {
 
         // Now read the full message into a buffer.
         let mut buf = vec![0u8; (len as usize) + 1];
-        let len2 = crate::murk_last_panic_message(
-            buf.as_mut_ptr() as *mut std::ffi::c_char,
-            buf.len(),
-        );
+        let len2 =
+            crate::murk_last_panic_message(buf.as_mut_ptr() as *mut std::ffi::c_char, buf.len());
         assert_eq!(len, len2, "length must be consistent between calls");
 
         let msg = std::str::from_utf8(&buf[..len2 as usize]).unwrap();
@@ -1006,10 +1072,8 @@ mod tests {
 
         // Verify the message is stored.
         let mut buf = [0u8; 128];
-        let len = crate::murk_last_panic_message(
-            buf.as_mut_ptr() as *mut std::ffi::c_char,
-            buf.len(),
-        );
+        let len =
+            crate::murk_last_panic_message(buf.as_mut_ptr() as *mut std::ffi::c_char, buf.len());
         assert!(len > 0);
         let msg = std::str::from_utf8(&buf[..len as usize]).unwrap();
         assert!(msg.contains("boom during world test"));
@@ -1033,6 +1097,59 @@ mod tests {
         assert_eq!(murk_current_tick(world_h), 1);
 
         murk_lockstep_destroy(world_h);
+    }
+
+    #[test]
+    fn panicking_propagator_returns_panicked_and_poisoned_world_is_reported() {
+        crate::LAST_PANIC.with(|cell| cell.borrow_mut().clear());
+        let world_h = create_test_world_with_panicking_rust_propagator();
+
+        let mut n_receipts: usize = 0;
+        let status = murk_lockstep_step(
+            world_h,
+            std::ptr::null(),
+            0,
+            std::ptr::null_mut(),
+            0,
+            &mut n_receipts,
+            std::ptr::null_mut(),
+        );
+        assert_eq!(status, MurkStatus::Panicked as i32);
+
+        let len = crate::murk_last_panic_message(std::ptr::null_mut(), 0);
+        assert!(len > 0, "panic message should be captured");
+        let mut buf = vec![0u8; (len as usize) + 1];
+        let len2 =
+            crate::murk_last_panic_message(buf.as_mut_ptr() as *mut std::ffi::c_char, buf.len());
+        assert_eq!(len, len2);
+        let msg = std::str::from_utf8(&buf[..len as usize]).unwrap();
+        assert!(
+            msg.contains("panicking propagator test"),
+            "panic message should include callback panic text, got: {msg:?}"
+        );
+
+        // The handle still exists, but the world mutex is poisoned.
+        let mut tick: u64 = 123;
+        assert_eq!(
+            murk_current_tick_get(world_h, &mut tick),
+            MurkStatus::InternalError as i32
+        );
+        assert_eq!(tick, 123, "out param must not be written on error");
+        assert_eq!(
+            murk_lockstep_step(
+                world_h,
+                std::ptr::null(),
+                0,
+                std::ptr::null_mut(),
+                0,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            ),
+            MurkStatus::InternalError as i32
+        );
+
+        // Destroy still succeeds because removal does not require locking the world mutex.
+        assert_eq!(murk_lockstep_destroy(world_h), MurkStatus::Ok as i32);
     }
 
     #[test]

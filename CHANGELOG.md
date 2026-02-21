@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-02-22
+
+FFI panic safety hardening and observability improvements.
+
+### Added
+
+- `ffi_guard!` macro: all 41 `extern "C"` functions wrapped in `catch_unwind`
+- `MurkStatus::Panicked` (-128) error code for caught panics
+- `murk_last_panic_message()` FFI function for panic diagnostics
+- `Propagator::max_dt()` now receives `&dyn Space` for topology-aware CFL bounds
+- `sparse_reuse_hits` and `sparse_reuse_misses` metrics in StepMetrics/FFI/Python
+- Formal semantic documentation for ProductSpace (CR-1)
+
+### Changed
+
+- ABI version bumped from v2.0 to v2.1
+- `MurkStepMetrics` layout: 48 → 56 bytes (added reuse counters)
+- `ScalarDiffusion` CFL bound derived from space topology (no longer defaults to 12-neighbour worst-case)
+- `validate_pipeline()` signature extended with `space: &dyn Space` parameter
+
 ## [0.1.7] - 2026-02-21
 
 Major stabilisation release: 90+ bug fixes across all crates, 6 new library

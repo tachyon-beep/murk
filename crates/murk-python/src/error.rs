@@ -33,8 +33,7 @@ pub(crate) fn check_status(code: i32) -> PyResult<()> {
 
     // Panicked (-128): retrieve the panic message from the FFI boundary.
     if code == -128 {
-        let panic_msg = last_panic_message()
-            .unwrap_or_else(|| "unknown panic".to_owned());
+        let panic_msg = last_panic_message().unwrap_or_else(|| "unknown panic".to_owned());
         let full = format!(
             "murk: Rust panic caught at FFI boundary: {panic_msg}\n\
              \x20 Hint: This is a bug in murk or a propagator. Please report it.\n\
@@ -260,7 +259,10 @@ mod tests {
     fn panicked_code_has_detail() {
         let (msg, hint, section) = error_detail(-128);
         assert!(msg.contains("panic"), "msg should mention panic: {msg}");
-        assert!(hint.contains("ffi_guard"), "hint should mention ffi_guard: {hint}");
+        assert!(
+            hint.contains("ffi_guard"),
+            "hint should mention ffi_guard: {hint}"
+        );
         assert_eq!(section, "panicked");
     }
 }

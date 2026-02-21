@@ -36,10 +36,9 @@ macro_rules! ffi_lock {
 
 use std::cell::RefCell;
 
-
 thread_local! {
     /// Stores the last panic message caught by [`ffi_guard!`] on this thread.
-    pub(crate) static LAST_PANIC: RefCell<String> = RefCell::new(String::new());
+    pub(crate) static LAST_PANIC: RefCell<String> = const { RefCell::new(String::new()) };
 }
 
 /// Extract a human-readable message from a `catch_unwind` panic payload.
@@ -213,10 +212,7 @@ mod tests {
             panic!("hello from test");
         });
         let mut buf = [0u8; 64];
-        let len = murk_last_panic_message(
-            buf.as_mut_ptr() as *mut std::ffi::c_char,
-            buf.len(),
-        );
+        let len = murk_last_panic_message(buf.as_mut_ptr() as *mut std::ffi::c_char, buf.len());
         let msg = std::str::from_utf8(&buf[..len as usize]).unwrap();
         assert_eq!(msg, "hello from test");
     }
