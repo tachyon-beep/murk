@@ -569,73 +569,8 @@ mod tests {
 
         murk_batched_destroy(batch_h);
     }
-}
 
-#[cfg(test)]
-mod p1_regression_tests {
-    use super::*;
-    use crate::config::*;
-    use crate::propagator::*;
-    use crate::types::*;
-    use std::ffi::{c_void, CString};
-
-    #[allow(unsafe_code)]
-    unsafe extern "C" fn const_step_fn(
-        _user_data: *mut c_void,
-        ctx: *const MurkStepContext,
-    ) -> i32 {
-        let ctx = &*ctx;
-        let mut ptr: *mut f32 = std::ptr::null_mut();
-        let mut len: usize = 0;
-        let rc = (ctx.write_fn)(ctx.opaque, 0, &mut ptr, &mut len);
-        if rc != 0 {
-            return rc;
-        }
-        let slice = std::slice::from_raw_parts_mut(ptr, len);
-        for v in slice {
-            *v = 7.0;
-        }
-        0
-    }
-
-    fn create_config_handle() -> u64 {
-        let mut cfg_h: u64 = 0;
-        murk_config_create(&mut cfg_h);
-        let params = [10.0f64, 0.0];
-        murk_config_set_space(cfg_h, MurkSpaceType::Line1D as i32, params.as_ptr(), 2);
-        let name = CString::new("energy").unwrap();
-        murk_config_add_field(
-            cfg_h,
-            name.as_ptr(),
-            MurkFieldType::Scalar as i32,
-            MurkFieldMutability::PerTick as i32,
-            0,
-            MurkBoundaryBehavior::Clamp as i32,
-        );
-        murk_config_set_dt(cfg_h, 0.1);
-        murk_config_set_seed(cfg_h, 42);
-        let prop_name = CString::new("const7").unwrap();
-        let writes = [MurkWriteDecl {
-            field_id: 0,
-            mode: MurkWriteMode::Full as i32,
-        }];
-        let def = MurkPropagatorDef {
-            name: prop_name.as_ptr(),
-            reads: std::ptr::null(),
-            n_reads: 0,
-            reads_previous: std::ptr::null(),
-            n_reads_previous: 0,
-            writes: writes.as_ptr(),
-            n_writes: 1,
-            step_fn: Some(const_step_fn),
-            user_data: std::ptr::null_mut(),
-            scratch_bytes: 0,
-        };
-        let mut prop_h: u64 = 0;
-        murk_propagator_create(&def, &mut prop_h);
-        murk_config_add_propagator(cfg_h, prop_h);
-        cfg_h
-    }
+    // ── P1 regression tests ─────────────────────────────────────
 
     #[test]
     fn negative_disk_radius_rejected() {

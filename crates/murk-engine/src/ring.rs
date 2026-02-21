@@ -514,10 +514,8 @@ mod tests {
                     loop {
                         // Once at least one push has happened, latest() must
                         // never return None.
-                        if ring_c.write_pos() > 0 {
-                            if ring_c.latest().is_none() {
-                                nones.fetch_add(1, Ordering::Relaxed);
-                            }
+                        if ring_c.write_pos() > 0 && ring_c.latest().is_none() {
+                            nones.fetch_add(1, Ordering::Relaxed);
                         }
                         reads += 1;
                         if done_c.load(Ordering::Acquire) {

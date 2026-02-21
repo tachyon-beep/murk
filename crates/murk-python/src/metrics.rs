@@ -88,26 +88,6 @@ impl StepMetrics {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn struct_has_sparse_fields() {
-        let m = StepMetrics {
-            total_us: 0,
-            command_processing_us: 0,
-            snapshot_publish_us: 0,
-            memory_bytes: 0,
-            propagator_us: vec![],
-            sparse_retired_ranges: 5,
-            sparse_pending_retired: 3,
-        };
-        assert_eq!(m.sparse_retired_ranges, 5);
-        assert_eq!(m.sparse_pending_retired, 3);
-    }
-}
-
 impl StepMetrics {
     /// Build from FFI MurkStepMetrics + per-propagator queries.
     pub(crate) fn from_ffi(m: &MurkStepMetrics, world_handle: u64) -> Self {
@@ -138,5 +118,25 @@ impl StepMetrics {
             sparse_retired_ranges: m.sparse_retired_ranges,
             sparse_pending_retired: m.sparse_pending_retired,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn struct_has_sparse_fields() {
+        let m = StepMetrics {
+            total_us: 0,
+            command_processing_us: 0,
+            snapshot_publish_us: 0,
+            memory_bytes: 0,
+            propagator_us: vec![],
+            sparse_retired_ranges: 5,
+            sparse_pending_retired: 3,
+        };
+        assert_eq!(m.sparse_retired_ranges, 5);
+        assert_eq!(m.sparse_pending_retired, 3);
     }
 }

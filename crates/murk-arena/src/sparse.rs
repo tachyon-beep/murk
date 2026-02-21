@@ -269,8 +269,8 @@ mod tests {
         let mut slab = SparseSlab::new();
         let mut segs = make_segments();
 
-        slab.alloc(FieldId(0), 50, 1, &mut segs).unwrap();
-        slab.alloc(FieldId(1), 75, 1, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(0), 50, 1, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(1), 75, 1, &mut segs).unwrap();
 
         assert_eq!(slab.live_count(), 2);
         assert_eq!(slab.get_handle(FieldId(0)).unwrap().len(), 50);
@@ -283,9 +283,9 @@ mod tests {
         let mut segs = make_segments();
 
         // First alloc creates slot 0.
-        slab.alloc(FieldId(0), 50, 1, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(0), 50, 1, &mut segs).unwrap();
         // Realloc kills slot 0, but it gets reused for the new allocation.
-        slab.alloc(FieldId(0), 50, 2, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(0), 50, 2, &mut segs).unwrap();
 
         // The dead slot was immediately reused, so total slots should stay at 1.
         // (free_list pops the old slot, then it's reused for the new one.)
@@ -298,11 +298,11 @@ mod tests {
         let mut segs = make_segments();
 
         // Gen 0: initial allocation.
-        slab.alloc(FieldId(0), 100, 0, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(0), 100, 0, &mut segs).unwrap();
         let used_after_init = segs.total_used();
 
         // Gen 1: CoW write — old range goes to pending_retired.
-        slab.alloc(FieldId(0), 100, 1, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(0), 100, 1, &mut segs).unwrap();
         let used_after_cow1 = segs.total_used();
         assert!(used_after_cow1 > used_after_init);
         assert_eq!(slab.pending_retired_count(), 1);
@@ -314,7 +314,7 @@ mod tests {
         assert_eq!(slab.retired_range_count(), 1);
 
         // Gen 2: CoW write — should reuse the retired range.
-        slab.alloc(FieldId(0), 100, 2, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(0), 100, 2, &mut segs).unwrap();
         assert_eq!(
             segs.total_used(),
             used_after_cow1,
@@ -329,13 +329,13 @@ mod tests {
         let mut segs = make_segments();
 
         // Gen 0: initial allocation.
-        slab.alloc(FieldId(0), 100, 0, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(0), 100, 0, &mut segs).unwrap();
         // Gen 1: CoW — range goes to pending_retired.
-        slab.alloc(FieldId(0), 100, 1, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(0), 100, 1, &mut segs).unwrap();
         let used_before = segs.total_used();
 
         // Gen 2: another CoW WITHOUT flush — must bump-allocate.
-        slab.alloc(FieldId(0), 100, 2, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(0), 100, 2, &mut segs).unwrap();
         assert!(
             segs.total_used() > used_before,
             "should bump-allocate because pending ranges are not reusable"
@@ -348,13 +348,13 @@ mod tests {
         // Small segments to make exhaustion easy to detect.
         let mut segs = SegmentList::new(1024, 2);
 
-        slab.alloc(FieldId(0), 100, 0, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(0), 100, 0, &mut segs).unwrap();
 
         // 50 ticks of CoW writes with flush between each — should never
         // exhaust the pool (only 200 f32s ever live at once).
         for gen in 1..=50u32 {
             slab.flush_retired();
-            slab.alloc(FieldId(0), 100, gen, &mut segs).unwrap();
+            let _ = slab.alloc(FieldId(0), 100, gen, &mut segs).unwrap();
         }
         // Pool should still be well within bounds.
         assert!(segs.total_used() <= 300);
@@ -366,19 +366,19 @@ mod tests {
         let mut segs = make_segments();
 
         // Gen 0: allocate two fields of size 100.
-        slab.alloc(FieldId(0), 100, 0, &mut segs).unwrap();
-        slab.alloc(FieldId(1), 100, 0, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(0), 100, 0, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(1), 100, 0, &mut segs).unwrap();
 
         // Gen 1: CoW both — their ranges go to pending_retired.
-        slab.alloc(FieldId(0), 100, 1, &mut segs).unwrap();
-        slab.alloc(FieldId(1), 100, 1, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(0), 100, 1, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(1), 100, 1, &mut segs).unwrap();
         slab.flush_retired();
         assert_eq!(slab.retired_range_count(), 2);
 
         let used_before = segs.total_used();
 
         // Request size 200 — no retired range matches, must bump-allocate.
-        slab.alloc(FieldId(2), 200, 2, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(2), 200, 2, &mut segs).unwrap();
         assert!(
             segs.total_used() > used_before,
             "should bump-allocate when no retired range matches the requested size"
@@ -393,23 +393,23 @@ mod tests {
         let mut segs = make_segments();
 
         // Gen 0: allocate three fields of equal size.
-        slab.alloc(FieldId(0), 100, 0, &mut segs).unwrap();
-        slab.alloc(FieldId(1), 100, 0, &mut segs).unwrap();
-        slab.alloc(FieldId(2), 100, 0, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(0), 100, 0, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(1), 100, 0, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(2), 100, 0, &mut segs).unwrap();
 
         // Gen 1: CoW all three — old ranges go to pending_retired.
-        slab.alloc(FieldId(0), 100, 1, &mut segs).unwrap();
-        slab.alloc(FieldId(1), 100, 1, &mut segs).unwrap();
-        slab.alloc(FieldId(2), 100, 1, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(0), 100, 1, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(1), 100, 1, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(2), 100, 1, &mut segs).unwrap();
         slab.flush_retired();
         assert_eq!(slab.retired_range_count(), 3);
 
         let used_before = segs.total_used();
 
         // Gen 2: CoW all three again — should reuse all three retired ranges.
-        slab.alloc(FieldId(0), 100, 2, &mut segs).unwrap();
-        slab.alloc(FieldId(1), 100, 2, &mut segs).unwrap();
-        slab.alloc(FieldId(2), 100, 2, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(0), 100, 2, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(1), 100, 2, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(2), 100, 2, &mut segs).unwrap();
 
         assert_eq!(
             segs.total_used(),
@@ -425,18 +425,18 @@ mod tests {
         let mut segs = make_segments();
 
         // Two fields with different sizes.
-        slab.alloc(FieldId(0), 100, 0, &mut segs).unwrap();
-        slab.alloc(FieldId(1), 200, 0, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(0), 100, 0, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(1), 200, 0, &mut segs).unwrap();
 
         // CoW both — retire both ranges.
-        slab.alloc(FieldId(0), 100, 1, &mut segs).unwrap();
-        slab.alloc(FieldId(1), 200, 1, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(0), 100, 1, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(1), 200, 1, &mut segs).unwrap();
         slab.flush_retired();
 
         let used_before = segs.total_used();
 
         // Request size 200 — should reuse the size-200 range, not size-100.
-        slab.alloc(FieldId(1), 200, 2, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(1), 200, 2, &mut segs).unwrap();
         assert_eq!(segs.total_used(), used_before);
         // The size-100 range should still be available.
         assert_eq!(slab.retired_range_count(), 1);
@@ -458,7 +458,7 @@ mod tests {
                     let _ = slab.alloc(FieldId(fid), 10, gen as u32, &mut segs);
                 }
                 // Live count = number of distinct field IDs allocated.
-                let distinct: std::collections::HashSet<_> = field_ids.iter().collect();
+                let distinct: indexmap::IndexSet<_> = field_ids.iter().collect();
                 prop_assert_eq!(slab.live_count(), distinct.len());
             }
 

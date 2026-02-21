@@ -1,6 +1,6 @@
 //! Criterion micro-benchmarks for space/topology operations.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
 use murk_space::{EdgeBehavior, Hex2D, Line1D, ProductSpace, Space, Square4};
 use smallvec::smallvec;
 
@@ -14,7 +14,7 @@ fn bench_neighbours_square4_10k(c: &mut Criterion) {
                 for col in 0..100i32 {
                     let coord = smallvec![r, col];
                     let n = space.neighbours(&coord);
-                    black_box(&n);
+                    std::hint::black_box(&n);
                 }
             }
         });
@@ -33,7 +33,7 @@ fn bench_neighbours_hex2d_10k(c: &mut Criterion) {
                 for q in 0..100i32 {
                     let coord = smallvec![q, r];
                     let n = space.neighbours(&coord);
-                    black_box(&n);
+                    std::hint::black_box(&n);
                 }
             }
         });
@@ -66,7 +66,7 @@ fn bench_distance_product_space(c: &mut Criterion) {
         b.iter(|| {
             for (a, bv) in &pairs {
                 let d = space.distance(a, bv);
-                black_box(d);
+                std::hint::black_box(d);
             }
         });
     });

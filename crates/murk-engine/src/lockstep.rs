@@ -203,7 +203,7 @@ impl std::fmt::Debug for LockstepWorld {
 mod tests {
     use super::*;
     use murk_core::command::CommandPayload;
-    use murk_core::id::{Coord, FieldId, ParameterKey};
+    use murk_core::id::{Coord, FieldId};
     use murk_core::traits::{FieldReader, SnapshotAccess};
     use murk_core::{BoundaryBehavior, FieldDef, FieldMutability, FieldType};
     use murk_propagator::propagator::WriteMode;

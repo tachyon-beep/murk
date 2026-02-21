@@ -1,6 +1,6 @@
 //! Criterion benchmarks for the reference propagator pipeline.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
 use murk_bench::{reference_profile, stress_profile};
 use murk_engine::LockstepWorld;
 use murk_propagators::agent_movement::new_action_buffer;
@@ -16,7 +16,7 @@ fn bench_tick_10k(c: &mut Criterion) {
     c.bench_function("tick_10k", |b| {
         b.iter(|| {
             let result = world.step_sync(vec![]).unwrap();
-            black_box(&result);
+            std::hint::black_box(&result);
         });
     });
 }
@@ -31,7 +31,7 @@ fn bench_tick_100k(c: &mut Criterion) {
     c.bench_function("tick_100k", |b| {
         b.iter(|| {
             let result = world.step_sync(vec![]).unwrap();
-            black_box(&result);
+            std::hint::black_box(&result);
         });
     });
 }
@@ -44,7 +44,7 @@ fn bench_1000_ticks_10k(c: &mut Criterion) {
             let mut world = LockstepWorld::new(config).unwrap();
             for _ in 0..1000 {
                 let result = world.step_sync(vec![]).unwrap();
-                black_box(&result);
+                std::hint::black_box(&result);
             }
         });
     });

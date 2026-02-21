@@ -275,7 +275,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // First tick after injection: the propagator should now
             // see the HEAT_SOURCE value and pin (1,1) = 10.0.
             let heat = result.snapshot.read(HEAT).unwrap();
-            let injected_val = heat[1 * COLS as usize + 1];
+            let injected_val = heat[COLS as usize + 1];
             println!(
                 "  tick {:>3}: heat at (1,1) = {:.2} (injection visible!)",
                 tick, injected_val,

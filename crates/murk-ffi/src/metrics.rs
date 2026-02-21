@@ -116,6 +116,31 @@ pub extern "C" fn murk_step_metrics_propagator(
     })
 }
 
+/// Retrieve latest metrics for a world.
+#[no_mangle]
+#[allow(unsafe_code)]
+pub extern "C" fn murk_step_metrics(world_handle: u64, out: *mut MurkStepMetrics) -> i32 {
+    use crate::world::worlds;
+
+    if out.is_null() {
+        return MurkStatus::InvalidArgument as i32;
+    }
+
+    let world_arc = {
+        let table = ffi_lock!(worlds());
+        match table.get(world_handle).cloned() {
+            Some(arc) => arc,
+            None => return MurkStatus::InvalidHandle as i32,
+        }
+    };
+    let world = ffi_lock!(world_arc);
+
+    let metrics = MurkStepMetrics::from_rust(world.last_metrics());
+    // SAFETY: out is valid per caller contract.
+    unsafe { *out = metrics };
+    MurkStatus::Ok as i32
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -142,29 +167,4 @@ mod tests {
         assert_eq!(m.sparse_retired_ranges, 0);
         assert_eq!(m.sparse_pending_retired, 0);
     }
-}
-
-/// Retrieve latest metrics for a world.
-#[no_mangle]
-#[allow(unsafe_code)]
-pub extern "C" fn murk_step_metrics(world_handle: u64, out: *mut MurkStepMetrics) -> i32 {
-    use crate::world::worlds;
-
-    if out.is_null() {
-        return MurkStatus::InvalidArgument as i32;
-    }
-
-    let world_arc = {
-        let table = ffi_lock!(worlds());
-        match table.get(world_handle).cloned() {
-            Some(arc) => arc,
-            None => return MurkStatus::InvalidHandle as i32,
-        }
-    };
-    let world = ffi_lock!(world_arc);
-
-    let metrics = MurkStepMetrics::from_rust(world.last_metrics());
-    // SAFETY: out is valid per caller contract.
-    unsafe { *out = metrics };
-    MurkStatus::Ok as i32
 }

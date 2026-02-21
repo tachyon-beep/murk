@@ -1,11 +1,14 @@
 //! Criterion micro-benchmarks for observation pipeline operations.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
+use murk_core::FieldId;
 use murk_engine::LockstepWorld;
 use murk_obs::{ObsDtype, ObsEntry, ObsPlan, ObsRegion, ObsSpec, ObsTransform};
 use murk_propagators::agent_movement::new_action_buffer;
-use murk_propagators::HEAT;
 use murk_space::RegionSpec;
+
+/// Heat scalar field — matches the reference pipeline's field 0.
+const HEAT: FieldId = FieldId(0);
 
 use murk_bench::reference_profile;
 
@@ -33,7 +36,7 @@ fn bench_obs_compile_simple(c: &mut Criterion) {
     c.bench_function("obs_compile_simple", |b| {
         b.iter(|| {
             let result = ObsPlan::compile(&spec, space).unwrap();
-            black_box(&result);
+            std::hint::black_box(&result);
         });
     });
 }
@@ -64,7 +67,7 @@ fn bench_obs_execute_10k(c: &mut Criterion) {
         b.iter(|| {
             let snap = world.snapshot();
             let meta = plan.execute(&snap, None, &mut output, &mut mask).unwrap();
-            black_box(&meta);
+            std::hint::black_box(&meta);
         });
     });
 }
@@ -99,7 +102,7 @@ fn bench_obs_execute_batch_16(c: &mut Criterion) {
                 let meta = plan
                     .execute(&snap, None, &mut outputs[i], &mut masks[i])
                     .unwrap();
-                black_box(&meta);
+                std::hint::black_box(&meta);
             }
         });
     });

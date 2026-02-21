@@ -1090,7 +1090,7 @@ mod tests {
 
         // Uniform field: diffusion leaves values at 10.0
         // Then true exponential decay: out[i] = 10.0 * exp(-1.0 * 0.01) ≈ 9.9005
-        let expected = 10.0_f64 * (-1.0_f64 * 0.01).exp();
+        let expected = 10.0_f64 * (-0.01_f64).exp();
         let result = writer.get_field(F_HEAT).unwrap();
         for &v in result {
             assert!(

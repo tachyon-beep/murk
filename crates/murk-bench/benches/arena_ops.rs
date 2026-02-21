@@ -1,6 +1,6 @@
 //! Criterion micro-benchmarks for arena allocation, write, and snapshot operations.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
 use murk_arena::config::ArenaConfig;
 use murk_arena::static_arena::StaticArena;
 use murk_arena::PingPongArena;
@@ -83,8 +83,7 @@ fn bench_arena_alloc_10k(c: &mut Criterion) {
     c.bench_function("arena_alloc_10k", |b| {
         b.iter(|| {
             let mut arena = make_arena_10k();
-            let guard = arena.begin_tick().unwrap();
-            black_box(guard);
+            let _guard = std::hint::black_box(arena.begin_tick().unwrap());
         });
     });
 }
@@ -107,7 +106,7 @@ fn bench_arena_write_10k(c: &mut Criterion) {
             for (i, val) in data.iter_mut().enumerate() {
                 *val = i as f32;
             }
-            black_box(data[0]);
+            std::hint::black_box(data[0]);
             arena.publish(TickId(tick), ParameterVersion(0)).unwrap();
             tick += 1;
         });
@@ -135,7 +134,7 @@ fn bench_arena_snapshot(c: &mut Criterion) {
             // Take snapshot and read field.
             let snap = arena.snapshot();
             let data = snap.read_field(FieldId(0)).unwrap();
-            black_box(data[0]);
+            std::hint::black_box(data[0]);
         });
     });
 }
