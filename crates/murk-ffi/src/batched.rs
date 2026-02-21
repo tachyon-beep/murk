@@ -35,96 +35,98 @@ pub extern "C" fn murk_batched_create(
     n_entries: usize,
     handle_out: *mut u64,
 ) -> i32 {
-    if handle_out.is_null() {
-        return MurkStatus::InvalidArgument as i32;
-    }
-    if n_worlds == 0 || config_handles.is_null() {
-        return MurkStatus::InvalidArgument as i32;
-    }
-
-    // SAFETY: config_handles points to n_worlds valid u64 values.
-    let handles = unsafe { std::slice::from_raw_parts(config_handles, n_worlds) };
-
-    // Consume ALL config handles unconditionally (even on error).
-    // Remove every handle first, then check for missing ones.
-    let mut configs_table = match configs().lock() {
-        Ok(g) => g,
-        Err(_) => return MurkStatus::InternalError as i32,
-    };
-    let mut builders = Vec::with_capacity(n_worlds);
-    let mut any_missing = false;
-    for &ch in handles {
-        match configs_table.remove(ch) {
-            Some(b) => builders.push(b),
-            None => any_missing = true,
-        }
-    }
-    drop(configs_table);
-    if any_missing {
-        return MurkStatus::InvalidHandle as i32;
-    }
-
-    // Build WorldConfigs from builders.
-    let mut world_configs = Vec::with_capacity(n_worlds);
-    for builder in builders {
-        let space = match builder.space {
-            Some(s) => s,
-            None => return MurkStatus::ConfigError as i32,
-        };
-        if builder.fields.is_empty() || builder.propagators.is_empty() {
-            return MurkStatus::ConfigError as i32;
-        }
-        world_configs.push(WorldConfig {
-            space,
-            fields: builder.fields,
-            propagators: builder.propagators,
-            dt: builder.dt,
-            seed: builder.seed,
-            ring_buffer_size: builder.ring_buffer_size,
-            max_ingress_queue: builder.max_ingress_queue,
-            tick_rate_hz: None,
-            backoff: BackoffConfig::default(),
-        });
-    }
-
-    // Convert obs entries to ObsSpec (if any).
-    let obs_spec = if n_entries > 0 {
-        if obs_entries.is_null() {
+    ffi_guard!({
+        if handle_out.is_null() {
             return MurkStatus::InvalidArgument as i32;
         }
-        let entry_slice = unsafe { std::slice::from_raw_parts(obs_entries, n_entries) };
-        let mut rust_entries = Vec::with_capacity(n_entries);
-        for e in entry_slice {
-            match convert_obs_entry(e) {
-                Some(re) => rust_entries.push(re),
-                None => return MurkStatus::InvalidArgument as i32,
+        if n_worlds == 0 || config_handles.is_null() {
+            return MurkStatus::InvalidArgument as i32;
+        }
+
+        // SAFETY: config_handles points to n_worlds valid u64 values.
+        let handles = unsafe { std::slice::from_raw_parts(config_handles, n_worlds) };
+
+        // Consume ALL config handles unconditionally (even on error).
+        // Remove every handle first, then check for missing ones.
+        let mut configs_table = match configs().lock() {
+            Ok(g) => g,
+            Err(_) => return MurkStatus::InternalError as i32,
+        };
+        let mut builders = Vec::with_capacity(n_worlds);
+        let mut any_missing = false;
+        for &ch in handles {
+            match configs_table.remove(ch) {
+                Some(b) => builders.push(b),
+                None => any_missing = true,
             }
         }
-        Some(ObsSpec {
-            entries: rust_entries,
-        })
-    } else {
-        None
-    };
-
-    // Create the batched engine.
-    let engine = match BatchedEngine::new(world_configs, obs_spec.as_ref()) {
-        Ok(e) => e,
-        Err(e) => {
-            return match &e {
-                murk_engine::batched::BatchError::Config(ce) => MurkStatus::from(ce) as i32,
-                murk_engine::batched::BatchError::Observe(oe) => MurkStatus::from(oe) as i32,
-                _ => MurkStatus::ConfigError as i32,
-            };
+        drop(configs_table);
+        if any_missing {
+            return MurkStatus::InvalidHandle as i32;
         }
-    };
 
-    let handle = match BATCHED.lock() {
-        Ok(mut g) => g.insert(engine),
-        Err(_) => return MurkStatus::InternalError as i32,
-    };
-    unsafe { *handle_out = handle };
-    MurkStatus::Ok as i32
+        // Build WorldConfigs from builders.
+        let mut world_configs = Vec::with_capacity(n_worlds);
+        for builder in builders {
+            let space = match builder.space {
+                Some(s) => s,
+                None => return MurkStatus::ConfigError as i32,
+            };
+            if builder.fields.is_empty() || builder.propagators.is_empty() {
+                return MurkStatus::ConfigError as i32;
+            }
+            world_configs.push(WorldConfig {
+                space,
+                fields: builder.fields,
+                propagators: builder.propagators,
+                dt: builder.dt,
+                seed: builder.seed,
+                ring_buffer_size: builder.ring_buffer_size,
+                max_ingress_queue: builder.max_ingress_queue,
+                tick_rate_hz: None,
+                backoff: BackoffConfig::default(),
+            });
+        }
+
+        // Convert obs entries to ObsSpec (if any).
+        let obs_spec = if n_entries > 0 {
+            if obs_entries.is_null() {
+                return MurkStatus::InvalidArgument as i32;
+            }
+            let entry_slice = unsafe { std::slice::from_raw_parts(obs_entries, n_entries) };
+            let mut rust_entries = Vec::with_capacity(n_entries);
+            for e in entry_slice {
+                match convert_obs_entry(e) {
+                    Some(re) => rust_entries.push(re),
+                    None => return MurkStatus::InvalidArgument as i32,
+                }
+            }
+            Some(ObsSpec {
+                entries: rust_entries,
+            })
+        } else {
+            None
+        };
+
+        // Create the batched engine.
+        let engine = match BatchedEngine::new(world_configs, obs_spec.as_ref()) {
+            Ok(e) => e,
+            Err(e) => {
+                return match &e {
+                    murk_engine::batched::BatchError::Config(ce) => MurkStatus::from(ce) as i32,
+                    murk_engine::batched::BatchError::Observe(oe) => MurkStatus::from(oe) as i32,
+                    _ => MurkStatus::ConfigError as i32,
+                };
+            }
+        };
+
+        let handle = match BATCHED.lock() {
+            Ok(mut g) => g.insert(engine),
+            Err(_) => return MurkStatus::InternalError as i32,
+        };
+        unsafe { *handle_out = handle };
+        MurkStatus::Ok as i32
+    })
 }
 
 /// Step all worlds and extract observations in one call.
@@ -146,46 +148,48 @@ pub extern "C" fn murk_batched_step_and_observe(
     obs_mask_len: usize,
     tick_ids_out: *mut u64,
 ) -> i32 {
-    let mut table = match BATCHED.lock() {
-        Ok(g) => g,
-        Err(_) => return MurkStatus::InternalError as i32,
-    };
-    let engine = match table.get_mut(handle) {
-        Some(e) => e,
-        None => return MurkStatus::InvalidHandle as i32,
-    };
+    ffi_guard!({
+        let mut table = match BATCHED.lock() {
+            Ok(g) => g,
+            Err(_) => return MurkStatus::InternalError as i32,
+        };
+        let engine = match table.get_mut(handle) {
+            Some(e) => e,
+            None => return MurkStatus::InvalidHandle as i32,
+        };
 
-    let n = engine.num_worlds();
+        let n = engine.num_worlds();
 
-    // Convert commands.
-    let commands = match convert_batch_commands(cmds_per_world, n_cmds_per_world, n) {
-        Ok(cmds) => cmds,
-        Err(status) => return status as i32,
-    };
+        // Convert commands.
+        let commands = match convert_batch_commands(cmds_per_world, n_cmds_per_world, n) {
+            Ok(cmds) => cmds,
+            Err(status) => return status as i32,
+        };
 
-    // SAFETY: caller guarantees buffers are valid.
-    let out_slice = if obs_output.is_null() {
-        &mut []
-    } else {
-        unsafe { std::slice::from_raw_parts_mut(obs_output, obs_output_len) }
-    };
-    let mask_slice = if obs_mask.is_null() {
-        &mut []
-    } else {
-        unsafe { std::slice::from_raw_parts_mut(obs_mask, obs_mask_len) }
-    };
+        // SAFETY: caller guarantees buffers are valid.
+        let out_slice = if obs_output.is_null() {
+            &mut []
+        } else {
+            unsafe { std::slice::from_raw_parts_mut(obs_output, obs_output_len) }
+        };
+        let mask_slice = if obs_mask.is_null() {
+            &mut []
+        } else {
+            unsafe { std::slice::from_raw_parts_mut(obs_mask, obs_mask_len) }
+        };
 
-    match engine.step_and_observe(&commands, out_slice, mask_slice) {
-        Ok(result) => {
-            if !tick_ids_out.is_null() {
-                for (i, tid) in result.tick_ids.iter().enumerate() {
-                    unsafe { *tick_ids_out.add(i) = tid.0 };
+        match engine.step_and_observe(&commands, out_slice, mask_slice) {
+            Ok(result) => {
+                if !tick_ids_out.is_null() {
+                    for (i, tid) in result.tick_ids.iter().enumerate() {
+                        unsafe { *tick_ids_out.add(i) = tid.0 };
+                    }
                 }
+                MurkStatus::Ok as i32
             }
-            MurkStatus::Ok as i32
+            Err(e) => batch_error_to_status(&e),
         }
-        Err(e) => batch_error_to_status(&e),
-    }
+    })
 }
 
 /// Extract observations from all worlds without stepping.
@@ -198,88 +202,96 @@ pub extern "C" fn murk_batched_observe_all(
     obs_mask: *mut u8,
     obs_mask_len: usize,
 ) -> i32 {
-    let table = match BATCHED.lock() {
-        Ok(g) => g,
-        Err(_) => return MurkStatus::InternalError as i32,
-    };
-    let engine = match table.get(handle) {
-        Some(e) => e,
-        None => return MurkStatus::InvalidHandle as i32,
-    };
+    ffi_guard!({
+        let table = match BATCHED.lock() {
+            Ok(g) => g,
+            Err(_) => return MurkStatus::InternalError as i32,
+        };
+        let engine = match table.get(handle) {
+            Some(e) => e,
+            None => return MurkStatus::InvalidHandle as i32,
+        };
 
-    if obs_output.is_null() || obs_mask.is_null() {
-        return MurkStatus::InvalidArgument as i32;
-    }
+        if obs_output.is_null() || obs_mask.is_null() {
+            return MurkStatus::InvalidArgument as i32;
+        }
 
-    let out_slice = unsafe { std::slice::from_raw_parts_mut(obs_output, obs_output_len) };
-    let mask_slice = unsafe { std::slice::from_raw_parts_mut(obs_mask, obs_mask_len) };
+        let out_slice = unsafe { std::slice::from_raw_parts_mut(obs_output, obs_output_len) };
+        let mask_slice = unsafe { std::slice::from_raw_parts_mut(obs_mask, obs_mask_len) };
 
-    match engine.observe_all(out_slice, mask_slice) {
-        Ok(_) => MurkStatus::Ok as i32,
-        Err(e) => batch_error_to_status(&e),
-    }
+        match engine.observe_all(out_slice, mask_slice) {
+            Ok(_) => MurkStatus::Ok as i32,
+            Err(e) => batch_error_to_status(&e),
+        }
+    })
 }
 
 /// Reset one world by index.
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_batched_reset_world(handle: u64, world_index: usize, seed: u64) -> i32 {
-    let mut table = match BATCHED.lock() {
-        Ok(g) => g,
-        Err(_) => return MurkStatus::InternalError as i32,
-    };
-    let engine = match table.get_mut(handle) {
-        Some(e) => e,
-        None => return MurkStatus::InvalidHandle as i32,
-    };
+    ffi_guard!({
+        let mut table = match BATCHED.lock() {
+            Ok(g) => g,
+            Err(_) => return MurkStatus::InternalError as i32,
+        };
+        let engine = match table.get_mut(handle) {
+            Some(e) => e,
+            None => return MurkStatus::InvalidHandle as i32,
+        };
 
-    match engine.reset_world(world_index, seed) {
-        Ok(()) => MurkStatus::Ok as i32,
-        Err(e) => batch_error_to_status(&e),
-    }
+        match engine.reset_world(world_index, seed) {
+            Ok(()) => MurkStatus::Ok as i32,
+            Err(e) => batch_error_to_status(&e),
+        }
+    })
 }
 
 /// Reset all worlds with per-world seeds.
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_batched_reset_all(handle: u64, seeds: *const u64, n_seeds: usize) -> i32 {
-    let mut table = match BATCHED.lock() {
-        Ok(g) => g,
-        Err(_) => return MurkStatus::InternalError as i32,
-    };
-    let engine = match table.get_mut(handle) {
-        Some(e) => e,
-        None => return MurkStatus::InvalidHandle as i32,
-    };
+    ffi_guard!({
+        let mut table = match BATCHED.lock() {
+            Ok(g) => g,
+            Err(_) => return MurkStatus::InternalError as i32,
+        };
+        let engine = match table.get_mut(handle) {
+            Some(e) => e,
+            None => return MurkStatus::InvalidHandle as i32,
+        };
 
-    if seeds.is_null() && n_seeds > 0 {
-        return MurkStatus::InvalidArgument as i32;
-    }
+        if seeds.is_null() && n_seeds > 0 {
+            return MurkStatus::InvalidArgument as i32;
+        }
 
-    let seed_slice = if n_seeds > 0 {
-        unsafe { std::slice::from_raw_parts(seeds, n_seeds) }
-    } else {
-        &[]
-    };
+        let seed_slice = if n_seeds > 0 {
+            unsafe { std::slice::from_raw_parts(seeds, n_seeds) }
+        } else {
+            &[]
+        };
 
-    match engine.reset_all(seed_slice) {
-        Ok(()) => MurkStatus::Ok as i32,
-        Err(e) => batch_error_to_status(&e),
-    }
+        match engine.reset_all(seed_slice) {
+            Ok(()) => MurkStatus::Ok as i32,
+            Err(e) => batch_error_to_status(&e),
+        }
+    })
 }
 
 /// Destroy a batched engine.
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_batched_destroy(handle: u64) -> i32 {
-    let mut table = match BATCHED.lock() {
-        Ok(g) => g,
-        Err(_) => return MurkStatus::InternalError as i32,
-    };
-    match table.remove(handle) {
-        Some(_) => MurkStatus::Ok as i32,
-        None => MurkStatus::InvalidHandle as i32,
-    }
+    ffi_guard!({
+        let mut table = match BATCHED.lock() {
+            Ok(g) => g,
+            Err(_) => return MurkStatus::InternalError as i32,
+        };
+        match table.remove(handle) {
+            Some(_) => MurkStatus::Ok as i32,
+            None => MurkStatus::InvalidHandle as i32,
+        }
+    })
 }
 
 /// Number of worlds in the batch.
@@ -288,11 +300,13 @@ pub extern "C" fn murk_batched_destroy(handle: u64) -> i32 {
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_batched_num_worlds(handle: u64) -> usize {
-    let table = match BATCHED.lock() {
-        Ok(g) => g,
-        Err(_) => return 0,
-    };
-    table.get(handle).map_or(0, |e| e.num_worlds())
+    ffi_guard_or!(0, {
+        let table = match BATCHED.lock() {
+            Ok(g) => g,
+            Err(_) => return 0,
+        };
+        table.get(handle).map_or(0, |e| e.num_worlds())
+    })
 }
 
 /// Per-world observation output length (f32 elements).
@@ -301,11 +315,13 @@ pub extern "C" fn murk_batched_num_worlds(handle: u64) -> usize {
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_batched_obs_output_len(handle: u64) -> usize {
-    let table = match BATCHED.lock() {
-        Ok(g) => g,
-        Err(_) => return 0,
-    };
-    table.get(handle).map_or(0, |e| e.obs_output_len())
+    ffi_guard_or!(0, {
+        let table = match BATCHED.lock() {
+            Ok(g) => g,
+            Err(_) => return 0,
+        };
+        table.get(handle).map_or(0, |e| e.obs_output_len())
+    })
 }
 
 /// Per-world observation mask length (bytes).
@@ -314,11 +330,13 @@ pub extern "C" fn murk_batched_obs_output_len(handle: u64) -> usize {
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_batched_obs_mask_len(handle: u64) -> usize {
-    let table = match BATCHED.lock() {
-        Ok(g) => g,
-        Err(_) => return 0,
-    };
-    table.get(handle).map_or(0, |e| e.obs_mask_len())
+    ffi_guard_or!(0, {
+        let table = match BATCHED.lock() {
+            Ok(g) => g,
+            Err(_) => return 0,
+        };
+        table.get(handle).map_or(0, |e| e.obs_mask_len())
+    })
 }
 
 // ── Internal helpers ────────────────────────────────────────────

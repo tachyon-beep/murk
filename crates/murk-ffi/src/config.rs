@@ -56,23 +56,27 @@ pub(crate) fn configs() -> &'static Mutex<HandleTable<ConfigBuilder>> {
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_config_create(out: *mut u64) -> i32 {
-    // SAFETY: caller must pass a valid, aligned, non-null pointer.
-    if out.is_null() {
-        return MurkStatus::InvalidArgument as i32;
-    }
-    let handle = ffi_lock!(CONFIGS).insert(ConfigBuilder::default());
-    unsafe { *out = handle };
-    MurkStatus::Ok as i32
+    ffi_guard!({
+        // SAFETY: caller must pass a valid, aligned, non-null pointer.
+        if out.is_null() {
+            return MurkStatus::InvalidArgument as i32;
+        }
+        let handle = ffi_lock!(CONFIGS).insert(ConfigBuilder::default());
+        unsafe { *out = handle };
+        MurkStatus::Ok as i32
+    })
 }
 
 /// Destroy a config builder, releasing its resources.
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_config_destroy(handle: u64) -> i32 {
-    match ffi_lock!(CONFIGS).remove(handle) {
-        Some(_) => MurkStatus::Ok as i32,
-        None => MurkStatus::InvalidHandle as i32,
-    }
+    ffi_guard!({
+        match ffi_lock!(CONFIGS).remove(handle) {
+            Some(_) => MurkStatus::Ok as i32,
+            None => MurkStatus::InvalidHandle as i32,
+        }
+    })
 }
 
 /// Safely convert an f64 FFI parameter to u32.
@@ -217,29 +221,31 @@ pub extern "C" fn murk_config_set_space(
     params: *const f64,
     n_params: usize,
 ) -> i32 {
-    if params.is_null() && n_params > 0 {
-        return MurkStatus::InvalidArgument as i32;
-    }
-    // SAFETY: caller guarantees params points to n_params valid f64 values.
-    let p: &[f64] = if n_params > 0 {
-        unsafe { std::slice::from_raw_parts(params, n_params) }
-    } else {
-        &[]
-    };
-
-    let space = match parse_space(space_type, p) {
-        Some(s) => s,
-        None => return MurkStatus::InvalidArgument as i32,
-    };
-
-    let mut table = ffi_lock!(CONFIGS);
-    match table.get_mut(handle) {
-        Some(cfg) => {
-            cfg.space = Some(space);
-            MurkStatus::Ok as i32
+    ffi_guard!({
+        if params.is_null() && n_params > 0 {
+            return MurkStatus::InvalidArgument as i32;
         }
-        None => MurkStatus::InvalidHandle as i32,
-    }
+        // SAFETY: caller guarantees params points to n_params valid f64 values.
+        let p: &[f64] = if n_params > 0 {
+            unsafe { std::slice::from_raw_parts(params, n_params) }
+        } else {
+            &[]
+        };
+
+        let space = match parse_space(space_type, p) {
+            Some(s) => s,
+            None => return MurkStatus::InvalidArgument as i32,
+        };
+
+        let mut table = ffi_lock!(CONFIGS);
+        match table.get_mut(handle) {
+            Some(cfg) => {
+                cfg.space = Some(space);
+                MurkStatus::Ok as i32
+            }
+            None => MurkStatus::InvalidHandle as i32,
+        }
+    })
 }
 
 /// Add a field definition to the config.
@@ -259,54 +265,56 @@ pub extern "C" fn murk_config_add_field(
     dims: u32,
     boundary_behavior: i32,
 ) -> i32 {
-    if name.is_null() {
-        return MurkStatus::InvalidArgument as i32;
-    }
-    // SAFETY: caller guarantees name is a valid null-terminated C string.
-    let name_str = match unsafe { CStr::from_ptr(name) }.to_str() {
-        Ok(s) => s.to_owned(),
-        Err(_) => return MurkStatus::InvalidArgument as i32,
-    };
-
-    let ft = match field_type {
-        x if x == MurkFieldType::Scalar as i32 => FieldType::Scalar,
-        x if x == MurkFieldType::Vector as i32 => FieldType::Vector { dims },
-        x if x == MurkFieldType::Categorical as i32 => FieldType::Categorical { n_values: dims },
-        _ => return MurkStatus::InvalidArgument as i32,
-    };
-
-    let mut_class = match mutability {
-        x if x == MurkFieldMutability::Static as i32 => FieldMutability::Static,
-        x if x == MurkFieldMutability::PerTick as i32 => FieldMutability::PerTick,
-        x if x == MurkFieldMutability::Sparse as i32 => FieldMutability::Sparse,
-        _ => return MurkStatus::InvalidArgument as i32,
-    };
-
-    let bb = match boundary_behavior {
-        x if x == MurkBoundaryBehavior::Clamp as i32 => BoundaryBehavior::Clamp,
-        x if x == MurkBoundaryBehavior::Reflect as i32 => BoundaryBehavior::Reflect,
-        x if x == MurkBoundaryBehavior::Absorb as i32 => BoundaryBehavior::Absorb,
-        x if x == MurkBoundaryBehavior::Wrap as i32 => BoundaryBehavior::Wrap,
-        _ => return MurkStatus::InvalidArgument as i32,
-    };
-
-    let def = FieldDef {
-        name: name_str,
-        field_type: ft,
-        mutability: mut_class,
-        units: None,
-        bounds: None,
-        boundary_behavior: bb,
-    };
-
-    let mut table = ffi_lock!(CONFIGS);
-    match table.get_mut(handle) {
-        Some(cfg) => {
-            cfg.fields.push(def);
-            MurkStatus::Ok as i32
+    ffi_guard!({
+        if name.is_null() {
+            return MurkStatus::InvalidArgument as i32;
         }
-        None => MurkStatus::InvalidHandle as i32,
-    }
+        // SAFETY: caller guarantees name is a valid null-terminated C string.
+        let name_str = match unsafe { CStr::from_ptr(name) }.to_str() {
+            Ok(s) => s.to_owned(),
+            Err(_) => return MurkStatus::InvalidArgument as i32,
+        };
+
+        let ft = match field_type {
+            x if x == MurkFieldType::Scalar as i32 => FieldType::Scalar,
+            x if x == MurkFieldType::Vector as i32 => FieldType::Vector { dims },
+            x if x == MurkFieldType::Categorical as i32 => FieldType::Categorical { n_values: dims },
+            _ => return MurkStatus::InvalidArgument as i32,
+        };
+
+        let mut_class = match mutability {
+            x if x == MurkFieldMutability::Static as i32 => FieldMutability::Static,
+            x if x == MurkFieldMutability::PerTick as i32 => FieldMutability::PerTick,
+            x if x == MurkFieldMutability::Sparse as i32 => FieldMutability::Sparse,
+            _ => return MurkStatus::InvalidArgument as i32,
+        };
+
+        let bb = match boundary_behavior {
+            x if x == MurkBoundaryBehavior::Clamp as i32 => BoundaryBehavior::Clamp,
+            x if x == MurkBoundaryBehavior::Reflect as i32 => BoundaryBehavior::Reflect,
+            x if x == MurkBoundaryBehavior::Absorb as i32 => BoundaryBehavior::Absorb,
+            x if x == MurkBoundaryBehavior::Wrap as i32 => BoundaryBehavior::Wrap,
+            _ => return MurkStatus::InvalidArgument as i32,
+        };
+
+        let def = FieldDef {
+            name: name_str,
+            field_type: ft,
+            mutability: mut_class,
+            units: None,
+            bounds: None,
+            boundary_behavior: bb,
+        };
+
+        let mut table = ffi_lock!(CONFIGS);
+        match table.get_mut(handle) {
+            Some(cfg) => {
+                cfg.fields.push(def);
+                MurkStatus::Ok as i32
+            }
+            None => MurkStatus::InvalidHandle as i32,
+        }
+    })
 }
 
 /// Add a propagator to the config. Takes ownership of the propagator box.
@@ -316,78 +324,88 @@ pub extern "C" fn murk_config_add_field(
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_config_add_propagator(handle: u64, prop_ptr: u64) -> i32 {
-    if prop_ptr == 0 {
-        return MurkStatus::InvalidArgument as i32;
-    }
-    // SAFETY: prop_ptr was produced by Box::into_raw(Box::new(boxed)) in
-    // murk_propagator_create. It's a thin pointer to a Box<dyn Propagator>
-    // and is consumed exactly once here.
-    let prop: Box<dyn Propagator> = *unsafe { Box::from_raw(prop_ptr as *mut Box<dyn Propagator>) };
-
-    let mut table = ffi_lock!(CONFIGS);
-    match table.get_mut(handle) {
-        Some(cfg) => {
-            cfg.propagators.push(prop);
-            MurkStatus::Ok as i32
+    ffi_guard!({
+        if prop_ptr == 0 {
+            return MurkStatus::InvalidArgument as i32;
         }
-        None => MurkStatus::InvalidHandle as i32,
-    }
+        // SAFETY: prop_ptr was produced by Box::into_raw(Box::new(boxed)) in
+        // murk_propagator_create. It's a thin pointer to a Box<dyn Propagator>
+        // and is consumed exactly once here.
+        let prop: Box<dyn Propagator> = *unsafe { Box::from_raw(prop_ptr as *mut Box<dyn Propagator>) };
+
+        let mut table = ffi_lock!(CONFIGS);
+        match table.get_mut(handle) {
+            Some(cfg) => {
+                cfg.propagators.push(prop);
+                MurkStatus::Ok as i32
+            }
+            None => MurkStatus::InvalidHandle as i32,
+        }
+    })
 }
 
 /// Set the simulation timestep in seconds.
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_config_set_dt(handle: u64, dt: f64) -> i32 {
-    let mut table = ffi_lock!(CONFIGS);
-    match table.get_mut(handle) {
-        Some(cfg) => {
-            cfg.dt = dt;
-            MurkStatus::Ok as i32
+    ffi_guard!({
+        let mut table = ffi_lock!(CONFIGS);
+        match table.get_mut(handle) {
+            Some(cfg) => {
+                cfg.dt = dt;
+                MurkStatus::Ok as i32
+            }
+            None => MurkStatus::InvalidHandle as i32,
         }
-        None => MurkStatus::InvalidHandle as i32,
-    }
+    })
 }
 
 /// Set the RNG seed.
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_config_set_seed(handle: u64, seed: u64) -> i32 {
-    let mut table = ffi_lock!(CONFIGS);
-    match table.get_mut(handle) {
-        Some(cfg) => {
-            cfg.seed = seed;
-            MurkStatus::Ok as i32
+    ffi_guard!({
+        let mut table = ffi_lock!(CONFIGS);
+        match table.get_mut(handle) {
+            Some(cfg) => {
+                cfg.seed = seed;
+                MurkStatus::Ok as i32
+            }
+            None => MurkStatus::InvalidHandle as i32,
         }
-        None => MurkStatus::InvalidHandle as i32,
-    }
+    })
 }
 
 /// Set the ring buffer size (minimum 2).
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_config_set_ring_buffer_size(handle: u64, size: usize) -> i32 {
-    let mut table = ffi_lock!(CONFIGS);
-    match table.get_mut(handle) {
-        Some(cfg) => {
-            cfg.ring_buffer_size = size;
-            MurkStatus::Ok as i32
+    ffi_guard!({
+        let mut table = ffi_lock!(CONFIGS);
+        match table.get_mut(handle) {
+            Some(cfg) => {
+                cfg.ring_buffer_size = size;
+                MurkStatus::Ok as i32
+            }
+            None => MurkStatus::InvalidHandle as i32,
         }
-        None => MurkStatus::InvalidHandle as i32,
-    }
+    })
 }
 
 /// Set the maximum ingress queue depth.
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_config_set_max_ingress_queue(handle: u64, size: usize) -> i32 {
-    let mut table = ffi_lock!(CONFIGS);
-    match table.get_mut(handle) {
-        Some(cfg) => {
-            cfg.max_ingress_queue = size;
-            MurkStatus::Ok as i32
+    ffi_guard!({
+        let mut table = ffi_lock!(CONFIGS);
+        match table.get_mut(handle) {
+            Some(cfg) => {
+                cfg.max_ingress_queue = size;
+                MurkStatus::Ok as i32
+            }
+            None => MurkStatus::InvalidHandle as i32,
         }
-        None => MurkStatus::InvalidHandle as i32,
-    }
+    })
 }
 
 // ── helpers ──────────────────────────────────────────────

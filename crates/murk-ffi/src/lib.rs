@@ -35,7 +35,7 @@ macro_rules! ffi_lock {
 }
 
 use std::cell::RefCell;
-use std::panic::{catch_unwind, AssertUnwindSafe};
+
 
 thread_local! {
     /// Stores the last panic message caught by [`ffi_guard!`] on this thread.
@@ -61,7 +61,7 @@ fn panic_message_from_payload(payload: &Box<dyn std::any::Any + Send>) -> String
 /// `MurkStatus::Panicked as i32` is returned.
 macro_rules! ffi_guard {
     ($body:expr) => {{
-        let result = catch_unwind(AssertUnwindSafe(|| $body));
+        let result = ::std::panic::catch_unwind(::std::panic::AssertUnwindSafe(|| $body));
         match result {
             Ok(val) => val,
             Err(payload) => {
@@ -80,7 +80,7 @@ macro_rules! ffi_guard {
 /// type is not `i32`.
 macro_rules! ffi_guard_or {
     ($default:expr, $body:expr) => {{
-        let result = catch_unwind(AssertUnwindSafe(|| $body));
+        let result = ::std::panic::catch_unwind(::std::panic::AssertUnwindSafe(|| $body));
         match result {
             Ok(val) => val,
             Err(payload) => {

@@ -241,81 +241,84 @@ pub extern "C" fn murk_propagator_create(
     def: *const MurkPropagatorDef,
     out_handle: *mut u64,
 ) -> i32 {
-    if def.is_null() || out_handle.is_null() {
-        return MurkStatus::InvalidArgument as i32;
-    }
-
-    // SAFETY: def is a valid pointer per caller contract.
-    let def = unsafe { &*def };
-
-    if def.name.is_null() {
-        return MurkStatus::InvalidArgument as i32;
-    }
-
-    let step_fn = match def.step_fn {
-        Some(f) => f,
-        None => return MurkStatus::InvalidArgument as i32,
-    };
-
-    let name = match unsafe { CStr::from_ptr(def.name) }.to_str() {
-        Ok(s) => s.to_owned(),
-        Err(_) => return MurkStatus::InvalidArgument as i32,
-    };
-
-    let mut reads = FieldSet::empty();
-    if def.n_reads > 0 {
-        if def.reads.is_null() {
+    ffi_guard!({
+        if def.is_null() || out_handle.is_null() {
             return MurkStatus::InvalidArgument as i32;
         }
-        let slice = unsafe { std::slice::from_raw_parts(def.reads, def.n_reads) };
-        for &id in slice {
-            reads.insert(FieldId(id));
-        }
-    }
 
-    let mut reads_previous = FieldSet::empty();
-    if def.n_reads_previous > 0 {
-        if def.reads_previous.is_null() {
+        // SAFETY: def is a valid pointer per caller contract.
+        let def = unsafe { &*def };
+
+        if def.name.is_null() {
             return MurkStatus::InvalidArgument as i32;
         }
-        let slice = unsafe { std::slice::from_raw_parts(def.reads_previous, def.n_reads_previous) };
-        for &id in slice {
-            reads_previous.insert(FieldId(id));
-        }
-    }
 
-    let mut writes = Vec::new();
-    if def.n_writes > 0 {
-        if def.writes.is_null() {
-            return MurkStatus::InvalidArgument as i32;
-        }
-        let slice = unsafe { std::slice::from_raw_parts(def.writes, def.n_writes) };
-        for decl in slice {
-            let mode = match decl.mode {
-                x if x == MurkWriteMode::Full as i32 => WriteMode::Full,
-                x if x == MurkWriteMode::Incremental as i32 => WriteMode::Incremental,
-                _ => return MurkStatus::InvalidArgument as i32,
-            };
-            writes.push((FieldId(decl.field_id), mode));
-        }
-    }
+        let step_fn = match def.step_fn {
+            Some(f) => f,
+            None => return MurkStatus::InvalidArgument as i32,
+        };
 
-    let prop = CallbackPropagator {
-        name,
-        reads,
-        reads_previous,
-        writes,
-        step_fn,
-        user_data: def.user_data,
-        scratch: def.scratch_bytes,
-    };
+        let name = match unsafe { CStr::from_ptr(def.name) }.to_str() {
+            Ok(s) => s.to_owned(),
+            Err(_) => return MurkStatus::InvalidArgument as i32,
+        };
 
-    let boxed: Box<dyn murk_propagator::Propagator> = Box::new(prop);
-    // Double-box: Box<dyn Propagator> is a fat pointer (2 words), can't fit in u64.
-    // Box::new(boxed) yields a thin pointer to the heap-allocated fat pointer.
-    let raw = Box::into_raw(Box::new(boxed)) as u64;
-    unsafe { *out_handle = raw };
-    MurkStatus::Ok as i32
+        let mut reads = FieldSet::empty();
+        if def.n_reads > 0 {
+            if def.reads.is_null() {
+                return MurkStatus::InvalidArgument as i32;
+            }
+            let slice = unsafe { std::slice::from_raw_parts(def.reads, def.n_reads) };
+            for &id in slice {
+                reads.insert(FieldId(id));
+            }
+        }
+
+        let mut reads_previous = FieldSet::empty();
+        if def.n_reads_previous > 0 {
+            if def.reads_previous.is_null() {
+                return MurkStatus::InvalidArgument as i32;
+            }
+            let slice =
+                unsafe { std::slice::from_raw_parts(def.reads_previous, def.n_reads_previous) };
+            for &id in slice {
+                reads_previous.insert(FieldId(id));
+            }
+        }
+
+        let mut writes = Vec::new();
+        if def.n_writes > 0 {
+            if def.writes.is_null() {
+                return MurkStatus::InvalidArgument as i32;
+            }
+            let slice = unsafe { std::slice::from_raw_parts(def.writes, def.n_writes) };
+            for decl in slice {
+                let mode = match decl.mode {
+                    x if x == MurkWriteMode::Full as i32 => WriteMode::Full,
+                    x if x == MurkWriteMode::Incremental as i32 => WriteMode::Incremental,
+                    _ => return MurkStatus::InvalidArgument as i32,
+                };
+                writes.push((FieldId(decl.field_id), mode));
+            }
+        }
+
+        let prop = CallbackPropagator {
+            name,
+            reads,
+            reads_previous,
+            writes,
+            step_fn,
+            user_data: def.user_data,
+            scratch: def.scratch_bytes,
+        };
+
+        let boxed: Box<dyn murk_propagator::Propagator> = Box::new(prop);
+        // Double-box: Box<dyn Propagator> is a fat pointer (2 words), can't fit in u64.
+        // Box::new(boxed) yields a thin pointer to the heap-allocated fat pointer.
+        let raw = Box::into_raw(Box::new(boxed)) as u64;
+        unsafe { *out_handle = raw };
+        MurkStatus::Ok as i32
+    })
 }
 
 #[cfg(test)]

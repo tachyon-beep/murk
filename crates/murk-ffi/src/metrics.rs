@@ -85,34 +85,36 @@ pub extern "C" fn murk_step_metrics_propagator(
     name_cap: usize,
     us_out: *mut u64,
 ) -> i32 {
-    if us_out.is_null() {
-        return MurkStatus::InvalidArgument as i32;
-    }
-
-    LAST_PROPAGATOR_US.with(|cell| {
-        let data = cell.borrow();
-        let idx = index as usize;
-        if idx >= data.len() {
+    ffi_guard!({
+        if us_out.is_null() {
             return MurkStatus::InvalidArgument as i32;
         }
 
-        let (ref name, us) = data[idx];
-
-        // SAFETY: us_out is valid per caller contract.
-        unsafe { *us_out = us };
-
-        // Write name if buffer provided.
-        if !name_buf.is_null() && name_cap > 0 {
-            let bytes = name.as_bytes();
-            let copy_len = bytes.len().min(name_cap - 1);
-            // SAFETY: name_buf points to name_cap valid bytes.
-            unsafe {
-                std::ptr::copy_nonoverlapping(bytes.as_ptr(), name_buf as *mut u8, copy_len);
-                *name_buf.add(copy_len) = 0; // null-terminate
+        LAST_PROPAGATOR_US.with(|cell| {
+            let data = cell.borrow();
+            let idx = index as usize;
+            if idx >= data.len() {
+                return MurkStatus::InvalidArgument as i32;
             }
-        }
 
-        MurkStatus::Ok as i32
+            let (ref name, us) = data[idx];
+
+            // SAFETY: us_out is valid per caller contract.
+            unsafe { *us_out = us };
+
+            // Write name if buffer provided.
+            if !name_buf.is_null() && name_cap > 0 {
+                let bytes = name.as_bytes();
+                let copy_len = bytes.len().min(name_cap - 1);
+                // SAFETY: name_buf points to name_cap valid bytes.
+                unsafe {
+                    std::ptr::copy_nonoverlapping(bytes.as_ptr(), name_buf as *mut u8, copy_len);
+                    *name_buf.add(copy_len) = 0; // null-terminate
+                }
+            }
+
+            MurkStatus::Ok as i32
+        })
     })
 }
 
@@ -120,25 +122,27 @@ pub extern "C" fn murk_step_metrics_propagator(
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_step_metrics(world_handle: u64, out: *mut MurkStepMetrics) -> i32 {
-    use crate::world::worlds;
+    ffi_guard!({
+        use crate::world::worlds;
 
-    if out.is_null() {
-        return MurkStatus::InvalidArgument as i32;
-    }
-
-    let world_arc = {
-        let table = ffi_lock!(worlds());
-        match table.get(world_handle).cloned() {
-            Some(arc) => arc,
-            None => return MurkStatus::InvalidHandle as i32,
+        if out.is_null() {
+            return MurkStatus::InvalidArgument as i32;
         }
-    };
-    let world = ffi_lock!(world_arc);
 
-    let metrics = MurkStepMetrics::from_rust(world.last_metrics());
-    // SAFETY: out is valid per caller contract.
-    unsafe { *out = metrics };
-    MurkStatus::Ok as i32
+        let world_arc = {
+            let table = ffi_lock!(worlds());
+            match table.get(world_handle).cloned() {
+                Some(arc) => arc,
+                None => return MurkStatus::InvalidHandle as i32,
+            }
+        };
+        let world = ffi_lock!(world_arc);
+
+        let metrics = MurkStepMetrics::from_rust(world.last_metrics());
+        // SAFETY: out is valid per caller contract.
+        unsafe { *out = metrics };
+        MurkStatus::Ok as i32
+    })
 }
 
 #[cfg(test)]

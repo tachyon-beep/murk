@@ -179,49 +179,51 @@ pub extern "C" fn murk_obsplan_compile(
     n_entries: usize,
     plan_out: *mut u64,
 ) -> i32 {
-    if plan_out.is_null() {
-        return MurkStatus::InvalidArgument as i32;
-    }
-    if n_entries == 0 || entries.is_null() {
-        return MurkStatus::InvalidObsSpec as i32;
-    }
-
-    // SAFETY: entries points to n_entries valid MurkObsEntry structs.
-    let entry_slice = unsafe { std::slice::from_raw_parts(entries, n_entries) };
-
-    // Convert C entries to Rust ObsSpec using shared conversion function.
-    let mut obs_entries = Vec::with_capacity(n_entries);
-    for e in entry_slice {
-        match convert_obs_entry(e) {
-            Some(entry) => obs_entries.push(entry),
-            None => return MurkStatus::InvalidArgument as i32,
+    ffi_guard!({
+        if plan_out.is_null() {
+            return MurkStatus::InvalidArgument as i32;
         }
-    }
-    let spec = ObsSpec {
-        entries: obs_entries,
-    };
-
-    // Get the space from the world to trigger initial compilation.
-    let world_arc = {
-        let w_table = ffi_lock!(worlds());
-        match w_table.get(world_handle).cloned() {
-            Some(arc) => arc,
-            None => return MurkStatus::InvalidHandle as i32,
+        if n_entries == 0 || entries.is_null() {
+            return MurkStatus::InvalidObsSpec as i32;
         }
-    };
-    let world = ffi_lock!(world_arc);
 
-    let mut cache = ObsPlanCache::new(spec);
-    // Compile eagerly so we detect errors now rather than at execute time.
-    if let Err(e) = cache.get_or_compile(world.space()) {
-        return MurkStatus::from(&e) as i32;
-    }
-    drop(world);
+        // SAFETY: entries points to n_entries valid MurkObsEntry structs.
+        let entry_slice = unsafe { std::slice::from_raw_parts(entries, n_entries) };
 
-    let state = Arc::new(Mutex::new(ObsPlanState { cache }));
-    let handle = ffi_lock!(OBS_PLANS).insert(state);
-    unsafe { *plan_out = handle };
-    MurkStatus::Ok as i32
+        // Convert C entries to Rust ObsSpec using shared conversion function.
+        let mut obs_entries = Vec::with_capacity(n_entries);
+        for e in entry_slice {
+            match convert_obs_entry(e) {
+                Some(entry) => obs_entries.push(entry),
+                None => return MurkStatus::InvalidArgument as i32,
+            }
+        }
+        let spec = ObsSpec {
+            entries: obs_entries,
+        };
+
+        // Get the space from the world to trigger initial compilation.
+        let world_arc = {
+            let w_table = ffi_lock!(worlds());
+            match w_table.get(world_handle).cloned() {
+                Some(arc) => arc,
+                None => return MurkStatus::InvalidHandle as i32,
+            }
+        };
+        let world = ffi_lock!(world_arc);
+
+        let mut cache = ObsPlanCache::new(spec);
+        // Compile eagerly so we detect errors now rather than at execute time.
+        if let Err(e) = cache.get_or_compile(world.space()) {
+            return MurkStatus::from(&e) as i32;
+        }
+        drop(world);
+
+        let state = Arc::new(Mutex::new(ObsPlanState { cache }));
+        let handle = ffi_lock!(OBS_PLANS).insert(state);
+        unsafe { *plan_out = handle };
+        MurkStatus::Ok as i32
+    })
 }
 
 /// Execute an observation plan, filling caller-allocated output and mask buffers.
@@ -239,61 +241,63 @@ pub extern "C" fn murk_obsplan_execute(
     mask_len: usize,
     result_out: *mut MurkObsResult,
 ) -> i32 {
-    if output.is_null() || mask.is_null() {
-        return MurkStatus::InvalidArgument as i32;
-    }
+    ffi_guard!({
+        if output.is_null() || mask.is_null() {
+            return MurkStatus::InvalidArgument as i32;
+        }
 
-    // Acquire per-plan Arc briefly, then drop global table lock.
-    let plan_arc = match get_obs_plan(plan_handle) {
-        Some(arc) => arc,
-        None => return MurkStatus::InvalidHandle as i32,
-    };
-    let mut plan_state = ffi_lock!(plan_arc);
-
-    // Check buffer sizes.
-    let expected_out = plan_state.cache.output_len().unwrap_or(0);
-    let expected_mask = plan_state.cache.mask_len().unwrap_or(0);
-    if output_len < expected_out {
-        return MurkStatus::BufferTooSmall as i32;
-    }
-    if mask_len < expected_mask {
-        return MurkStatus::BufferTooSmall as i32;
-    }
-
-    // SAFETY: output/mask point to output_len/mask_len valid elements.
-    let out_slice = unsafe { std::slice::from_raw_parts_mut(output, output_len) };
-    let mask_slice = unsafe { std::slice::from_raw_parts_mut(mask, mask_len) };
-
-    // Acquire per-world Arc briefly, then drop global table lock.
-    // Lock ordering: no global table locks are held at this point.
-    let world_arc = {
-        let w_table = ffi_lock!(worlds());
-        match w_table.get(world_handle).cloned() {
+        // Acquire per-plan Arc briefly, then drop global table lock.
+        let plan_arc = match get_obs_plan(plan_handle) {
             Some(arc) => arc,
             None => return MurkStatus::InvalidHandle as i32,
+        };
+        let mut plan_state = ffi_lock!(plan_arc);
+
+        // Check buffer sizes.
+        let expected_out = plan_state.cache.output_len().unwrap_or(0);
+        let expected_mask = plan_state.cache.mask_len().unwrap_or(0);
+        if output_len < expected_out {
+            return MurkStatus::BufferTooSmall as i32;
         }
-    };
-    let world = ffi_lock!(world_arc);
+        if mask_len < expected_mask {
+            return MurkStatus::BufferTooSmall as i32;
+        }
 
-    let snap = world.snapshot();
+        // SAFETY: output/mask point to output_len/mask_len valid elements.
+        let out_slice = unsafe { std::slice::from_raw_parts_mut(output, output_len) };
+        let mask_slice = unsafe { std::slice::from_raw_parts_mut(mask, mask_len) };
 
-    match plan_state
-        .cache
-        .execute(world.space(), &snap, None, out_slice, mask_slice)
-    {
-        Ok(meta) => {
-            if !result_out.is_null() {
-                unsafe {
-                    *result_out = MurkObsResult {
-                        tick_id: meta.tick_id.0,
-                        age_ticks: meta.age_ticks,
-                    };
-                }
+        // Acquire per-world Arc briefly, then drop global table lock.
+        // Lock ordering: no global table locks are held at this point.
+        let world_arc = {
+            let w_table = ffi_lock!(worlds());
+            match w_table.get(world_handle).cloned() {
+                Some(arc) => arc,
+                None => return MurkStatus::InvalidHandle as i32,
             }
-            MurkStatus::Ok as i32
+        };
+        let world = ffi_lock!(world_arc);
+
+        let snap = world.snapshot();
+
+        match plan_state
+            .cache
+            .execute(world.space(), &snap, None, out_slice, mask_slice)
+        {
+            Ok(meta) => {
+                if !result_out.is_null() {
+                    unsafe {
+                        *result_out = MurkObsResult {
+                            tick_id: meta.tick_id.0,
+                            age_ticks: meta.age_ticks,
+                        };
+                    }
+                }
+                MurkStatus::Ok as i32
+            }
+            Err(e) => MurkStatus::from(&e) as i32,
         }
-        Err(e) => MurkStatus::from(&e) as i32,
-    }
+    })
 }
 
 /// Execute an observation plan for N agents, filling caller-allocated buffers.
@@ -316,78 +320,82 @@ pub extern "C" fn murk_obsplan_execute_agents(
     mask_len: usize,
     results_out: *mut MurkObsResult,
 ) -> i32 {
-    if output.is_null() || mask.is_null() || agent_centers.is_null() {
-        return MurkStatus::InvalidArgument as i32;
-    }
-    if n_agents <= 0 || ndim <= 0 {
-        return MurkStatus::InvalidArgument as i32;
-    }
-    let n = n_agents as usize;
-    let dim = ndim as usize;
+    ffi_guard!({
+        if output.is_null() || mask.is_null() || agent_centers.is_null() {
+            return MurkStatus::InvalidArgument as i32;
+        }
+        if n_agents <= 0 || ndim <= 0 {
+            return MurkStatus::InvalidArgument as i32;
+        }
+        let n = n_agents as usize;
+        let dim = ndim as usize;
 
-    // SAFETY: agent_centers points to n * dim valid i32 values.
-    let centers_flat = unsafe { std::slice::from_raw_parts(agent_centers, n * dim) };
-    let centers: Vec<Coord> = centers_flat
-        .chunks_exact(dim)
-        .map(|chunk| chunk.iter().copied().collect())
-        .collect();
+        // SAFETY: agent_centers points to n * dim valid i32 values.
+        let centers_flat = unsafe { std::slice::from_raw_parts(agent_centers, n * dim) };
+        let centers: Vec<Coord> = centers_flat
+            .chunks_exact(dim)
+            .map(|chunk| chunk.iter().copied().collect())
+            .collect();
 
-    // Acquire per-plan Arc briefly, then drop global table lock.
-    let plan_arc = match get_obs_plan(plan_handle) {
-        Some(arc) => arc,
-        None => return MurkStatus::InvalidHandle as i32,
-    };
-    let mut plan_state = ffi_lock!(plan_arc);
-
-    // SAFETY: output/mask point to output_len/mask_len valid elements.
-    let out_slice = unsafe { std::slice::from_raw_parts_mut(output, output_len) };
-    let mask_slice = unsafe { std::slice::from_raw_parts_mut(mask, mask_len) };
-
-    // Acquire per-world Arc briefly, then drop global table lock.
-    // Lock ordering: no global table locks are held at this point.
-    let world_arc = {
-        let w_table = ffi_lock!(worlds());
-        match w_table.get(world_handle).cloned() {
+        // Acquire per-plan Arc briefly, then drop global table lock.
+        let plan_arc = match get_obs_plan(plan_handle) {
             Some(arc) => arc,
             None => return MurkStatus::InvalidHandle as i32,
-        }
-    };
-    let world = ffi_lock!(world_arc);
-    let snap = world.snapshot();
+        };
+        let mut plan_state = ffi_lock!(plan_arc);
 
-    match plan_state.cache.execute_agents(
-        world.space(),
-        &snap,
-        &centers,
-        None,
-        out_slice,
-        mask_slice,
-    ) {
-        Ok(metas) => {
-            if !results_out.is_null() {
-                for (i, meta) in metas.iter().enumerate() {
-                    unsafe {
-                        *results_out.add(i) = MurkObsResult {
-                            tick_id: meta.tick_id.0,
-                            age_ticks: meta.age_ticks,
-                        };
+        // SAFETY: output/mask point to output_len/mask_len valid elements.
+        let out_slice = unsafe { std::slice::from_raw_parts_mut(output, output_len) };
+        let mask_slice = unsafe { std::slice::from_raw_parts_mut(mask, mask_len) };
+
+        // Acquire per-world Arc briefly, then drop global table lock.
+        // Lock ordering: no global table locks are held at this point.
+        let world_arc = {
+            let w_table = ffi_lock!(worlds());
+            match w_table.get(world_handle).cloned() {
+                Some(arc) => arc,
+                None => return MurkStatus::InvalidHandle as i32,
+            }
+        };
+        let world = ffi_lock!(world_arc);
+        let snap = world.snapshot();
+
+        match plan_state.cache.execute_agents(
+            world.space(),
+            &snap,
+            &centers,
+            None,
+            out_slice,
+            mask_slice,
+        ) {
+            Ok(metas) => {
+                if !results_out.is_null() {
+                    for (i, meta) in metas.iter().enumerate() {
+                        unsafe {
+                            *results_out.add(i) = MurkObsResult {
+                                tick_id: meta.tick_id.0,
+                                age_ticks: meta.age_ticks,
+                            };
+                        }
                     }
                 }
+                MurkStatus::Ok as i32
             }
-            MurkStatus::Ok as i32
+            Err(e) => MurkStatus::from(&e) as i32,
         }
-        Err(e) => MurkStatus::from(&e) as i32,
-    }
+    })
 }
 
 /// Destroy an observation plan.
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_obsplan_destroy(plan_handle: u64) -> i32 {
-    match ffi_lock!(OBS_PLANS).remove(plan_handle) {
-        Some(_) => MurkStatus::Ok as i32,
-        None => MurkStatus::InvalidHandle as i32,
-    }
+    ffi_guard!({
+        match ffi_lock!(OBS_PLANS).remove(plan_handle) {
+            Some(_) => MurkStatus::Ok as i32,
+            None => MurkStatus::InvalidHandle as i32,
+        }
+    })
 }
 
 /// Query the output length (in f32 elements) of a compiled plan.
@@ -396,13 +404,15 @@ pub extern "C" fn murk_obsplan_destroy(plan_handle: u64) -> i32 {
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_obsplan_output_len(plan_handle: u64) -> i64 {
-    get_obs_plan(plan_handle)
-        .and_then(|arc| {
-            arc.lock()
-                .ok()
-                .and_then(|s| s.cache.output_len().map(|l| l as i64))
-        })
-        .unwrap_or(-1)
+    ffi_guard_or!(-1, {
+        get_obs_plan(plan_handle)
+            .and_then(|arc| {
+                arc.lock()
+                    .ok()
+                    .and_then(|s| s.cache.output_len().map(|l| l as i64))
+            })
+            .unwrap_or(-1)
+    })
 }
 
 /// Query the mask length (in bytes) of a compiled plan.
@@ -411,13 +421,15 @@ pub extern "C" fn murk_obsplan_output_len(plan_handle: u64) -> i64 {
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_obsplan_mask_len(plan_handle: u64) -> i64 {
-    get_obs_plan(plan_handle)
-        .and_then(|arc| {
-            arc.lock()
-                .ok()
-                .and_then(|s| s.cache.mask_len().map(|l| l as i64))
-        })
-        .unwrap_or(-1)
+    ffi_guard_or!(-1, {
+        get_obs_plan(plan_handle)
+            .and_then(|arc| {
+                arc.lock()
+                    .ok()
+                    .and_then(|s| s.cache.mask_len().map(|l| l as i64))
+            })
+            .unwrap_or(-1)
+    })
 }
 
 #[cfg(test)]

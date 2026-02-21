@@ -40,61 +40,65 @@ pub(crate) fn worlds() -> &'static Mutex<HandleTable<WorldArc>> {
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_lockstep_create(config_handle: u64, world_out: *mut u64) -> i32 {
-    // Remove config from table FIRST (consumes it unconditionally).
-    // This ensures the "config is always consumed" contract holds even
-    // if we return early due to null world_out or validation errors.
-    let builder = match ffi_lock!(configs()).remove(config_handle) {
-        Some(b) => b,
-        None => return MurkStatus::InvalidHandle as i32,
-    };
+    ffi_guard!({
+        // Remove config from table FIRST (consumes it unconditionally).
+        // This ensures the "config is always consumed" contract holds even
+        // if we return early due to null world_out or validation errors.
+        let builder = match ffi_lock!(configs()).remove(config_handle) {
+            Some(b) => b,
+            None => return MurkStatus::InvalidHandle as i32,
+        };
 
-    if world_out.is_null() {
-        return MurkStatus::InvalidArgument as i32;
-    }
+        if world_out.is_null() {
+            return MurkStatus::InvalidArgument as i32;
+        }
 
-    // Validate: space and fields must be set.
-    let space = match builder.space {
-        Some(s) => s,
-        None => return MurkStatus::ConfigError as i32,
-    };
-    if builder.fields.is_empty() {
-        return MurkStatus::ConfigError as i32;
-    }
-    if builder.propagators.is_empty() {
-        return MurkStatus::ConfigError as i32;
-    }
+        // Validate: space and fields must be set.
+        let space = match builder.space {
+            Some(s) => s,
+            None => return MurkStatus::ConfigError as i32,
+        };
+        if builder.fields.is_empty() {
+            return MurkStatus::ConfigError as i32;
+        }
+        if builder.propagators.is_empty() {
+            return MurkStatus::ConfigError as i32;
+        }
 
-    let config = WorldConfig {
-        space,
-        fields: builder.fields,
-        propagators: builder.propagators,
-        dt: builder.dt,
-        seed: builder.seed,
-        ring_buffer_size: builder.ring_buffer_size,
-        max_ingress_queue: builder.max_ingress_queue,
-        tick_rate_hz: None,
-        backoff: BackoffConfig::default(),
-    };
+        let config = WorldConfig {
+            space,
+            fields: builder.fields,
+            propagators: builder.propagators,
+            dt: builder.dt,
+            seed: builder.seed,
+            ring_buffer_size: builder.ring_buffer_size,
+            max_ingress_queue: builder.max_ingress_queue,
+            tick_rate_hz: None,
+            backoff: BackoffConfig::default(),
+        };
 
-    let world = match LockstepWorld::new(config) {
-        Ok(w) => w,
-        Err(e) => return MurkStatus::from(&e) as i32,
-    };
+        let world = match LockstepWorld::new(config) {
+            Ok(w) => w,
+            Err(e) => return MurkStatus::from(&e) as i32,
+        };
 
-    let handle = ffi_lock!(WORLDS).insert(Arc::new(Mutex::new(world)));
-    // SAFETY: world_out is valid per caller contract.
-    unsafe { *world_out = handle };
-    MurkStatus::Ok as i32
+        let handle = ffi_lock!(WORLDS).insert(Arc::new(Mutex::new(world)));
+        // SAFETY: world_out is valid per caller contract.
+        unsafe { *world_out = handle };
+        MurkStatus::Ok as i32
+    })
 }
 
 /// Destroy a lockstep world, releasing all resources.
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_lockstep_destroy(world_handle: u64) -> i32 {
-    match ffi_lock!(WORLDS).remove(world_handle) {
-        Some(_) => MurkStatus::Ok as i32,
-        None => MurkStatus::InvalidHandle as i32,
-    }
+    ffi_guard!({
+        match ffi_lock!(WORLDS).remove(world_handle) {
+            Some(_) => MurkStatus::Ok as i32,
+            None => MurkStatus::InvalidHandle as i32,
+        }
+    })
 }
 
 /// Execute one tick: submit commands, run pipeline, return receipts + metrics.
@@ -114,76 +118,80 @@ pub extern "C" fn murk_lockstep_step(
     n_receipts_out: *mut usize,
     metrics_out: *mut MurkStepMetrics,
 ) -> i32 {
-    // Convert C commands to Rust commands.
-    let mut rust_cmds = Vec::with_capacity(n_cmds);
-    if n_cmds > 0 {
-        if cmds.is_null() {
-            return MurkStatus::InvalidArgument as i32;
-        }
-        // SAFETY: cmds points to n_cmds valid MurkCommand structs.
-        let cmd_slice = unsafe { std::slice::from_raw_parts(cmds, n_cmds) };
-        for (i, cmd) in cmd_slice.iter().enumerate() {
-            match convert_command(cmd, i) {
-                Ok(c) => rust_cmds.push(c),
-                Err(status) => return status as i32,
+    ffi_guard!({
+        // Convert C commands to Rust commands.
+        let mut rust_cmds = Vec::with_capacity(n_cmds);
+        if n_cmds > 0 {
+            if cmds.is_null() {
+                return MurkStatus::InvalidArgument as i32;
+            }
+            // SAFETY: cmds points to n_cmds valid MurkCommand structs.
+            let cmd_slice = unsafe { std::slice::from_raw_parts(cmds, n_cmds) };
+            for (i, cmd) in cmd_slice.iter().enumerate() {
+                match convert_command(cmd, i) {
+                    Ok(c) => rust_cmds.push(c),
+                    Err(status) => return status as i32,
+                }
             }
         }
-    }
 
-    let world_arc = match get_world(world_handle) {
-        Some(arc) => arc,
-        None => return MurkStatus::InvalidHandle as i32,
-    };
-    // Per-world lock: only this world is locked, not the global table.
-    let mut world = ffi_lock!(world_arc);
+        let world_arc = match get_world(world_handle) {
+            Some(arc) => arc,
+            None => return MurkStatus::InvalidHandle as i32,
+        };
+        // Per-world lock: only this world is locked, not the global table.
+        let mut world = ffi_lock!(world_arc);
 
-    match world.step_sync(rust_cmds) {
-        Ok(result) => {
-            // Write receipts.
-            write_receipts(&result.receipts, receipts_out, receipts_cap, n_receipts_out);
+        match world.step_sync(rust_cmds) {
+            Ok(result) => {
+                // Write receipts.
+                write_receipts(&result.receipts, receipts_out, receipts_cap, n_receipts_out);
 
-            // Snapshot propagator timings into thread-local while the
-            // world lock is still held, so murk_step_metrics_propagator
-            // returns data from the same tick as the aggregate metrics.
-            crate::metrics::snapshot_propagator_timings(&result.metrics.propagator_us);
+                // Snapshot propagator timings into thread-local while the
+                // world lock is still held, so murk_step_metrics_propagator
+                // returns data from the same tick as the aggregate metrics.
+                crate::metrics::snapshot_propagator_timings(&result.metrics.propagator_us);
 
-            // Write metrics.
-            if !metrics_out.is_null() {
-                let m = MurkStepMetrics::from_rust(&result.metrics);
-                // SAFETY: metrics_out is valid per caller contract.
-                unsafe { *metrics_out = m };
+                // Write metrics.
+                if !metrics_out.is_null() {
+                    let m = MurkStepMetrics::from_rust(&result.metrics);
+                    // SAFETY: metrics_out is valid per caller contract.
+                    unsafe { *metrics_out = m };
+                }
+
+                MurkStatus::Ok as i32
             }
+            Err(tick_error) => {
+                // Write receipts even on error (rollback receipts).
+                write_receipts(
+                    &tick_error.receipts,
+                    receipts_out,
+                    receipts_cap,
+                    n_receipts_out,
+                );
 
-            MurkStatus::Ok as i32
+                MurkStatus::from(&tick_error) as i32
+            }
         }
-        Err(tick_error) => {
-            // Write receipts even on error (rollback receipts).
-            write_receipts(
-                &tick_error.receipts,
-                receipts_out,
-                receipts_cap,
-                n_receipts_out,
-            );
-
-            MurkStatus::from(&tick_error) as i32
-        }
-    }
+    })
 }
 
 /// Reset the world to tick 0 with a new seed.
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_lockstep_reset(world_handle: u64, seed: u64) -> i32 {
-    let world_arc = match get_world(world_handle) {
-        Some(arc) => arc,
-        None => return MurkStatus::InvalidHandle as i32,
-    };
-    let mut world = ffi_lock!(world_arc);
+    ffi_guard!({
+        let world_arc = match get_world(world_handle) {
+            Some(arc) => arc,
+            None => return MurkStatus::InvalidHandle as i32,
+        };
+        let mut world = ffi_lock!(world_arc);
 
-    match world.reset(seed) {
-        Ok(_) => MurkStatus::Ok as i32,
-        Err(e) => MurkStatus::from(&e) as i32,
-    }
+        match world.reset(seed) {
+            Ok(_) => MurkStatus::Ok as i32,
+            Err(e) => MurkStatus::from(&e) as i32,
+        }
+    })
 }
 
 /// Read a field from the current snapshot into a caller-allocated buffer.
@@ -199,32 +207,34 @@ pub extern "C" fn murk_snapshot_read_field(
     buf: *mut f32,
     buf_len: usize,
 ) -> i32 {
-    if buf.is_null() {
-        return MurkStatus::InvalidArgument as i32;
-    }
+    ffi_guard!({
+        if buf.is_null() {
+            return MurkStatus::InvalidArgument as i32;
+        }
 
-    let world_arc = match get_world(world_handle) {
-        Some(arc) => arc,
-        None => return MurkStatus::InvalidHandle as i32,
-    };
-    let world = ffi_lock!(world_arc);
+        let world_arc = match get_world(world_handle) {
+            Some(arc) => arc,
+            None => return MurkStatus::InvalidHandle as i32,
+        };
+        let world = ffi_lock!(world_arc);
 
-    let snap = world.snapshot();
-    let data = match snap.read_field(FieldId(field_id)) {
-        Some(d) => d,
-        None => return MurkStatus::InvalidArgument as i32,
-    };
+        let snap = world.snapshot();
+        let data = match snap.read_field(FieldId(field_id)) {
+            Some(d) => d,
+            None => return MurkStatus::InvalidArgument as i32,
+        };
 
-    if buf_len < data.len() {
-        return MurkStatus::BufferTooSmall as i32;
-    }
+        if buf_len < data.len() {
+            return MurkStatus::BufferTooSmall as i32;
+        }
 
-    // SAFETY: buf points to buf_len valid f32 values.
-    unsafe {
-        std::ptr::copy_nonoverlapping(data.as_ptr(), buf, data.len());
-    }
+        // SAFETY: buf points to buf_len valid f32 values.
+        unsafe {
+            std::ptr::copy_nonoverlapping(data.as_ptr(), buf, data.len());
+        }
 
-    MurkStatus::Ok as i32
+        MurkStatus::Ok as i32
+    })
 }
 
 /// Current tick ID for a world (0 after construction or reset).
@@ -234,9 +244,11 @@ pub extern "C" fn murk_snapshot_read_field(
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_current_tick(world_handle: u64) -> u64 {
-    get_world(world_handle)
-        .and_then(|arc| arc.lock().ok().map(|w| w.current_tick().0))
-        .unwrap_or(0)
+    ffi_guard_or!(0, {
+        get_world(world_handle)
+            .and_then(|arc| arc.lock().ok().map(|w| w.current_tick().0))
+            .unwrap_or(0)
+    })
 }
 
 /// Current tick ID with explicit error reporting.
@@ -246,16 +258,18 @@ pub extern "C" fn murk_current_tick(world_handle: u64) -> u64 {
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_current_tick_get(world_handle: u64, out: *mut u64) -> i32 {
-    if out.is_null() {
-        return MurkStatus::InvalidArgument as i32;
-    }
-    let world_arc = match get_world(world_handle) {
-        Some(arc) => arc,
-        None => return MurkStatus::InvalidHandle as i32,
-    };
-    let world = ffi_lock!(world_arc);
-    unsafe { *out = world.current_tick().0 };
-    MurkStatus::Ok as i32
+    ffi_guard!({
+        if out.is_null() {
+            return MurkStatus::InvalidArgument as i32;
+        }
+        let world_arc = match get_world(world_handle) {
+            Some(arc) => arc,
+            None => return MurkStatus::InvalidHandle as i32,
+        };
+        let world = ffi_lock!(world_arc);
+        unsafe { *out = world.current_tick().0 };
+        MurkStatus::Ok as i32
+    })
 }
 
 /// Whether ticking is disabled due to consecutive rollbacks.
@@ -265,9 +279,11 @@ pub extern "C" fn murk_current_tick_get(world_handle: u64, out: *mut u64) -> i32
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_is_tick_disabled(world_handle: u64) -> u8 {
-    get_world(world_handle)
-        .and_then(|arc| arc.lock().ok().map(|w| u8::from(w.is_tick_disabled())))
-        .unwrap_or(0)
+    ffi_guard_or!(0, {
+        get_world(world_handle)
+            .and_then(|arc| arc.lock().ok().map(|w| u8::from(w.is_tick_disabled())))
+            .unwrap_or(0)
+    })
 }
 
 /// Tick-disabled state with explicit error reporting.
@@ -277,16 +293,18 @@ pub extern "C" fn murk_is_tick_disabled(world_handle: u64) -> u8 {
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_is_tick_disabled_get(world_handle: u64, out: *mut u8) -> i32 {
-    if out.is_null() {
-        return MurkStatus::InvalidArgument as i32;
-    }
-    let world_arc = match get_world(world_handle) {
-        Some(arc) => arc,
-        None => return MurkStatus::InvalidHandle as i32,
-    };
-    let world = ffi_lock!(world_arc);
-    unsafe { *out = u8::from(world.is_tick_disabled()) };
-    MurkStatus::Ok as i32
+    ffi_guard!({
+        if out.is_null() {
+            return MurkStatus::InvalidArgument as i32;
+        }
+        let world_arc = match get_world(world_handle) {
+            Some(arc) => arc,
+            None => return MurkStatus::InvalidHandle as i32,
+        };
+        let world = ffi_lock!(world_arc);
+        unsafe { *out = u8::from(world.is_tick_disabled()) };
+        MurkStatus::Ok as i32
+    })
 }
 
 /// Number of consecutive rollbacks since the last successful tick.
@@ -296,9 +314,11 @@ pub extern "C" fn murk_is_tick_disabled_get(world_handle: u64, out: *mut u8) -> 
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_consecutive_rollbacks(world_handle: u64) -> u32 {
-    get_world(world_handle)
-        .and_then(|arc| arc.lock().ok().map(|w| w.consecutive_rollback_count()))
-        .unwrap_or(0)
+    ffi_guard_or!(0, {
+        get_world(world_handle)
+            .and_then(|arc| arc.lock().ok().map(|w| w.consecutive_rollback_count()))
+            .unwrap_or(0)
+    })
 }
 
 /// Consecutive rollback count with explicit error reporting.
@@ -308,16 +328,18 @@ pub extern "C" fn murk_consecutive_rollbacks(world_handle: u64) -> u32 {
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_consecutive_rollbacks_get(world_handle: u64, out: *mut u32) -> i32 {
-    if out.is_null() {
-        return MurkStatus::InvalidArgument as i32;
-    }
-    let world_arc = match get_world(world_handle) {
-        Some(arc) => arc,
-        None => return MurkStatus::InvalidHandle as i32,
-    };
-    let world = ffi_lock!(world_arc);
-    unsafe { *out = world.consecutive_rollback_count() };
-    MurkStatus::Ok as i32
+    ffi_guard!({
+        if out.is_null() {
+            return MurkStatus::InvalidArgument as i32;
+        }
+        let world_arc = match get_world(world_handle) {
+            Some(arc) => arc,
+            None => return MurkStatus::InvalidHandle as i32,
+        };
+        let world = ffi_lock!(world_arc);
+        unsafe { *out = world.consecutive_rollback_count() };
+        MurkStatus::Ok as i32
+    })
 }
 
 /// The world's current seed.
@@ -327,9 +349,11 @@ pub extern "C" fn murk_consecutive_rollbacks_get(world_handle: u64, out: *mut u3
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_seed(world_handle: u64) -> u64 {
-    get_world(world_handle)
-        .and_then(|arc| arc.lock().ok().map(|w| w.seed()))
-        .unwrap_or(0)
+    ffi_guard_or!(0, {
+        get_world(world_handle)
+            .and_then(|arc| arc.lock().ok().map(|w| w.seed()))
+            .unwrap_or(0)
+    })
 }
 
 /// Seed with explicit error reporting.
@@ -339,16 +363,18 @@ pub extern "C" fn murk_seed(world_handle: u64) -> u64 {
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_seed_get(world_handle: u64, out: *mut u64) -> i32 {
-    if out.is_null() {
-        return MurkStatus::InvalidArgument as i32;
-    }
-    let world_arc = match get_world(world_handle) {
-        Some(arc) => arc,
-        None => return MurkStatus::InvalidHandle as i32,
-    };
-    let world = ffi_lock!(world_arc);
-    unsafe { *out = world.seed() };
-    MurkStatus::Ok as i32
+    ffi_guard!({
+        if out.is_null() {
+            return MurkStatus::InvalidArgument as i32;
+        }
+        let world_arc = match get_world(world_handle) {
+            Some(arc) => arc,
+            None => return MurkStatus::InvalidHandle as i32,
+        };
+        let world = ffi_lock!(world_arc);
+        unsafe { *out = world.seed() };
+        MurkStatus::Ok as i32
+    })
 }
 
 /// Step multiple worlds sequentially. v1: no parallelism.
@@ -368,55 +394,57 @@ pub extern "C" fn murk_lockstep_step_vec(
     n_worlds: usize,
     metrics_out: *mut MurkStepMetrics,
 ) -> i32 {
-    if n_worlds == 0 {
-        return MurkStatus::Ok as i32;
-    }
-    if world_handles.is_null() || cmds_per_world.is_null() || n_cmds_per_world.is_null() {
-        return MurkStatus::InvalidArgument as i32;
-    }
+    ffi_guard!({
+        if n_worlds == 0 {
+            return MurkStatus::Ok as i32;
+        }
+        if world_handles.is_null() || cmds_per_world.is_null() || n_cmds_per_world.is_null() {
+            return MurkStatus::InvalidArgument as i32;
+        }
 
-    // SAFETY: caller guarantees these arrays have n_worlds elements.
-    let handles = unsafe { std::slice::from_raw_parts(world_handles, n_worlds) };
-    let cmds_ptrs = unsafe { std::slice::from_raw_parts(cmds_per_world, n_worlds) };
-    let n_cmds = unsafe { std::slice::from_raw_parts(n_cmds_per_world, n_worlds) };
+        // SAFETY: caller guarantees these arrays have n_worlds elements.
+        let handles = unsafe { std::slice::from_raw_parts(world_handles, n_worlds) };
+        let cmds_ptrs = unsafe { std::slice::from_raw_parts(cmds_per_world, n_worlds) };
+        let n_cmds = unsafe { std::slice::from_raw_parts(n_cmds_per_world, n_worlds) };
 
-    for i in 0..n_worlds {
-        // Convert commands for this world.
-        let mut rust_cmds = Vec::with_capacity(n_cmds[i]);
-        if n_cmds[i] > 0 {
-            if cmds_ptrs[i].is_null() {
-                return MurkStatus::InvalidArgument as i32;
+        for i in 0..n_worlds {
+            // Convert commands for this world.
+            let mut rust_cmds = Vec::with_capacity(n_cmds[i]);
+            if n_cmds[i] > 0 {
+                if cmds_ptrs[i].is_null() {
+                    return MurkStatus::InvalidArgument as i32;
+                }
+                let cmd_slice = unsafe { std::slice::from_raw_parts(cmds_ptrs[i], n_cmds[i]) };
+                for (j, cmd) in cmd_slice.iter().enumerate() {
+                    match convert_command(cmd, j) {
+                        Ok(c) => rust_cmds.push(c),
+                        Err(status) => return status as i32,
+                    }
+                }
             }
-            let cmd_slice = unsafe { std::slice::from_raw_parts(cmds_ptrs[i], n_cmds[i]) };
-            for (j, cmd) in cmd_slice.iter().enumerate() {
-                match convert_command(cmd, j) {
-                    Ok(c) => rust_cmds.push(c),
-                    Err(status) => return status as i32,
+
+            let world_arc = match get_world(handles[i]) {
+                Some(arc) => arc,
+                None => return MurkStatus::InvalidHandle as i32,
+            };
+            let mut world = ffi_lock!(world_arc);
+
+            match world.step_sync(rust_cmds) {
+                Ok(result) => {
+                    crate::metrics::snapshot_propagator_timings(&result.metrics.propagator_us);
+                    if !metrics_out.is_null() {
+                        let m = MurkStepMetrics::from_rust(&result.metrics);
+                        unsafe { *metrics_out.add(i) = m };
+                    }
+                }
+                Err(tick_error) => {
+                    return MurkStatus::from(&tick_error) as i32;
                 }
             }
         }
 
-        let world_arc = match get_world(handles[i]) {
-            Some(arc) => arc,
-            None => return MurkStatus::InvalidHandle as i32,
-        };
-        let mut world = ffi_lock!(world_arc);
-
-        match world.step_sync(rust_cmds) {
-            Ok(result) => {
-                crate::metrics::snapshot_propagator_timings(&result.metrics.propagator_us);
-                if !metrics_out.is_null() {
-                    let m = MurkStepMetrics::from_rust(&result.metrics);
-                    unsafe { *metrics_out.add(i) = m };
-                }
-            }
-            Err(tick_error) => {
-                return MurkStatus::from(&tick_error) as i32;
-            }
-        }
-    }
-
-    MurkStatus::Ok as i32
+        MurkStatus::Ok as i32
+    })
 }
 
 // ── helpers ──────────────────────────────────────────────
