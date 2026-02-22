@@ -61,11 +61,17 @@ pub struct MurkStepMetrics {
     pub worker_stall_events: u64,
     /// Cumulative number of ring "not available" events.
     pub ring_not_available_events: u64,
+    /// Cumulative number of snapshot evictions due to ring overwrite.
+    pub ring_eviction_events: u64,
+    /// Cumulative number of stale/not-yet-written position reads.
+    pub ring_stale_read_events: u64,
+    /// Cumulative number of reader retries caused by overwrite skew.
+    pub ring_skew_retry_events: u64,
 }
 
 // Compile-time layout assertions for ABI stability.
-// 4×u64 + 5×u32 + 4 bytes padding + 6×u64 = 104 bytes, align 8.
-const _: () = assert!(std::mem::size_of::<MurkStepMetrics>() == 104);
+// 4×u64 + 5×u32 + 4 bytes padding + 9×u64 = 128 bytes, align 8.
+const _: () = assert!(std::mem::size_of::<MurkStepMetrics>() == 128);
 const _: () = assert!(std::mem::align_of::<MurkStepMetrics>() == 8);
 
 impl MurkStepMetrics {
@@ -86,6 +92,9 @@ impl MurkStepMetrics {
             tick_disabled_transitions: m.tick_disabled_transitions,
             worker_stall_events: m.worker_stall_events,
             ring_not_available_events: m.ring_not_available_events,
+            ring_eviction_events: m.ring_eviction_events,
+            ring_stale_read_events: m.ring_stale_read_events,
+            ring_skew_retry_events: m.ring_skew_retry_events,
         }
     }
 }
@@ -191,6 +200,9 @@ mod tests {
             tick_disabled_transitions: 1,
             worker_stall_events: 3,
             ring_not_available_events: 7,
+            ring_eviction_events: 9,
+            ring_stale_read_events: 4,
+            ring_skew_retry_events: 2,
         };
         let ffi = MurkStepMetrics::from_rust(&rust_metrics);
         assert_eq!(ffi.sparse_retired_ranges, 7);
@@ -203,6 +215,9 @@ mod tests {
         assert_eq!(ffi.tick_disabled_transitions, 1);
         assert_eq!(ffi.worker_stall_events, 3);
         assert_eq!(ffi.ring_not_available_events, 7);
+        assert_eq!(ffi.ring_eviction_events, 9);
+        assert_eq!(ffi.ring_stale_read_events, 4);
+        assert_eq!(ffi.ring_skew_retry_events, 2);
     }
 
     #[test]
@@ -218,5 +233,8 @@ mod tests {
         assert_eq!(m.tick_disabled_transitions, 0);
         assert_eq!(m.worker_stall_events, 0);
         assert_eq!(m.ring_not_available_events, 0);
+        assert_eq!(m.ring_eviction_events, 0);
+        assert_eq!(m.ring_stale_read_events, 0);
+        assert_eq!(m.ring_skew_retry_events, 0);
     }
 }

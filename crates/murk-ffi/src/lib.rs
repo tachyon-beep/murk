@@ -168,11 +168,11 @@ pub use world::{
 /// ABI version: major in upper 16 bits, minor in lower 16.
 ///
 /// Bump major on breaking changes, minor on additions.
-/// Current: v2.1 (v2.0→v2.1: ffi_guard! panic safety, murk_last_panic_message, MurkStatus::Panicked)
+/// Current: v3.0 (v2.1→v3.0: MurkStepMetrics layout expansion for ring retention/skew counters)
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_abi_version() -> u32 {
-    (2 << 16) | 1
+    3 << 16
 }
 
 #[cfg(test)]
@@ -180,12 +180,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn abi_version_returns_v2_1() {
+    fn abi_version_returns_v3_0() {
         let v = murk_abi_version();
         let major = v >> 16;
         let minor = v & 0xFFFF;
-        assert_eq!(major, 2);
-        assert_eq!(minor, 1);
+        assert_eq!(major, 3);
+        assert_eq!(minor, 0);
     }
 
     #[test]

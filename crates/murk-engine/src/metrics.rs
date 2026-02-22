@@ -40,6 +40,12 @@ pub struct StepMetrics {
     pub worker_stall_events: u64,
     /// Cumulative number of ring "not available" events.
     pub ring_not_available_events: u64,
+    /// Cumulative number of snapshot evictions due to ring overwrite.
+    pub ring_eviction_events: u64,
+    /// Cumulative number of stale/not-yet-written position reads.
+    pub ring_stale_read_events: u64,
+    /// Cumulative number of reader retries caused by overwrite skew.
+    pub ring_skew_retry_events: u64,
 }
 
 #[cfg(test)]
@@ -64,6 +70,9 @@ mod tests {
         assert_eq!(m.tick_disabled_transitions, 0);
         assert_eq!(m.worker_stall_events, 0);
         assert_eq!(m.ring_not_available_events, 0);
+        assert_eq!(m.ring_eviction_events, 0);
+        assert_eq!(m.ring_stale_read_events, 0);
+        assert_eq!(m.ring_skew_retry_events, 0);
     }
 
     #[test]
@@ -84,6 +93,9 @@ mod tests {
             tick_disabled_transitions: 1,
             worker_stall_events: 3,
             ring_not_available_events: 7,
+            ring_eviction_events: 9,
+            ring_stale_read_events: 4,
+            ring_skew_retry_events: 2,
         };
         assert_eq!(m.total_us, 100);
         assert_eq!(m.command_processing_us, 20);
@@ -102,5 +114,8 @@ mod tests {
         assert_eq!(m.tick_disabled_transitions, 1);
         assert_eq!(m.worker_stall_events, 3);
         assert_eq!(m.ring_not_available_events, 7);
+        assert_eq!(m.ring_eviction_events, 9);
+        assert_eq!(m.ring_stale_read_events, 4);
+        assert_eq!(m.ring_skew_retry_events, 2);
     }
 }

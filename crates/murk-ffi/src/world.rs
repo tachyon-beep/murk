@@ -866,6 +866,9 @@ mod tests {
         assert!(metrics.memory_bytes > 0);
         assert_eq!(metrics.worker_stall_events, 0);
         assert_eq!(metrics.ring_not_available_events, 0);
+        assert_eq!(metrics.ring_eviction_events, 0);
+        assert_eq!(metrics.ring_stale_read_events, 0);
+        assert_eq!(metrics.ring_skew_retry_events, 0);
 
         // Test murk_step_metrics too.
         let mut metrics2 = MurkStepMetrics::default();
@@ -874,6 +877,9 @@ mod tests {
         assert!(metrics2.n_propagators >= 1);
         assert_eq!(metrics2.worker_stall_events, 0);
         assert_eq!(metrics2.ring_not_available_events, 0);
+        assert_eq!(metrics2.ring_eviction_events, 0);
+        assert_eq!(metrics2.ring_stale_read_events, 0);
+        assert_eq!(metrics2.ring_skew_retry_events, 0);
 
         murk_lockstep_destroy(world_h);
     }

@@ -50,7 +50,7 @@ generational allocation for deterministic, zero-GC memory management.
 - **Step metrics observability** — per-step timings plus sparse retirement
   and sparse reuse counters (`sparse_retired_ranges`, `sparse_pending_retired`,
   `sparse_reuse_hits`, `sparse_reuse_misses`)
-- **C FFI** — stable ABI v2.1 with handle tables (slot+generation),
+- **C FFI** — stable ABI v3.0 with handle tables (slot+generation),
   panic-safe boundary (`MurkStatus::Panicked`, `murk_last_panic_message`),
   and safe double-destroy
 - **Python bindings** — PyO3/maturin native extension with Gymnasium `Env`/`VecEnv`

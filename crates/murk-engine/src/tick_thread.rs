@@ -221,6 +221,12 @@ impl TickThreadState {
             // Update ring "not available" totals from egress-side observations.
             self.engine
                 .set_ring_not_available_events(self.ring.not_available_events());
+            self.engine
+                .set_ring_eviction_events(self.ring.eviction_events());
+            self.engine
+                .set_ring_stale_read_events(self.ring.stale_read_events());
+            self.engine
+                .set_ring_skew_retry_events(self.ring.skew_retry_events());
 
             // 6. Sleep for remaining budget, interruptible by shutdown.
             // Uses park_timeout instead of thread::sleep so the shutdown

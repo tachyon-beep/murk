@@ -25,6 +25,9 @@ pub(crate) struct StepMetrics {
     pub(crate) tick_disabled_transitions: u64,
     pub(crate) worker_stall_events: u64,
     pub(crate) ring_not_available_events: u64,
+    pub(crate) ring_eviction_events: u64,
+    pub(crate) ring_stale_read_events: u64,
+    pub(crate) ring_skew_retry_events: u64,
 }
 
 #[pymethods]
@@ -119,6 +122,24 @@ impl StepMetrics {
         self.ring_not_available_events
     }
 
+    /// Cumulative number of snapshot evictions due to ring overwrite.
+    #[getter]
+    fn ring_eviction_events(&self) -> u64 {
+        self.ring_eviction_events
+    }
+
+    /// Cumulative number of stale/not-yet-written position reads.
+    #[getter]
+    fn ring_stale_read_events(&self) -> u64 {
+        self.ring_stale_read_events
+    }
+
+    /// Cumulative number of reader retries caused by overwrite skew.
+    #[getter]
+    fn ring_skew_retry_events(&self) -> u64 {
+        self.ring_skew_retry_events
+    }
+
     /// Convert to a plain Python dict.
     fn to_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
         let d = PyDict::new(py);
@@ -137,12 +158,15 @@ impl StepMetrics {
         d.set_item("tick_disabled_transitions", self.tick_disabled_transitions)?;
         d.set_item("worker_stall_events", self.worker_stall_events)?;
         d.set_item("ring_not_available_events", self.ring_not_available_events)?;
+        d.set_item("ring_eviction_events", self.ring_eviction_events)?;
+        d.set_item("ring_stale_read_events", self.ring_stale_read_events)?;
+        d.set_item("ring_skew_retry_events", self.ring_skew_retry_events)?;
         Ok(d)
     }
 
     fn __repr__(&self) -> String {
         format!(
-            "StepMetrics(total={}us, mem={}B, propagators={}, sparse_retired={}, sparse_pending={}, reuse_hits={}, reuse_misses={}, queue_full={}, tick_disabled_rejections={}, rollbacks={}, tick_disabled_transitions={}, worker_stalls={}, ring_not_available={})",
+            "StepMetrics(total={}us, mem={}B, propagators={}, sparse_retired={}, sparse_pending={}, reuse_hits={}, reuse_misses={}, queue_full={}, tick_disabled_rejections={}, rollbacks={}, tick_disabled_transitions={}, worker_stalls={}, ring_not_available={}, ring_evictions={}, ring_stale_reads={}, ring_skew_retries={})",
             self.total_us,
             self.memory_bytes,
             self.propagator_us.len(),
@@ -156,6 +180,9 @@ impl StepMetrics {
             self.tick_disabled_transitions,
             self.worker_stall_events,
             self.ring_not_available_events,
+            self.ring_eviction_events,
+            self.ring_stale_read_events,
+            self.ring_skew_retry_events,
         )
     }
 }
@@ -197,6 +224,9 @@ impl StepMetrics {
             tick_disabled_transitions: m.tick_disabled_transitions,
             worker_stall_events: m.worker_stall_events,
             ring_not_available_events: m.ring_not_available_events,
+            ring_eviction_events: m.ring_eviction_events,
+            ring_stale_read_events: m.ring_stale_read_events,
+            ring_skew_retry_events: m.ring_skew_retry_events,
         }
     }
 }
@@ -223,6 +253,9 @@ mod tests {
             tick_disabled_transitions: 1,
             worker_stall_events: 3,
             ring_not_available_events: 7,
+            ring_eviction_events: 9,
+            ring_stale_read_events: 4,
+            ring_skew_retry_events: 2,
         };
         assert_eq!(m.sparse_retired_ranges, 5);
         assert_eq!(m.sparse_pending_retired, 3);
@@ -234,5 +267,8 @@ mod tests {
         assert_eq!(m.tick_disabled_transitions, 1);
         assert_eq!(m.worker_stall_events, 3);
         assert_eq!(m.ring_not_available_events, 7);
+        assert_eq!(m.ring_eviction_events, 9);
+        assert_eq!(m.ring_stale_read_events, 4);
+        assert_eq!(m.ring_skew_retry_events, 2);
     }
 }

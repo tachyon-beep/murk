@@ -26,8 +26,8 @@
 ### Improvement Roadmap (`09-improvement-roadmap.md`)
 
 - Phase 1: `[Resolved]`
-- Phase 2: telemetry + preflight `[Resolved]`, ring retention/skew signaling `[PartiallyResolved]`
-- Phase 3: `[Open]`
+- Phase 2: telemetry + preflight `[Resolved]`, ring retention/skew signaling `[Resolved]`
+- Phase 3: performance harness/budgets `[Resolved]`, optimization work `[Open]`
 - Phase 4: `[Open]`
 
 ## Baseline Validation Commands
@@ -82,6 +82,7 @@ Commands:
 cargo test -p murk-engine -- realtime
 cargo test -p murk-ffi
 UV_CACHE_DIR=.uv-cache uv run pytest crates/murk-python/tests/test_vec_env.py -q
+cargo bench -p murk-bench --bench obs_ops --bench space_ops --bench arena_ops -- --sample-size 20 --measurement-time 1
 ```
 
 Result summary:
@@ -89,10 +90,9 @@ Result summary:
 - PASS for realtime preflight additions in engine.
 - PASS for FFI hardening + added negative/integration-like tests.
 - PASS for Python vec-env preflight surface test.
+- PASS for representative Phase 3 benchmark scenarios; baselines captured in `docs/design/performance-budget.md`.
 
 ## Remaining Risks (Deferred to Gates C/D)
 
-- Performance regression budgets/document (`Task 10`) are not implemented.
 - `murk-obs`, `murk-space`, `murk-arena` optimization tasks (`Tasks 11-13`) are not started.
 - v0.2 feature-package kickoff plan (`Task 14`) is not started.
-

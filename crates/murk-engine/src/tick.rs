@@ -94,6 +94,9 @@ pub struct TickEngine {
     total_tick_disabled_transitions: u64,
     total_worker_stall_events: u64,
     total_ring_not_available_events: u64,
+    total_ring_eviction_events: u64,
+    total_ring_stale_read_events: u64,
+    total_ring_skew_retry_events: u64,
     propagator_scratch: PropagatorScratch,
     base_field_set: BaseFieldSet,
     base_cache: BaseFieldCache,
@@ -178,6 +181,9 @@ impl TickEngine {
             total_tick_disabled_transitions: 0,
             total_worker_stall_events: 0,
             total_ring_not_available_events: 0,
+            total_ring_eviction_events: 0,
+            total_ring_stale_read_events: 0,
+            total_ring_skew_retry_events: 0,
             propagator_scratch,
             base_field_set,
             base_cache: BaseFieldCache::new(),
@@ -396,6 +402,9 @@ impl TickEngine {
             tick_disabled_transitions: self.total_tick_disabled_transitions,
             worker_stall_events: self.total_worker_stall_events,
             ring_not_available_events: self.total_ring_not_available_events,
+            ring_eviction_events: self.total_ring_eviction_events,
+            ring_stale_read_events: self.total_ring_stale_read_events,
+            ring_skew_retry_events: self.total_ring_skew_retry_events,
         };
         self.arena.reset_sparse_reuse_counters();
         self.last_metrics = metrics.clone();
@@ -460,6 +469,9 @@ impl TickEngine {
         self.total_tick_disabled_transitions = 0;
         self.total_worker_stall_events = 0;
         self.total_ring_not_available_events = 0;
+        self.total_ring_eviction_events = 0;
+        self.total_ring_stale_read_events = 0;
+        self.total_ring_skew_retry_events = 0;
         self.last_metrics = StepMetrics::default();
         Ok(())
     }
@@ -474,6 +486,21 @@ impl TickEngine {
         self.refresh_counter_metrics();
     }
 
+    pub(crate) fn set_ring_eviction_events(&mut self, total: u64) {
+        self.total_ring_eviction_events = self.total_ring_eviction_events.max(total);
+        self.refresh_counter_metrics();
+    }
+
+    pub(crate) fn set_ring_stale_read_events(&mut self, total: u64) {
+        self.total_ring_stale_read_events = self.total_ring_stale_read_events.max(total);
+        self.refresh_counter_metrics();
+    }
+
+    pub(crate) fn set_ring_skew_retry_events(&mut self, total: u64) {
+        self.total_ring_skew_retry_events = self.total_ring_skew_retry_events.max(total);
+        self.refresh_counter_metrics();
+    }
+
     fn refresh_counter_metrics(&mut self) {
         self.last_metrics.queue_full_rejections = self.total_queue_full_rejections;
         self.last_metrics.tick_disabled_rejections = self.total_tick_disabled_rejections;
@@ -481,6 +508,9 @@ impl TickEngine {
         self.last_metrics.tick_disabled_transitions = self.total_tick_disabled_transitions;
         self.last_metrics.worker_stall_events = self.total_worker_stall_events;
         self.last_metrics.ring_not_available_events = self.total_ring_not_available_events;
+        self.last_metrics.ring_eviction_events = self.total_ring_eviction_events;
+        self.last_metrics.ring_stale_read_events = self.total_ring_stale_read_events;
+        self.last_metrics.ring_skew_retry_events = self.total_ring_skew_retry_events;
     }
 
     /// Get a read-only snapshot of the current published generation.
@@ -1017,6 +1047,9 @@ mod tests {
         assert_eq!(engine.last_metrics().tick_disabled_transitions, 0);
         assert_eq!(engine.last_metrics().worker_stall_events, 0);
         assert_eq!(engine.last_metrics().ring_not_available_events, 0);
+        assert_eq!(engine.last_metrics().ring_eviction_events, 0);
+        assert_eq!(engine.last_metrics().ring_stale_read_events, 0);
+        assert_eq!(engine.last_metrics().ring_skew_retry_events, 0);
     }
 
     // ── Integration tests ────────────────────────────────────
@@ -1143,6 +1176,9 @@ mod tests {
         assert_eq!(result.metrics.tick_disabled_transitions, 0);
         assert_eq!(result.metrics.worker_stall_events, 0);
         assert_eq!(result.metrics.ring_not_available_events, 0);
+        assert_eq!(result.metrics.ring_eviction_events, 0);
+        assert_eq!(result.metrics.ring_stale_read_events, 0);
+        assert_eq!(result.metrics.ring_skew_retry_events, 0);
     }
 
     #[test]
@@ -1187,13 +1223,22 @@ mod tests {
         let mut engine = simple_engine();
         engine.record_worker_stall_events(3);
         engine.set_ring_not_available_events(7);
+        engine.set_ring_eviction_events(5);
+        engine.set_ring_stale_read_events(2);
+        engine.set_ring_skew_retry_events(1);
 
         assert_eq!(engine.last_metrics().worker_stall_events, 3);
         assert_eq!(engine.last_metrics().ring_not_available_events, 7);
+        assert_eq!(engine.last_metrics().ring_eviction_events, 5);
+        assert_eq!(engine.last_metrics().ring_stale_read_events, 2);
+        assert_eq!(engine.last_metrics().ring_skew_retry_events, 1);
 
         let result = engine.execute_tick().unwrap();
         assert_eq!(result.metrics.worker_stall_events, 3);
         assert_eq!(result.metrics.ring_not_available_events, 7);
+        assert_eq!(result.metrics.ring_eviction_events, 5);
+        assert_eq!(result.metrics.ring_stale_read_events, 2);
+        assert_eq!(result.metrics.ring_skew_retry_events, 1);
     }
 
     #[test]

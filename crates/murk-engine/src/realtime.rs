@@ -101,6 +101,20 @@ pub struct RealtimePreflight {
     pub latest_snapshot_tick_id: u64,
     /// Snapshot age in ticks relative to the current epoch.
     pub snapshot_age_ticks: u64,
+    /// Ring retention capacity (maximum number of retained snapshots).
+    pub ring_capacity: usize,
+    /// Current retained snapshot count.
+    pub ring_len: usize,
+    /// Current monotonic ring write position.
+    pub ring_write_pos: u64,
+    /// Oldest retained write position (None when ring is empty).
+    pub ring_oldest_retained_pos: Option<u64>,
+    /// Cumulative count of evictions from ring overwrite.
+    pub ring_eviction_events: u64,
+    /// Cumulative count of stale/not-yet-written position reads.
+    pub ring_stale_read_events: u64,
+    /// Cumulative count of overwrite-skew retry events.
+    pub ring_skew_retry_events: u64,
     /// Whether the tick thread has already stopped.
     pub tick_thread_stopped: bool,
 }
@@ -479,6 +493,13 @@ impl RealtimeAsyncWorld {
             has_snapshot: ring.has_snapshot,
             latest_snapshot_tick_id: ring.latest_tick_id,
             snapshot_age_ticks: ring.age_ticks,
+            ring_capacity: ring.ring_capacity,
+            ring_len: ring.ring_len,
+            ring_write_pos: ring.ring_write_pos,
+            ring_oldest_retained_pos: ring.ring_oldest_retained_pos,
+            ring_eviction_events: ring.ring_eviction_events,
+            ring_stale_read_events: ring.ring_stale_read_events,
+            ring_skew_retry_events: ring.ring_skew_retry_events,
             tick_thread_stopped: self.tick_stopped.load(Ordering::Acquire),
         }
     }
@@ -994,6 +1015,10 @@ mod tests {
         let initial = world.preflight();
         assert_eq!(initial.command_queue_capacity, 64);
         assert!(initial.observe_queue_capacity > 0);
+        assert_eq!(initial.ring_capacity, 8);
+        assert_eq!(initial.ring_len, 0);
+        assert_eq!(initial.ring_write_pos, 0);
+        assert_eq!(initial.ring_oldest_retained_pos, None);
         assert!(!initial.tick_thread_stopped);
 
         let deadline = Instant::now() + Duration::from_secs(2);
@@ -1006,6 +1031,9 @@ mod tests {
             ready = world.preflight();
         }
         assert!(ready.latest_snapshot_tick_id > 0);
+        assert!(ready.ring_len > 0);
+        assert!(ready.ring_write_pos >= ready.ring_len as u64);
+        assert!(ready.ring_oldest_retained_pos.is_some());
 
         world.shutdown();
         let stopped = world.preflight();

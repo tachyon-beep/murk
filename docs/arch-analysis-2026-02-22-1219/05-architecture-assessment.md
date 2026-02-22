@@ -47,5 +47,5 @@
 1. **[Resolved] Make the spec surfaces trustworthy again**: replay format/docs drift and install/version contract checks are now CI-gated.
 2. **[Resolved] Remove tracked binary/caches from the repo** and validate artifact-first packaging via release smoke tests.
 3. **[Resolved] Finish the FFI hardening pass** (checked arithmetic, bounded allocations, stable error reporting) and implement a documented poisoning recovery policy.
-4. **[Resolved] Add realtime-first telemetry**: queue saturation, rollbacks/tick-disabled transitions, worker-stall events, and ring “not available” rates are exposed in Rust/FFI/Python metrics.
+4. **[Resolved] Add realtime-first telemetry**: queue saturation, rollbacks/tick-disabled transitions, worker-stall events, ring “not available” rates, and ring retention/skew signals are exposed in Rust/FFI/Python metrics plus realtime preflight.
 5. **[Open] Pay down the obvious perf debt** in `murk-obs`, `murk-space`, and snapshot handling before building v0.2 features that multiply observation complexity (LOS sensors, heterogeneous specs).

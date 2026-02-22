@@ -510,7 +510,7 @@ Stable, handle-based C ABI:
   slot+generation for safe double-destroy.
 - Caller-allocated buffers for tensor output (no allocation on the
   hot path).
-- Versioned API with explicit error codes (current ABI: v2.1).
+- Versioned API with explicit error codes (current ABI: v3.0).
 - Panic-safe FFI boundary: all `extern "C"` entry points are guarded;
   panics return `MurkStatus::Panicked` (-128) instead of unwinding.
 - Panic diagnostics are retrievable via `murk_last_panic_message`.

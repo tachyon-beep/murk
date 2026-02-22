@@ -443,6 +443,18 @@ typedef struct MurkStepMetrics {
    * Cumulative number of ring "not available" events.
    */
   uint64_t ring_not_available_events;
+  /**
+   * Cumulative number of snapshot evictions due to ring overwrite.
+   */
+  uint64_t ring_eviction_events;
+  /**
+   * Cumulative number of stale/not-yet-written position reads.
+   */
+  uint64_t ring_stale_read_events;
+  /**
+   * Cumulative number of reader retries caused by overwrite skew.
+   */
+  uint64_t ring_skew_retry_events;
 } MurkStepMetrics;
 
 /**
@@ -628,7 +640,7 @@ int32_t murk_last_panic_message(char *buf, uintptr_t cap);
  * ABI version: major in upper 16 bits, minor in lower 16.
  *
  * Bump major on breaking changes, minor on additions.
- * Current: v2.1 (v2.0→v2.1: ffi_guard! panic safety, murk_last_panic_message, MurkStatus::Panicked)
+ * Current: v3.0 (v2.1→v3.0: MurkStepMetrics layout expansion for ring retention/skew counters)
  */
 uint32_t murk_abi_version(void);
 

@@ -16,12 +16,13 @@ This is a risk-first roadmap: correctness/security and “trust surfaces” (doc
 
 - **[Resolved] Telemetry/counters:** queue saturation (`QueueFull`), rollbacks, `tick_disabled` transitions, worker stall/unpin events, and ring “NotAvailable” rates are exposed through Rust + FFI + Python metrics.
 - **[Resolved] Egress ergonomics:** non-blocking preflight/queue-depth visibility is available for realtime and binding-layer callers.
-- **[PartiallyResolved] Ring behavior:** ring “not available” rate is surfaced, but explicit retention/skew signaling for eviction/staleness remains to be expanded.
+- **[Resolved] Ring behavior:** explicit ring retention/skew signaling is exposed via preflight and cumulative metrics (`evictions`, `stale reads`, `skew retries`) to diagnose eviction/staleness under load.
 
 **Exit criteria:** realtime users can answer “are we dropping commands?” and “are observations stale/evicted?” from metrics alone.
 
 ## Phase 3: Scale-Up Performance (2–4 weeks)
 
+- **[Resolved] Performance harness + budgets:** representative obs/space/arena benchmarks and regression thresholds are documented for Phase 3 gatekeeping.
 - **[Open] `murk-obs`:** remove per-call pooling allocations; optimize `execute_batch` to avoid redundant work and scale better with `num_envs`.
 - **[Open] `murk-space`:** add caching/indexing for canonical ordering and coordinate→tensor mapping; reduce default O(n) scans.
 - **[Open] `murk-arena`:** reduce publish-time copying in owned snapshots (where possible) and optimize sparse reuse bookkeeping.
