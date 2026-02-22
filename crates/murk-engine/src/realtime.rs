@@ -84,6 +84,41 @@ pub struct ShutdownReport {
     pub workers_joined: usize,
 }
 
+/// Non-blocking visibility snapshot for realtime health checks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RealtimePreflight {
+    /// Pending command batches in the ingress channel.
+    pub command_queue_depth: usize,
+    /// Ingress channel capacity (0 if unavailable/shut down).
+    pub command_queue_capacity: usize,
+    /// Pending observation tasks in the egress task channel.
+    pub observe_queue_depth: usize,
+    /// Egress task channel capacity (0 if unavailable/shut down).
+    pub observe_queue_capacity: usize,
+    /// Whether a snapshot is currently available to serve observes.
+    pub has_snapshot: bool,
+    /// Tick ID of the latest snapshot (0 when unavailable).
+    pub latest_snapshot_tick_id: u64,
+    /// Snapshot age in ticks relative to the current epoch.
+    pub snapshot_age_ticks: u64,
+    /// Ring retention capacity (maximum number of retained snapshots).
+    pub ring_capacity: usize,
+    /// Current retained snapshot count.
+    pub ring_len: usize,
+    /// Current monotonic ring write position.
+    pub ring_write_pos: u64,
+    /// Oldest retained write position (None when ring is empty).
+    pub ring_oldest_retained_pos: Option<u64>,
+    /// Cumulative count of evictions from ring overwrite.
+    pub ring_eviction_events: u64,
+    /// Cumulative count of stale/not-yet-written position reads.
+    pub ring_stale_read_events: u64,
+    /// Cumulative count of overwrite-skew retry events.
+    pub ring_skew_retry_events: u64,
+    /// Whether the tick thread has already stopped.
+    pub tick_thread_stopped: bool,
+}
+
 // ── ShutdownState ────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -431,6 +466,42 @@ impl RealtimeAsyncWorld {
     /// Current epoch (lock-free read).
     pub fn current_epoch(&self) -> u64 {
         self.epoch_counter.current()
+    }
+
+    /// Non-blocking queue/ring visibility for readiness checks.
+    ///
+    /// This API is intended for callers that need to detect overload risk
+    /// before making blocking calls like `observe`.
+    pub fn preflight(&self) -> RealtimePreflight {
+        let (command_queue_depth, command_queue_capacity) = self
+            .cmd_tx
+            .as_ref()
+            .map(|tx| (tx.len(), tx.capacity().unwrap_or(0)))
+            .unwrap_or((0, 0));
+        let (observe_queue_depth, observe_queue_capacity) = self
+            .obs_tx
+            .as_ref()
+            .map(|tx| (tx.len(), tx.capacity().unwrap_or(0)))
+            .unwrap_or((0, 0));
+        let ring = crate::egress::ring_preflight(&self.ring, &self.epoch_counter);
+
+        RealtimePreflight {
+            command_queue_depth,
+            command_queue_capacity,
+            observe_queue_depth,
+            observe_queue_capacity,
+            has_snapshot: ring.has_snapshot,
+            latest_snapshot_tick_id: ring.latest_tick_id,
+            snapshot_age_ticks: ring.age_ticks,
+            ring_capacity: ring.ring_capacity,
+            ring_len: ring.ring_len,
+            ring_write_pos: ring.ring_write_pos,
+            ring_oldest_retained_pos: ring.ring_oldest_retained_pos,
+            ring_eviction_events: ring.ring_eviction_events,
+            ring_stale_read_events: ring.ring_stale_read_events,
+            ring_skew_retry_events: ring.ring_skew_retry_events,
+            tick_thread_stopped: self.tick_stopped.load(Ordering::Acquire),
+        }
     }
 
     /// Shutdown the world with the 4-state machine.
@@ -935,6 +1006,98 @@ mod tests {
             report.quiesce_ms
         );
         assert!(report.tick_joined);
+    }
+
+    #[test]
+    fn preflight_reports_queue_capacities_and_snapshot_readiness() {
+        let mut world = RealtimeAsyncWorld::new(test_config(), AsyncConfig::default()).unwrap();
+
+        let initial = world.preflight();
+        assert_eq!(initial.command_queue_capacity, 64);
+        assert!(initial.observe_queue_capacity > 0);
+        assert_eq!(initial.ring_capacity, 8);
+        assert!(initial.ring_len <= initial.ring_capacity);
+        assert!(initial.ring_write_pos >= initial.ring_len as u64);
+        if initial.has_snapshot {
+            assert!(initial.ring_len > 0);
+            assert!(initial.latest_snapshot_tick_id > 0);
+            assert!(initial.ring_oldest_retained_pos.is_some());
+        } else {
+            assert_eq!(initial.ring_len, 0);
+            assert_eq!(initial.ring_write_pos, 0);
+            assert_eq!(initial.ring_oldest_retained_pos, None);
+        }
+        assert!(!initial.tick_thread_stopped);
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let mut ready = initial;
+        while !ready.has_snapshot {
+            if Instant::now() > deadline {
+                panic!("preflight never reported available snapshot");
+            }
+            std::thread::sleep(Duration::from_millis(10));
+            ready = world.preflight();
+        }
+        assert!(ready.latest_snapshot_tick_id > 0);
+        assert!(ready.ring_len > 0);
+        assert!(ready.ring_write_pos >= ready.ring_len as u64);
+        assert!(ready.ring_oldest_retained_pos.is_some());
+
+        world.shutdown();
+        let stopped = world.preflight();
+        assert_eq!(stopped.command_queue_capacity, 0);
+        assert_eq!(stopped.observe_queue_capacity, 0);
+        assert!(stopped.tick_thread_stopped);
+    }
+
+    #[test]
+    fn preflight_observes_ingress_backlog() {
+        let config = WorldConfig {
+            tick_rate_hz: Some(0.5),
+            ..test_config()
+        };
+        let mut world = RealtimeAsyncWorld::new(config, AsyncConfig::default()).unwrap();
+
+        // Wait for the first publish so the tick thread enters budget sleep.
+        // Enqueueing after this point makes backlog visibility deterministic
+        // in slow/instrumented runners (e.g., tarpaulin).
+        let ready_deadline = Instant::now() + Duration::from_secs(5);
+        while world.latest_snapshot().is_none() {
+            if Instant::now() > ready_deadline {
+                panic!("no snapshot produced within 5s");
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        let cmd_tx = world
+            .cmd_tx
+            .as_ref()
+            .expect("cmd channel must exist")
+            .clone();
+
+        for _ in 0..8 {
+            let (reply_tx, _reply_rx) = crossbeam_channel::bounded(1);
+            cmd_tx
+                .try_send(IngressBatch {
+                    commands: Vec::new(),
+                    reply: reply_tx,
+                })
+                .expect("expected ingress queue to accept batch");
+        }
+
+        let deadline = Instant::now() + Duration::from_millis(500);
+        let mut preflight = world.preflight();
+        while preflight.command_queue_depth == 0 {
+            if Instant::now() > deadline {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+            preflight = world.preflight();
+        }
+        assert!(preflight.command_queue_depth > 0);
+        assert!(preflight.command_queue_depth <= preflight.command_queue_capacity);
+
+        world.shutdown();
     }
 
     #[test]

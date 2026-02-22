@@ -142,14 +142,67 @@ jobs:
           name: sdist
           path: crates/murk-python/dist/*.tar.gz
 
+  smoke-artifacts:
+    name: Smoke-test built artifacts
+    needs: [build-wheels, build-sdist]
+    if: >-
+      always()
+      && needs.build-wheels.result == 'success'
+      && needs.build-sdist.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Download Linux x86_64 wheel artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: wheel-x86_64-unknown-linux-gnu
+          path: dist/wheels
+      - name: Download sdist artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: sdist
+          path: dist/sdist
+      - name: Install and smoke-test wheel
+        run: |
+          python -m venv .venv-wheel
+          source .venv-wheel/bin/activate
+          python -m pip install --upgrade pip
+          WHEEL=$(ls dist/wheels/*.whl | head -n1)
+          python -m pip install "$WHEEL"
+          python - <<'PY'
+          import murk
+          cfg = murk.Config()
+          cfg.set_space_square4(2, 2, murk.EdgeBehavior.Absorb)
+          cfg.add_field("energy", murk.FieldType.Scalar, murk.FieldMutability.PerTick)
+          print("wheel smoke OK")
+          PY
+      - name: Install and smoke-test sdist
+        run: |
+          python -m venv .venv-sdist
+          source .venv-sdist/bin/activate
+          python -m pip install --upgrade pip
+          SDIST=$(ls dist/sdist/*.tar.gz | head -n1)
+          python -m pip install "$SDIST"
+          python - <<'PY'
+          import murk
+          cfg = murk.Config()
+          cfg.set_space_square4(2, 2, murk.EdgeBehavior.Absorb)
+          cfg.add_field("energy", murk.FieldType.Scalar, murk.FieldMutability.PerTick)
+          print("sdist smoke OK")
+          PY
+
   publish-pypi:
     name: Publish to PyPI
-    needs: [release, build-wheels, build-sdist]
+    needs: [release, build-wheels, build-sdist, smoke-artifacts]
     if: >-
       always()
       && needs.release.result == 'success'
       && needs.build-wheels.result == 'success'
       && needs.build-sdist.result == 'success'
+      && needs.smoke-artifacts.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       id-token: write

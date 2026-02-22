@@ -58,6 +58,8 @@ pub enum MurkStatus {
     InternalError = -20,
     /// Command type not supported by the tick executor.
     UnsupportedCommand = -21,
+    /// A Rust panic was caught at the FFI boundary.
+    Panicked = -128,
 }
 
 impl From<&StepError> for MurkStatus {
@@ -231,6 +233,11 @@ mod tests {
             MurkStatus::from(&IngressError::UnsupportedCommand),
             MurkStatus::UnsupportedCommand
         );
+    }
+
+    #[test]
+    fn panicked_status_is_negative_128() {
+        assert_eq!(MurkStatus::Panicked as i32, -128);
     }
 
     #[test]

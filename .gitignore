@@ -15,12 +15,14 @@ Thumbs.db
 
 # Python
 __pycache__/
+.pytest_cache/
 *.pyc
 *.pyo
 *.egg-info/
 *.so
 *.abi3.so
 .venv/
+crates/murk-python/dist/
 
 # Environment
 .env

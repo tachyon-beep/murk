@@ -73,7 +73,7 @@ impl Propagator for DiffusionPropagator {
         vec![(HEAT, WriteMode::Full)]
     }
 
-    fn max_dt(&self) -> Option<f64> {
+    fn max_dt(&self, _space: &dyn murk_space::Space) -> Option<f64> {
         // CFL constraint: 4 * D * dt < 1 → dt < 1/(4*D) = 3.125
         Some(1.0 / (4.0 * DIFFUSION))
     }

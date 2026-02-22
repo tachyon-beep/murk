@@ -88,6 +88,15 @@ pub struct TickEngine {
     consecutive_rollback_count: u32,
     tick_disabled: bool,
     max_consecutive_rollbacks: u32,
+    total_queue_full_rejections: u64,
+    total_tick_disabled_rejections: u64,
+    total_rollback_events: u64,
+    total_tick_disabled_transitions: u64,
+    total_worker_stall_events: u64,
+    total_ring_not_available_events: u64,
+    total_ring_eviction_events: u64,
+    total_ring_stale_read_events: u64,
+    total_ring_skew_retry_events: u64,
     propagator_scratch: PropagatorScratch,
     base_field_set: BaseFieldSet,
     base_cache: BaseFieldCache,
@@ -105,8 +114,12 @@ impl TickEngine {
         // Validate and build read resolution plan.
         config.validate()?;
         let defined_fields = config.defined_field_set();
-        let plan =
-            murk_propagator::validate_pipeline(&config.propagators, &defined_fields, config.dt)?;
+        let plan = murk_propagator::validate_pipeline(
+            &config.propagators,
+            &defined_fields,
+            config.dt,
+            &*config.space,
+        )?;
 
         // Build arena field defs.
         // Safety: validate() already checked fields.len() fits in u32.
@@ -162,6 +175,15 @@ impl TickEngine {
             consecutive_rollback_count: 0,
             tick_disabled: false,
             max_consecutive_rollbacks: 3,
+            total_queue_full_rejections: 0,
+            total_tick_disabled_rejections: 0,
+            total_rollback_events: 0,
+            total_tick_disabled_transitions: 0,
+            total_worker_stall_events: 0,
+            total_ring_not_available_events: 0,
+            total_ring_eviction_events: 0,
+            total_ring_stale_read_events: 0,
+            total_ring_skew_retry_events: 0,
             propagator_scratch,
             base_field_set,
             base_cache: BaseFieldCache::new(),
@@ -174,7 +196,22 @@ impl TickEngine {
     ///
     /// Returns one receipt per command indicating acceptance or rejection.
     pub fn submit_commands(&mut self, commands: Vec<Command>) -> Vec<Receipt> {
-        self.ingress.submit(commands, self.tick_disabled)
+        let receipts = self.ingress.submit(commands, self.tick_disabled);
+        for receipt in &receipts {
+            match receipt.reason_code {
+                Some(IngressError::QueueFull) => {
+                    self.total_queue_full_rejections =
+                        self.total_queue_full_rejections.saturating_add(1);
+                }
+                Some(IngressError::TickDisabled) => {
+                    self.total_tick_disabled_rejections =
+                        self.total_tick_disabled_rejections.saturating_add(1);
+                }
+                _ => {}
+            }
+        }
+        self.refresh_counter_metrics();
+        receipts
     }
 
     /// Execute one tick.
@@ -327,9 +364,12 @@ impl TickEngine {
         let publish_start = Instant::now();
         self.arena
             .publish(next_tick, self.param_version)
-            .map_err(|_| TickError {
-                kind: StepError::AllocationFailed,
-                receipts: vec![],
+            .map_err(|_| {
+                self.arena.reset_sparse_reuse_counters();
+                TickError {
+                    kind: StepError::AllocationFailed,
+                    receipts: vec![],
+                }
             })?;
         let snapshot_publish_us = publish_start.elapsed().as_micros() as u64;
 
@@ -354,7 +394,19 @@ impl TickEngine {
             memory_bytes: self.arena.memory_bytes(),
             sparse_retired_ranges: self.arena.sparse_retired_range_count() as u32,
             sparse_pending_retired: self.arena.sparse_pending_retired_count() as u32,
+            sparse_reuse_hits: self.arena.sparse_reuse_hits(),
+            sparse_reuse_misses: self.arena.sparse_reuse_misses(),
+            queue_full_rejections: self.total_queue_full_rejections,
+            tick_disabled_rejections: self.total_tick_disabled_rejections,
+            rollback_events: self.total_rollback_events,
+            tick_disabled_transitions: self.total_tick_disabled_transitions,
+            worker_stall_events: self.total_worker_stall_events,
+            ring_not_available_events: self.total_ring_not_available_events,
+            ring_eviction_events: self.total_ring_eviction_events,
+            ring_stale_read_events: self.total_ring_stale_read_events,
+            ring_skew_retry_events: self.total_ring_skew_retry_events,
         };
+        self.arena.reset_sparse_reuse_counters();
         self.last_metrics = metrics.clone();
 
         Ok(TickResult { receipts, metrics })
@@ -372,10 +424,17 @@ impl TickEngine {
         accepted_start: usize,
     ) -> Result<TickResult, TickError> {
         // Guard was dropped → staging buffer abandoned (free rollback).
+        self.arena.reset_sparse_reuse_counters();
+        self.total_rollback_events = self.total_rollback_events.saturating_add(1);
         self.consecutive_rollback_count += 1;
         if self.consecutive_rollback_count >= self.max_consecutive_rollbacks {
+            if !self.tick_disabled {
+                self.total_tick_disabled_transitions =
+                    self.total_tick_disabled_transitions.saturating_add(1);
+            }
             self.tick_disabled = true;
         }
+        self.refresh_counter_metrics();
 
         // Mark accepted command receipts as rolled back, but preserve
         // receipts that were already rejected (e.g. unsupported command
@@ -404,8 +463,54 @@ impl TickEngine {
         self.param_version = ParameterVersion(0);
         self.tick_disabled = false;
         self.consecutive_rollback_count = 0;
+        self.total_queue_full_rejections = 0;
+        self.total_tick_disabled_rejections = 0;
+        self.total_rollback_events = 0;
+        self.total_tick_disabled_transitions = 0;
+        self.total_worker_stall_events = 0;
+        self.total_ring_not_available_events = 0;
+        self.total_ring_eviction_events = 0;
+        self.total_ring_stale_read_events = 0;
+        self.total_ring_skew_retry_events = 0;
         self.last_metrics = StepMetrics::default();
         Ok(())
+    }
+
+    pub(crate) fn record_worker_stall_events(&mut self, count: u64) {
+        self.total_worker_stall_events = self.total_worker_stall_events.saturating_add(count);
+        self.refresh_counter_metrics();
+    }
+
+    pub(crate) fn set_ring_not_available_events(&mut self, total: u64) {
+        self.total_ring_not_available_events = self.total_ring_not_available_events.max(total);
+        self.refresh_counter_metrics();
+    }
+
+    pub(crate) fn set_ring_eviction_events(&mut self, total: u64) {
+        self.total_ring_eviction_events = self.total_ring_eviction_events.max(total);
+        self.refresh_counter_metrics();
+    }
+
+    pub(crate) fn set_ring_stale_read_events(&mut self, total: u64) {
+        self.total_ring_stale_read_events = self.total_ring_stale_read_events.max(total);
+        self.refresh_counter_metrics();
+    }
+
+    pub(crate) fn set_ring_skew_retry_events(&mut self, total: u64) {
+        self.total_ring_skew_retry_events = self.total_ring_skew_retry_events.max(total);
+        self.refresh_counter_metrics();
+    }
+
+    fn refresh_counter_metrics(&mut self) {
+        self.last_metrics.queue_full_rejections = self.total_queue_full_rejections;
+        self.last_metrics.tick_disabled_rejections = self.total_tick_disabled_rejections;
+        self.last_metrics.rollback_events = self.total_rollback_events;
+        self.last_metrics.tick_disabled_transitions = self.total_tick_disabled_transitions;
+        self.last_metrics.worker_stall_events = self.total_worker_stall_events;
+        self.last_metrics.ring_not_available_events = self.total_ring_not_available_events;
+        self.last_metrics.ring_eviction_events = self.total_ring_eviction_events;
+        self.last_metrics.ring_stale_read_events = self.total_ring_stale_read_events;
+        self.last_metrics.ring_skew_retry_events = self.total_ring_skew_retry_events;
     }
 
     /// Get a read-only snapshot of the current published generation.
@@ -445,6 +550,16 @@ impl TickEngine {
     pub fn space(&self) -> &dyn murk_space::Space {
         self.space.as_ref()
     }
+
+    /// Number of command batches currently buffered in ingress.
+    pub fn ingress_queue_depth(&self) -> usize {
+        self.ingress.len()
+    }
+
+    /// Maximum number of command batches ingress can buffer.
+    pub fn ingress_queue_capacity(&self) -> usize {
+        self.ingress.capacity()
+    }
 }
 
 #[cfg(test)]
@@ -457,12 +572,24 @@ mod tests {
     use murk_propagator::propagator::WriteMode;
     use murk_space::{EdgeBehavior, Line1D};
     use murk_test_utils::{ConstPropagator, FailingPropagator, IdentityPropagator};
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn scalar_field(name: &str) -> FieldDef {
         FieldDef {
             name: name.to_string(),
             field_type: FieldType::Scalar,
             mutability: FieldMutability::PerTick,
+            units: None,
+            bounds: None,
+            boundary_behavior: BoundaryBehavior::Clamp,
+        }
+    }
+
+    fn sparse_scalar_field(name: &str) -> FieldDef {
+        FieldDef {
+            name: name.to_string(),
+            field_type: FieldType::Scalar,
+            mutability: FieldMutability::Sparse,
             units: None,
             bounds: None,
             boundary_behavior: BoundaryBehavior::Clamp,
@@ -856,6 +983,8 @@ mod tests {
 
         assert!(engine.is_tick_disabled());
         assert_eq!(engine.consecutive_rollback_count(), 3);
+        assert_eq!(engine.last_metrics().rollback_events, 3);
+        assert_eq!(engine.last_metrics().tick_disabled_transitions, 1);
     }
 
     #[test]
@@ -889,6 +1018,14 @@ mod tests {
             }) => {}
             other => panic!("expected TickDisabled, got {other:?}"),
         }
+
+        let receipts = engine.submit_commands(vec![make_cmd(100), make_cmd(100)]);
+        assert!(receipts
+            .iter()
+            .all(|r| r.reason_code == Some(IngressError::TickDisabled)));
+        assert_eq!(engine.last_metrics().tick_disabled_rejections, 2);
+        assert_eq!(engine.last_metrics().rollback_events, 3);
+        assert_eq!(engine.last_metrics().tick_disabled_transitions, 1);
     }
 
     #[test]
@@ -904,6 +1041,15 @@ mod tests {
         assert!(!engine.is_tick_disabled());
         assert_eq!(engine.current_tick(), TickId(0));
         assert_eq!(engine.consecutive_rollback_count(), 0);
+        assert_eq!(engine.last_metrics().queue_full_rejections, 0);
+        assert_eq!(engine.last_metrics().tick_disabled_rejections, 0);
+        assert_eq!(engine.last_metrics().rollback_events, 0);
+        assert_eq!(engine.last_metrics().tick_disabled_transitions, 0);
+        assert_eq!(engine.last_metrics().worker_stall_events, 0);
+        assert_eq!(engine.last_metrics().ring_not_available_events, 0);
+        assert_eq!(engine.last_metrics().ring_eviction_events, 0);
+        assert_eq!(engine.last_metrics().ring_stale_read_events, 0);
+        assert_eq!(engine.last_metrics().ring_skew_retry_events, 0);
     }
 
     // ── Integration tests ────────────────────────────────────
@@ -1024,6 +1170,15 @@ mod tests {
         let _ = result.metrics.total_us;
         assert_eq!(result.metrics.propagator_us.len(), 1);
         assert_eq!(result.metrics.propagator_us[0].0, "const");
+        assert_eq!(result.metrics.queue_full_rejections, 0);
+        assert_eq!(result.metrics.tick_disabled_rejections, 0);
+        assert_eq!(result.metrics.rollback_events, 0);
+        assert_eq!(result.metrics.tick_disabled_transitions, 0);
+        assert_eq!(result.metrics.worker_stall_events, 0);
+        assert_eq!(result.metrics.ring_not_available_events, 0);
+        assert_eq!(result.metrics.ring_eviction_events, 0);
+        assert_eq!(result.metrics.ring_stale_read_events, 0);
+        assert_eq!(result.metrics.ring_skew_retry_events, 0);
     }
 
     #[test]
@@ -1033,6 +1188,141 @@ mod tests {
 
         let metrics = engine.last_metrics();
         assert!(metrics.memory_bytes > 0);
+    }
+
+    #[test]
+    fn queue_full_rejections_are_counted_in_metrics() {
+        let config = WorldConfig {
+            space: Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()),
+            fields: vec![scalar_field("energy")],
+            propagators: vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))],
+            dt: 0.1,
+            seed: 42,
+            ring_buffer_size: 8,
+            max_ingress_queue: 1,
+            tick_rate_hz: None,
+            backoff: crate::config::BackoffConfig::default(),
+        };
+        let mut engine = TickEngine::new(config).unwrap();
+
+        let submit_receipts =
+            engine.submit_commands(vec![make_cmd(100), make_cmd(100), make_cmd(100)]);
+        let queue_full = submit_receipts
+            .iter()
+            .filter(|r| r.reason_code == Some(IngressError::QueueFull))
+            .count();
+        assert_eq!(queue_full, 2);
+
+        let result = engine.execute_tick().unwrap();
+        assert_eq!(result.metrics.queue_full_rejections, 2);
+        assert_eq!(result.metrics.tick_disabled_rejections, 0);
+    }
+
+    #[test]
+    fn external_realtime_counters_are_reflected_in_metrics() {
+        let mut engine = simple_engine();
+        engine.record_worker_stall_events(3);
+        engine.set_ring_not_available_events(7);
+        engine.set_ring_eviction_events(5);
+        engine.set_ring_stale_read_events(2);
+        engine.set_ring_skew_retry_events(1);
+
+        assert_eq!(engine.last_metrics().worker_stall_events, 3);
+        assert_eq!(engine.last_metrics().ring_not_available_events, 7);
+        assert_eq!(engine.last_metrics().ring_eviction_events, 5);
+        assert_eq!(engine.last_metrics().ring_stale_read_events, 2);
+        assert_eq!(engine.last_metrics().ring_skew_retry_events, 1);
+
+        let result = engine.execute_tick().unwrap();
+        assert_eq!(result.metrics.worker_stall_events, 3);
+        assert_eq!(result.metrics.ring_not_available_events, 7);
+        assert_eq!(result.metrics.ring_eviction_events, 5);
+        assert_eq!(result.metrics.ring_stale_read_events, 2);
+        assert_eq!(result.metrics.ring_skew_retry_events, 1);
+    }
+
+    #[test]
+    fn rollback_clears_sparse_reuse_counters_for_next_success() {
+        struct MaybeFailPropagator {
+            output: FieldId,
+            fail_on_call: Option<usize>,
+            call_count: AtomicUsize,
+        }
+
+        impl MaybeFailPropagator {
+            fn new(output: FieldId, fail_on_call: Option<usize>) -> Self {
+                Self {
+                    output,
+                    fail_on_call,
+                    call_count: AtomicUsize::new(0),
+                }
+            }
+        }
+
+        impl Propagator for MaybeFailPropagator {
+            fn name(&self) -> &str {
+                "maybe_fail"
+            }
+
+            fn reads(&self) -> murk_core::FieldSet {
+                murk_core::FieldSet::empty()
+            }
+
+            fn writes(&self) -> Vec<(FieldId, WriteMode)> {
+                vec![(self.output, WriteMode::Full)]
+            }
+
+            fn step(
+                &self,
+                ctx: &mut murk_propagator::StepContext<'_>,
+            ) -> Result<(), murk_core::PropagatorError> {
+                let n = self.call_count.fetch_add(1, Ordering::Relaxed);
+                if self.fail_on_call == Some(n) {
+                    return Err(murk_core::PropagatorError::ExecutionFailed {
+                        reason: format!("deliberate failure on call {n}"),
+                    });
+                }
+
+                let output = ctx.writes().write(self.output).ok_or_else(|| {
+                    murk_core::PropagatorError::ExecutionFailed {
+                        reason: format!("field {:?} not writable", self.output),
+                    }
+                })?;
+                output.fill(n as f32);
+                Ok(())
+            }
+        }
+
+        fn sparse_engine(fail_on_call: Option<usize>) -> TickEngine {
+            let config = WorldConfig {
+                space: Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()),
+                fields: vec![sparse_scalar_field("sparse0"), scalar_field("field1")],
+                propagators: vec![
+                    Box::new(ConstPropagator::new("write_sparse", FieldId(0), 3.0)),
+                    Box::new(MaybeFailPropagator::new(FieldId(1), fail_on_call)),
+                ],
+                dt: 0.1,
+                seed: 42,
+                ring_buffer_size: 8,
+                max_ingress_queue: 1024,
+                tick_rate_hz: None,
+                backoff: crate::config::BackoffConfig::default(),
+            };
+            let mut engine = TickEngine::new(config).unwrap();
+            engine.arena.reset_sparse_reuse_counters();
+            engine
+        }
+
+        let mut rollback_engine = sparse_engine(Some(1)); // fail on tick 2
+        rollback_engine.execute_tick().unwrap();
+
+        let rollback = rollback_engine.execute_tick();
+        assert!(rollback.is_err(), "tick 2 should fail and roll back");
+        assert_eq!(rollback_engine.arena.sparse_reuse_hits(), 0);
+        assert_eq!(rollback_engine.arena.sparse_reuse_misses(), 0);
+
+        // A subsequent tick should still execute successfully after rollback.
+        rollback_engine.execute_tick().unwrap();
     }
 
     // ── Bug-fix regression tests ─────────────────────────────

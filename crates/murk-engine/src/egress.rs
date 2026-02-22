@@ -60,6 +60,72 @@ pub(crate) enum ObsResult {
     Error(murk_core::error::ObsError),
 }
 
+/// Non-blocking ring visibility used by preflight callers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RingPreflight {
+    /// Whether at least one snapshot is currently available.
+    pub has_snapshot: bool,
+    /// Tick ID of the latest snapshot (0 when unavailable).
+    pub latest_tick_id: u64,
+    /// Age of the latest snapshot in ticks against the current epoch.
+    pub age_ticks: u64,
+    /// Ring retention capacity (number of snapshots that can be retained).
+    pub ring_capacity: usize,
+    /// Current retained snapshot count (bounded by `ring_capacity`).
+    pub ring_len: usize,
+    /// Current monotonic write position.
+    pub ring_write_pos: u64,
+    /// Oldest retained write position (None when no snapshot exists).
+    pub ring_oldest_retained_pos: Option<u64>,
+    /// Cumulative number of snapshot evictions from ring overwrite.
+    pub ring_eviction_events: u64,
+    /// Cumulative number of stale/not-yet-written position read attempts.
+    pub ring_stale_read_events: u64,
+    /// Cumulative number of reader retries caused by overwrite skew.
+    pub ring_skew_retry_events: u64,
+}
+
+/// Capture a lightweight snapshot/ring visibility view without blocking workers.
+pub(crate) fn ring_preflight(ring: &SnapshotRing, epoch_counter: &EpochCounter) -> RingPreflight {
+    let ring_capacity = ring.capacity();
+    let ring_len = ring.len();
+    let ring_write_pos = ring.write_pos();
+    let ring_oldest_retained_pos = ring.oldest_retained_pos();
+    let ring_eviction_events = ring.eviction_events();
+    let ring_stale_read_events = ring.stale_read_events();
+    let ring_skew_retry_events = ring.skew_retry_events();
+
+    match ring.peek_latest() {
+        Some(snapshot) => {
+            let tick = snapshot.tick_id().0;
+            RingPreflight {
+                has_snapshot: true,
+                latest_tick_id: tick,
+                age_ticks: epoch_counter.current().saturating_sub(tick),
+                ring_capacity,
+                ring_len,
+                ring_write_pos,
+                ring_oldest_retained_pos,
+                ring_eviction_events,
+                ring_stale_read_events,
+                ring_skew_retry_events,
+            }
+        }
+        None => RingPreflight {
+            has_snapshot: false,
+            latest_tick_id: 0,
+            age_ticks: 0,
+            ring_capacity,
+            ring_len,
+            ring_write_pos,
+            ring_oldest_retained_pos,
+            ring_eviction_events,
+            ring_stale_read_events,
+            ring_skew_retry_events,
+        },
+    }
+}
+
 /// Main loop for an egress worker thread, using an index into a shared
 /// `Arc<[WorkerEpoch]>` array. This ensures the tick thread's stall
 /// detector and the worker see the same `WorkerEpoch` instance.
@@ -244,6 +310,46 @@ mod tests {
         }
         arena.publish(TickId(tick), ParameterVersion(0)).unwrap();
         arena.owned_snapshot()
+    }
+
+    #[test]
+    fn ring_preflight_reports_absent_snapshot() {
+        let ring = SnapshotRing::new(4);
+        let epoch = EpochCounter::new();
+
+        let preflight = super::ring_preflight(&ring, &epoch);
+        assert!(!preflight.has_snapshot);
+        assert_eq!(preflight.latest_tick_id, 0);
+        assert_eq!(preflight.age_ticks, 0);
+        assert_eq!(preflight.ring_capacity, 4);
+        assert_eq!(preflight.ring_len, 0);
+        assert_eq!(preflight.ring_write_pos, 0);
+        assert_eq!(preflight.ring_oldest_retained_pos, None);
+        assert_eq!(ring.not_available_events(), 0);
+        assert_eq!(ring.skew_retry_events(), 0);
+    }
+
+    #[test]
+    fn ring_preflight_reports_snapshot_age() {
+        let ring = SnapshotRing::new(4);
+        ring.push(make_test_snapshot(2, 1.0, 10));
+
+        let epoch = EpochCounter::new();
+        for _ in 0..7 {
+            epoch.advance();
+        }
+
+        let preflight = super::ring_preflight(&ring, &epoch);
+        assert!(preflight.has_snapshot);
+        assert_eq!(preflight.latest_tick_id, 2);
+        assert_eq!(preflight.age_ticks, 5);
+        assert_eq!(preflight.ring_capacity, 4);
+        assert_eq!(preflight.ring_len, 1);
+        assert_eq!(preflight.ring_write_pos, 1);
+        assert_eq!(preflight.ring_oldest_retained_pos, Some(0));
+        assert_eq!(preflight.ring_eviction_events, 0);
+        assert_eq!(ring.not_available_events(), 0);
+        assert_eq!(ring.skew_retry_events(), 0);
     }
 
     #[test]

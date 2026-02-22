@@ -15,7 +15,7 @@ use murk_space::Space;
 
 use crate::geometry::GridGeometry;
 use crate::metadata::ObsMetadata;
-use crate::pool::pool_2d;
+use crate::pool::pool_2d_into;
 use crate::spec::{ObsDtype, ObsRegion, ObsSpec, ObsTransform, PoolConfig};
 
 /// Coverage threshold: warn if valid_ratio < this.
@@ -84,6 +84,8 @@ struct CompiledEntry {
     gather_ops: Vec<GatherOp>,
     /// Pre-computed validity mask for this entry's bounding box.
     valid_mask: Vec<u8>,
+    /// Number of valid cells in `valid_mask`.
+    valid_count: usize,
     /// Valid ratio for this entry's region.
     #[allow(dead_code)]
     valid_ratio: f64,
@@ -130,8 +132,8 @@ struct AgentCompiledEntry {
     pre_pool_element_count: usize,
     /// Shape of the pre-pool bounding box (e.g., `[7, 7]`).
     pre_pool_shape: Vec<usize>,
-    /// Template operations (one per cell in bounding box).
-    template_ops: Vec<TemplateOp>,
+    /// Active template operations (in-disk only) for runtime gather.
+    active_ops: Vec<TemplateOp>,
     /// Radius for `is_interior` check.
     radius: u32,
 }
@@ -147,11 +149,19 @@ struct StandardPlanData {
     geometry: Option<GridGeometry>,
 }
 
+/// Data for the Simple plan class (all entries fixed, branch-free gather).
+#[derive(Debug)]
+struct SimplePlanData {
+    entries: Vec<CompiledEntry>,
+    total_valid: usize,
+    total_elements: usize,
+}
+
 /// Internal plan strategy: Simple (all-fixed) or Standard (agent-centered).
 #[derive(Debug)]
 enum PlanStrategy {
     /// All entries are `ObsRegion::Fixed`: pre-computed gather indices.
-    Simple(Vec<CompiledEntry>),
+    Simple(SimplePlanData),
     /// At least one entry is agent-relative: template-based gather.
     Standard(StandardPlanData),
 }
@@ -212,6 +222,8 @@ impl ObsPlan {
             .collect();
 
         let mut entries = Vec::with_capacity(spec.entries.len());
+        let mut total_valid = 0usize;
+        let mut total_elements = 0usize;
         let mut output_offset = 0usize;
         let mut mask_offset = 0usize;
         let mut entry_shapes = Vec::with_capacity(spec.entries.len());
@@ -275,6 +287,8 @@ impl ObsPlan {
             };
             entry_shapes.push(shape);
 
+            let valid_mask = region_plan.take_valid_mask();
+            let valid_count = valid_mask.iter().filter(|&&v| v == 1).count();
             entries.push(CompiledEntry {
                 field_id: entry.field_id,
                 transform: entry.transform.clone(),
@@ -283,16 +297,23 @@ impl ObsPlan {
                 mask_offset,
                 element_count,
                 gather_ops,
-                valid_mask: region_plan.take_valid_mask(),
+                valid_mask,
+                valid_count,
                 valid_ratio: ratio,
             });
+            total_valid += valid_count;
+            total_elements += element_count;
 
             output_offset += element_count;
             mask_offset += element_count;
         }
 
         let plan = ObsPlan {
-            strategy: PlanStrategy::Simple(entries),
+            strategy: PlanStrategy::Simple(SimplePlanData {
+                entries,
+                total_valid,
+                total_elements,
+            }),
             output_len: output_offset,
             mask_len: mask_offset,
             compiled_generation: None,
@@ -373,6 +394,8 @@ impl ObsPlan {
                     };
                     entry_shapes.push(shape);
 
+                    let valid_mask = region_plan.take_valid_mask();
+                    let valid_count = valid_mask.iter().filter(|&&v| v == 1).count();
                     fixed_entries.push(CompiledEntry {
                         field_id: entry.field_id,
                         transform: entry.transform.clone(),
@@ -381,7 +404,8 @@ impl ObsPlan {
                         mask_offset,
                         element_count,
                         gather_ops,
-                        valid_mask: region_plan.take_valid_mask(),
+                        valid_mask,
+                        valid_count,
                         valid_ratio: ratio,
                     });
 
@@ -467,6 +491,11 @@ impl ObsPlan {
         let pre_pool_element_count: usize = pre_pool_shape.iter().product();
 
         let template_ops = generate_template_ops(half_extent, geometry, disk_radius);
+        let active_ops = template_ops
+            .iter()
+            .filter(|op| op.in_disk)
+            .cloned()
+            .collect();
 
         let (element_count, output_shape) = if let Some(pool) = &entry.pool {
             if pre_pool_shape.len() != 2 {
@@ -512,7 +541,7 @@ impl ObsPlan {
                 element_count,
                 pre_pool_element_count,
                 pre_pool_shape,
-                template_ops,
+                active_ops,
                 radius,
             },
             output_shape,
@@ -573,8 +602,8 @@ impl ObsPlan {
         output: &mut [f32],
         mask: &mut [u8],
     ) -> Result<ObsMetadata, ObsError> {
-        let entries = match &self.strategy {
-            PlanStrategy::Simple(entries) => entries,
+        let simple = match &self.strategy {
+            PlanStrategy::Simple(data) => data,
             PlanStrategy::Standard(_) => {
                 return Err(ObsError::ExecutionFailed {
                     reason: "Standard plan requires execute_agents(), not execute()".into(),
@@ -610,48 +639,12 @@ impl ObsPlan {
             }
         }
 
-        let mut total_valid = 0usize;
-        let mut total_elements = 0usize;
+        Self::execute_simple_entries(&simple.entries, snapshot, output, mask)?;
 
-        for entry in entries {
-            let field_data =
-                snapshot
-                    .read_field(entry.field_id)
-                    .ok_or_else(|| ObsError::ExecutionFailed {
-                        reason: format!("field {:?} not in snapshot", entry.field_id),
-                    })?;
-
-            let out_slice =
-                &mut output[entry.output_offset..entry.output_offset + entry.element_count];
-            let mask_slice = &mut mask[entry.mask_offset..entry.mask_offset + entry.element_count];
-
-            // Initialize to zero/padding.
-            out_slice.fill(0.0);
-            mask_slice.copy_from_slice(&entry.valid_mask);
-
-            // Branch-free gather: pre-computed (field_data_idx, tensor_idx) pairs.
-            for op in &entry.gather_ops {
-                let raw = *field_data.get(op.field_data_idx).ok_or_else(|| {
-                    ObsError::ExecutionFailed {
-                        reason: format!(
-                            "field {:?} has {} elements but gather requires index {}",
-                            entry.field_id,
-                            field_data.len(),
-                            op.field_data_idx,
-                        ),
-                    }
-                })?;
-                out_slice[op.tensor_idx] = apply_transform(raw, &entry.transform);
-            }
-
-            total_valid += entry.valid_mask.iter().filter(|&&v| v == 1).count();
-            total_elements += entry.element_count;
-        }
-
-        let coverage = if total_elements == 0 {
+        let coverage = if simple.total_elements == 0 {
             0.0
         } else {
-            total_valid as f64 / total_elements as f64
+            simple.total_valid as f64 / simple.total_elements as f64
         };
 
         let age_ticks = match engine_tick {
@@ -682,12 +675,14 @@ impl ObsPlan {
         output: &mut [f32],
         mask: &mut [u8],
     ) -> Result<Vec<ObsMetadata>, ObsError> {
-        // execute_batch only works with Simple plans.
-        if matches!(self.strategy, PlanStrategy::Standard(_)) {
-            return Err(ObsError::ExecutionFailed {
-                reason: "Standard plan requires execute_agents(), not execute_batch()".into(),
-            });
-        }
+        let simple = match &self.strategy {
+            PlanStrategy::Simple(data) => data,
+            PlanStrategy::Standard(_) => {
+                return Err(ObsError::ExecutionFailed {
+                    reason: "Standard plan requires execute_agents(), not execute_batch()".into(),
+                });
+            }
+        };
 
         let batch_size = snapshots.len();
         let expected_out = batch_size * self.output_len;
@@ -712,14 +707,43 @@ impl ObsPlan {
             });
         }
 
+        let coverage = if simple.total_elements == 0 {
+            0.0
+        } else {
+            simple.total_valid as f64 / simple.total_elements as f64
+        };
+
         let mut metadata = Vec::with_capacity(batch_size);
         for (i, snap) in snapshots.iter().enumerate() {
+            if let Some(compiled_gen) = self.compiled_generation {
+                let snapshot_gen = snap.world_generation_id();
+                if compiled_gen != snapshot_gen {
+                    return Err(ObsError::PlanInvalidated {
+                        reason: format!(
+                            "plan compiled for generation {}, snapshot is generation {}",
+                            compiled_gen.0, snapshot_gen.0
+                        ),
+                    });
+                }
+            }
+
             let out_start = i * self.output_len;
             let mask_start = i * self.mask_len;
             let out_slice = &mut output[out_start..out_start + self.output_len];
             let mask_slice = &mut mask[mask_start..mask_start + self.mask_len];
-            let meta = self.execute(*snap, engine_tick, out_slice, mask_slice)?;
-            metadata.push(meta);
+            Self::execute_simple_entries(&simple.entries, *snap, out_slice, mask_slice)?;
+
+            let age_ticks = match engine_tick {
+                Some(tick) => tick.0.saturating_sub(snap.tick_id().0),
+                None => 0,
+            };
+            metadata.push(ObsMetadata {
+                tick_id: snap.tick_id(),
+                age_ticks,
+                coverage,
+                world_generation_id: snap.world_generation_id(),
+                parameter_version: snap.parameter_version(),
+            });
         }
         Ok(metadata)
     }
@@ -800,38 +824,51 @@ impl ObsPlan {
         }
 
         // Pre-read all field data (shared borrows, valid for duration).
-        let mut field_data_map: IndexMap<FieldId, &[f32]> = IndexMap::new();
+        // Keep vectors aligned with compiled entry vectors to avoid
+        // map lookups on the hot path.
+        let mut fixed_field_data = Vec::with_capacity(standard.fixed_entries.len());
         for entry in &standard.fixed_entries {
-            if !field_data_map.contains_key(&entry.field_id) {
-                let data = snapshot.read_field(entry.field_id).ok_or_else(|| {
-                    ObsError::ExecutionFailed {
+            let data =
+                snapshot
+                    .read_field(entry.field_id)
+                    .ok_or_else(|| ObsError::ExecutionFailed {
                         reason: format!("field {:?} not in snapshot", entry.field_id),
-                    }
-                })?;
-                field_data_map.insert(entry.field_id, data);
-            }
+                    })?;
+            fixed_field_data.push(data);
         }
+        let mut agent_field_data = Vec::with_capacity(standard.agent_entries.len());
         for entry in &standard.agent_entries {
-            if !field_data_map.contains_key(&entry.field_id) {
-                let data = snapshot.read_field(entry.field_id).ok_or_else(|| {
-                    ObsError::ExecutionFailed {
+            let data =
+                snapshot
+                    .read_field(entry.field_id)
+                    .ok_or_else(|| ObsError::ExecutionFailed {
                         reason: format!("field {:?} not in snapshot", entry.field_id),
-                    }
-                })?;
-                field_data_map.insert(entry.field_id, data);
-            }
+                    })?;
+            agent_field_data.push(data);
         }
 
         // ── Compute fixed entries ONCE (identical for all agents) ──
         // Allocate scratch buffers for the fixed-entry output and mask, gather
         // into them, then memcpy per agent. This avoids redundant N*M gathers.
-        let mut fixed_out_scratch = vec![0.0f32; self.output_len];
-        let mut fixed_mask_scratch = vec![0u8; self.mask_len];
+        let has_fixed = !standard.fixed_entries.is_empty();
+        let mut fixed_out_scratch = if has_fixed {
+            vec![0.0f32; self.output_len]
+        } else {
+            Vec::new()
+        };
+        let mut fixed_mask_scratch = if has_fixed {
+            vec![0u8; self.mask_len]
+        } else {
+            Vec::new()
+        };
         let mut fixed_valid = 0usize;
         let mut fixed_elements = 0usize;
 
-        for entry in &standard.fixed_entries {
-            let field_data = field_data_map[&entry.field_id];
+        for (entry, field_data) in standard
+            .fixed_entries
+            .iter()
+            .zip(fixed_field_data.iter().copied())
+        {
             let out_slice = &mut fixed_out_scratch
                 [entry.output_offset..entry.output_offset + entry.element_count];
             let mask_slice =
@@ -852,7 +889,7 @@ impl ObsPlan {
                 out_slice[op.tensor_idx] = apply_transform(raw, &entry.transform);
             }
 
-            fixed_valid += entry.valid_mask.iter().filter(|&&v| v == 1).count();
+            fixed_valid += entry.valid_count;
             fixed_elements += entry.element_count;
         }
 
@@ -866,8 +903,17 @@ impl ObsPlan {
             .map(|e| e.pre_pool_element_count)
             .max()
             .unwrap_or(0);
+        let max_pool_output = standard
+            .agent_entries
+            .iter()
+            .filter(|e| e.pool.is_some())
+            .map(|e| e.element_count)
+            .max()
+            .unwrap_or(0);
         let mut pool_scratch = vec![0.0f32; max_pool_scratch];
         let mut pool_scratch_mask = vec![0u8; max_pool_scratch];
+        let mut pooled_scratch = vec![0.0f32; max_pool_output];
+        let mut pooled_scratch_mask = vec![0u8; max_pool_output];
 
         let mut metadata = Vec::with_capacity(n_agents);
 
@@ -877,17 +923,28 @@ impl ObsPlan {
             let agent_output = &mut output[out_start..out_start + self.output_len];
             let agent_mask = &mut mask[mask_start..mask_start + self.mask_len];
 
-            // Stamp fixed entries from pre-computed scratch (memcpy, not re-gather).
-            agent_output[..self.output_len].copy_from_slice(&fixed_out_scratch);
-            agent_mask[..self.mask_len].copy_from_slice(&fixed_mask_scratch);
+            // Initialize per-agent slices, then stamp fixed entries from
+            // pre-computed scratch (no re-gather).
+            agent_output.fill(0.0);
+            agent_mask.fill(0);
+            if has_fixed {
+                for entry in &standard.fixed_entries {
+                    let out_range = entry.output_offset..entry.output_offset + entry.element_count;
+                    let mask_range = entry.mask_offset..entry.mask_offset + entry.element_count;
+                    agent_output[out_range.clone()].copy_from_slice(&fixed_out_scratch[out_range]);
+                    agent_mask[mask_range.clone()].copy_from_slice(&fixed_mask_scratch[mask_range]);
+                }
+            }
 
             let mut total_valid = fixed_valid;
             let mut total_elements = fixed_elements;
 
             // ── Agent-relative entries ───────────────────────────
-            for entry in &standard.agent_entries {
-                let field_data = field_data_map[&entry.field_id];
-
+            for (entry, field_data) in standard
+                .agent_entries
+                .iter()
+                .zip(agent_field_data.iter().copied())
+            {
                 // Fast path: stride arithmetic works only for non-wrapping
                 // grids where all cells in the bounding box are in-bounds.
                 // Torus (all_wrap) requires modular arithmetic → slow path.
@@ -914,6 +971,8 @@ impl ObsPlan {
                     agent_mask,
                     &mut pool_scratch,
                     &mut pool_scratch_mask,
+                    &mut pooled_scratch,
+                    &mut pooled_scratch_mask,
                 );
 
                 total_valid += valid;
@@ -947,6 +1006,47 @@ impl ObsPlan {
     pub fn is_standard(&self) -> bool {
         matches!(self.strategy, PlanStrategy::Standard(_))
     }
+
+    /// Execute pre-compiled Simple plan entries into caller-provided buffers.
+    fn execute_simple_entries(
+        entries: &[CompiledEntry],
+        snapshot: &dyn SnapshotAccess,
+        output: &mut [f32],
+        mask: &mut [u8],
+    ) -> Result<(), ObsError> {
+        for entry in entries {
+            let field_data =
+                snapshot
+                    .read_field(entry.field_id)
+                    .ok_or_else(|| ObsError::ExecutionFailed {
+                        reason: format!("field {:?} not in snapshot", entry.field_id),
+                    })?;
+
+            let out_slice =
+                &mut output[entry.output_offset..entry.output_offset + entry.element_count];
+            let mask_slice = &mut mask[entry.mask_offset..entry.mask_offset + entry.element_count];
+
+            // Initialize to zero/padding.
+            out_slice.fill(0.0);
+            mask_slice.copy_from_slice(&entry.valid_mask);
+
+            // Branch-free gather: pre-computed (field_data_idx, tensor_idx) pairs.
+            for op in &entry.gather_ops {
+                let raw = *field_data.get(op.field_data_idx).ok_or_else(|| {
+                    ObsError::ExecutionFailed {
+                        reason: format!(
+                            "field {:?} has {} elements but gather requires index {}",
+                            entry.field_id,
+                            field_data.len(),
+                            op.field_data_idx,
+                        ),
+                    }
+                })?;
+                out_slice[op.tensor_idx] = apply_transform(raw, &entry.transform);
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Execute a single agent-relative entry for one agent.
@@ -968,6 +1068,8 @@ fn execute_agent_entry(
     agent_mask: &mut [u8],
     pool_scratch: &mut [f32],
     pool_scratch_mask: &mut [u8],
+    pooled_scratch: &mut [f32],
+    pooled_scratch_mask: &mut [u8],
 ) -> usize {
     if entry.pool.is_some() {
         execute_agent_entry_pooled(
@@ -981,6 +1083,8 @@ fn execute_agent_entry(
             agent_mask,
             &mut pool_scratch[..entry.pre_pool_element_count],
             &mut pool_scratch_mask[..entry.pre_pool_element_count],
+            &mut pooled_scratch[..entry.element_count],
+            &mut pooled_scratch_mask[..entry.element_count],
         )
     } else {
         execute_agent_entry_direct(
@@ -1017,10 +1121,7 @@ fn execute_agent_entry_direct(
         let geo = geometry.as_ref().unwrap();
         let base_rank = geo.canonical_rank(center) as isize;
         let mut valid = 0;
-        for op in &entry.template_ops {
-            if !op.in_disk {
-                continue;
-            }
+        for op in &entry.active_ops {
             let field_idx = (base_rank + op.stride_offset) as usize;
             if let Some(&val) = field_data.get(field_idx) {
                 out_slice[op.tensor_idx] = apply_transform(val, &entry.transform);
@@ -1032,10 +1133,7 @@ fn execute_agent_entry_direct(
     } else {
         // SLOW PATH: bounds-check each offset (or modular wrap for torus).
         let mut valid = 0;
-        for op in &entry.template_ops {
-            if !op.in_disk {
-                continue;
-            }
+        for op in &entry.active_ops {
             let field_idx = resolve_field_index(center, &op.relative, geometry, space);
             if let Some(idx) = field_idx {
                 if idx < field_data.len() {
@@ -1067,14 +1165,13 @@ fn execute_agent_entry_pooled(
     agent_mask: &mut [u8],
     scratch: &mut [f32],
     scratch_mask: &mut [u8],
+    pooled: &mut [f32],
+    pooled_mask: &mut [u8],
 ) -> usize {
     if use_fast_path {
         let geo = geometry.as_ref().unwrap();
         let base_rank = geo.canonical_rank(center) as isize;
-        for op in &entry.template_ops {
-            if !op.in_disk {
-                continue;
-            }
+        for op in &entry.active_ops {
             let field_idx = (base_rank + op.stride_offset) as usize;
             if let Some(&val) = field_data.get(field_idx) {
                 scratch[op.tensor_idx] = val;
@@ -1082,10 +1179,7 @@ fn execute_agent_entry_pooled(
             }
         }
     } else {
-        for op in &entry.template_ops {
-            if !op.in_disk {
-                continue;
-            }
+        for op in &entry.active_ops {
             let field_idx = resolve_field_index(center, &op.relative, geometry, space);
             if let Some(idx) = field_idx {
                 if idx < field_data.len() {
@@ -1097,14 +1191,20 @@ fn execute_agent_entry_pooled(
     }
 
     let pool_config = entry.pool.as_ref().unwrap();
-    let (pooled, pooled_mask, _) =
-        pool_2d(scratch, scratch_mask, &entry.pre_pool_shape, pool_config);
+    let (out_h, out_w) = pool_2d_into(
+        scratch,
+        scratch_mask,
+        &entry.pre_pool_shape,
+        pool_config,
+        pooled,
+        pooled_mask,
+    );
 
     let out_slice =
         &mut agent_output[entry.output_offset..entry.output_offset + entry.element_count];
     let mask_slice = &mut agent_mask[entry.mask_offset..entry.mask_offset + entry.element_count];
 
-    let n = pooled.len().min(entry.element_count);
+    let n = (out_h * out_w).min(entry.element_count);
     for i in 0..n {
         out_slice[i] = apply_transform(pooled[i], &entry.transform);
     }

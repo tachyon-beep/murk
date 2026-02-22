@@ -16,6 +16,17 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
+      - name: Validate replay format docs match code
+        run: python3 scripts/check_replay_format_version.py
+      - name: Validate docs consistency (README/book/changelog)
+        run: python3 scripts/check_install_docs_consistency.py
+      - name: Ensure generated artifacts are not tracked
+        run: |
+          if git ls-files | grep -E '(_murk\.abi3\.so|\.pytest_cache|__pycache__/|dist/)' >/dev/null; then
+            echo "Tracked generated artifacts detected."
+            git ls-files | grep -E '(_murk\.abi3\.so|\.pytest_cache|__pycache__/|dist/)'
+            exit 1
+          fi
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo check --workspace
 

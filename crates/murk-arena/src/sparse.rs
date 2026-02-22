@@ -78,6 +78,10 @@ pub struct SparseSlab {
     retired_ranges: Vec<RetiredRange>,
     /// Segment ranges freed during the current tick (not yet safe to reuse).
     pending_retired: Vec<RetiredRange>,
+    /// Number of alloc() calls that successfully reused a retired range.
+    reuse_hits: u32,
+    /// Number of alloc() calls that fell through to bump allocation.
+    reuse_misses: u32,
 }
 
 impl SparseSlab {
@@ -89,6 +93,8 @@ impl SparseSlab {
             live_map: indexmap::IndexMap::new(),
             retired_ranges: Vec::new(),
             pending_retired: Vec::new(),
+            reuse_hits: 0,
+            reuse_misses: 0,
         }
     }
 
@@ -109,8 +115,10 @@ impl SparseSlab {
         let (segment_index, offset) =
             if let Some(pos) = self.retired_ranges.iter().position(|r| r.len == len) {
                 let r = self.retired_ranges.swap_remove(pos);
+                self.reuse_hits += 1;
                 (r.segment_index, r.offset)
             } else {
+                self.reuse_misses += 1;
                 segments.alloc(len)?
             };
 
@@ -205,6 +213,22 @@ impl SparseSlab {
     /// Number of segment ranges pending promotion (freed this tick).
     pub fn pending_retired_count(&self) -> usize {
         self.pending_retired.len()
+    }
+
+    /// Number of `alloc()` calls that reused a retired range.
+    pub fn reuse_hits(&self) -> u32 {
+        self.reuse_hits
+    }
+
+    /// Number of `alloc()` calls that fell through to bump allocation.
+    pub fn reuse_misses(&self) -> u32 {
+        self.reuse_misses
+    }
+
+    /// Reset the reuse hit/miss counters to zero (for per-tick counting).
+    pub fn reset_reuse_counters(&mut self) {
+        self.reuse_hits = 0;
+        self.reuse_misses = 0;
     }
 
     /// Iterate over all live field → slot index mappings.
@@ -440,6 +464,107 @@ mod tests {
         assert_eq!(segs.total_used(), used_before);
         // The size-100 range should still be available.
         assert_eq!(slab.retired_range_count(), 1);
+    }
+
+    // ── reuse counter tests ──────────────────────────────────────
+
+    #[test]
+    fn reuse_counters_start_at_zero() {
+        let slab = SparseSlab::new();
+        assert_eq!(slab.reuse_hits(), 0);
+        assert_eq!(slab.reuse_misses(), 0);
+    }
+
+    #[test]
+    fn reuse_miss_on_fresh_alloc() {
+        let mut slab = SparseSlab::new();
+        let mut segs = make_segments();
+        let _ = slab.alloc(FieldId(0), 100, 0, &mut segs).unwrap();
+        assert_eq!(slab.reuse_hits(), 0);
+        assert_eq!(slab.reuse_misses(), 1);
+    }
+
+    #[test]
+    fn reuse_hit_after_flush() {
+        let mut slab = SparseSlab::new();
+        let mut segs = make_segments();
+
+        // Gen 0: initial allocation (miss).
+        let _ = slab.alloc(FieldId(0), 100, 0, &mut segs).unwrap();
+        assert_eq!(slab.reuse_misses(), 1);
+
+        // Gen 1: CoW — old range goes to pending_retired (miss: no retired ranges yet).
+        let _ = slab.alloc(FieldId(0), 100, 1, &mut segs).unwrap();
+        assert_eq!(slab.reuse_misses(), 2);
+
+        // Flush pending → retired.
+        slab.flush_retired();
+
+        // Gen 2: CoW — should reuse the retired range (hit).
+        let _ = slab.alloc(FieldId(0), 100, 2, &mut segs).unwrap();
+        assert_eq!(slab.reuse_hits(), 1);
+        assert_eq!(slab.reuse_misses(), 2);
+    }
+
+    #[test]
+    fn reuse_miss_when_size_mismatch() {
+        let mut slab = SparseSlab::new();
+        let mut segs = make_segments();
+
+        // Allocate size 100, then CoW, then flush.
+        let _ = slab.alloc(FieldId(0), 100, 0, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(0), 100, 1, &mut segs).unwrap();
+        slab.flush_retired();
+
+        // Request size 200 — no match, should be a miss.
+        let _ = slab.alloc(FieldId(1), 200, 2, &mut segs).unwrap();
+        assert_eq!(slab.reuse_hits(), 0);
+        assert_eq!(slab.reuse_misses(), 3); // all three allocs were misses
+    }
+
+    #[test]
+    fn reuse_counters_reset() {
+        let mut slab = SparseSlab::new();
+        let mut segs = make_segments();
+
+        let _ = slab.alloc(FieldId(0), 100, 0, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(0), 100, 1, &mut segs).unwrap();
+        slab.flush_retired();
+        let _ = slab.alloc(FieldId(0), 100, 2, &mut segs).unwrap();
+        assert_eq!(slab.reuse_hits(), 1);
+        assert_eq!(slab.reuse_misses(), 2);
+
+        slab.reset_reuse_counters();
+        assert_eq!(slab.reuse_hits(), 0);
+        assert_eq!(slab.reuse_misses(), 0);
+    }
+
+    #[test]
+    fn reuse_counters_accumulate_across_ticks() {
+        let mut slab = SparseSlab::new();
+        let mut segs = make_segments();
+
+        // Gen 0: initial allocs for 3 fields (3 misses).
+        let _ = slab.alloc(FieldId(0), 100, 0, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(1), 100, 0, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(2), 100, 0, &mut segs).unwrap();
+        assert_eq!(slab.reuse_misses(), 3);
+
+        // Gen 1: CoW all 3 (3 more misses — no retired yet).
+        let _ = slab.alloc(FieldId(0), 100, 1, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(1), 100, 1, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(2), 100, 1, &mut segs).unwrap();
+        assert_eq!(slab.reuse_misses(), 6);
+        assert_eq!(slab.reuse_hits(), 0);
+
+        slab.flush_retired();
+
+        // Gen 2: CoW all 3 — should reuse all 3 retired ranges (3 hits).
+        let _ = slab.alloc(FieldId(0), 100, 2, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(1), 100, 2, &mut segs).unwrap();
+        let _ = slab.alloc(FieldId(2), 100, 2, &mut segs).unwrap();
+        assert_eq!(slab.reuse_hits(), 3);
+        assert_eq!(slab.reuse_misses(), 6);
     }
 
     #[cfg(not(miri))]

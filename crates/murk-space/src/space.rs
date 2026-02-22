@@ -36,6 +36,24 @@ pub trait Space: Any + Send + Sync + 'static {
     /// topologies (up to 8 neighbors covers Hex2D and Square8).
     fn neighbours(&self, coord: &Coord) -> SmallVec<[Coord; 8]>;
 
+    /// Maximum neighbor-list length over all cells in this space.
+    ///
+    /// Implementations may return a conservative upper bound, but must
+    /// never under-estimate the true maximum. This value is used by
+    /// timestep stability checks (for example CFL validation), where
+    /// under-estimation can admit unstable configurations.
+    ///
+    /// The default implementation performs an exact full scan over
+    /// `canonical_ordering()`. Backends should override with a cheap
+    /// closed form when available.
+    fn max_neighbour_degree(&self) -> usize {
+        self.canonical_ordering()
+            .iter()
+            .map(|coord| self.neighbours(coord).len())
+            .max()
+            .unwrap_or(0)
+    }
+
     /// Graph-geodesic distance between two cells.
     fn distance(&self, a: &Coord, b: &Coord) -> f64;
 
@@ -74,6 +92,16 @@ pub trait Space: Any + Send + Sync + 'static {
     /// override with O(1) arithmetic when possible.
     fn canonical_rank(&self, coord: &Coord) -> Option<usize> {
         self.canonical_ordering().iter().position(|c| c == coord)
+    }
+
+    /// Position of a coordinate slice in the canonical ordering.
+    ///
+    /// The default implementation delegates to [`canonical_rank`](Self::canonical_rank)
+    /// for backwards compatibility. Backends can override this to avoid
+    /// temporary `Coord` allocations when callers already have a slice.
+    fn canonical_rank_slice(&self, coord: &[i32]) -> Option<usize> {
+        let coord: Coord = SmallVec::from_slice(coord);
+        self.canonical_rank(&coord)
     }
 
     /// Unique instance identifier for this space object.

@@ -1,19 +1,24 @@
 //! Criterion micro-benchmarks for observation pipeline operations.
+//!
+//! Phase 3 baseline focus:
+//! - fixed-region extraction throughput
+//! - agent-relative extraction throughput under batched centers
 
-use criterion::{criterion_group, criterion_main, Criterion};
-use murk_core::FieldId;
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use murk_core::{Coord, FieldId, SnapshotAccess};
 use murk_engine::LockstepWorld;
 use murk_obs::{ObsDtype, ObsEntry, ObsPlan, ObsRegion, ObsSpec, ObsTransform};
 use murk_propagators::agent_movement::new_action_buffer;
 use murk_space::RegionSpec;
+use smallvec::smallvec;
 
 /// Heat scalar field — matches the reference pipeline's field 0.
 const HEAT: FieldId = FieldId(0);
 
 use murk_bench::reference_profile;
 
-/// Build a simple ObsSpec: 1 field (heat), All region, no transform.
-fn simple_obs_spec() -> ObsSpec {
+/// Build a fixed-region ObsSpec: 1 field (heat), All region, no transform.
+fn fixed_obs_spec() -> ObsSpec {
     ObsSpec {
         entries: vec![ObsEntry {
             field_id: HEAT,
@@ -25,36 +30,69 @@ fn simple_obs_spec() -> ObsSpec {
     }
 }
 
-/// Benchmark: Compile an ObsPlan from a simple ObsSpec (1 field, All region).
-fn bench_obs_compile_simple(c: &mut Criterion) {
-    let ab = new_action_buffer();
-    let config = reference_profile(42, ab);
-    let space = config.space.as_ref();
-
-    let spec = simple_obs_spec();
-
-    c.bench_function("obs_compile_simple", |b| {
-        b.iter(|| {
-            let result = ObsPlan::compile(&spec, space).unwrap();
-            std::hint::black_box(&result);
-        });
-    });
+/// Build an agent-relative ObsSpec using AgentDisk radius 3.
+fn agent_obs_spec() -> ObsSpec {
+    ObsSpec {
+        entries: vec![ObsEntry {
+            field_id: HEAT,
+            region: ObsRegion::AgentDisk { radius: 3 },
+            pool: None,
+            transform: ObsTransform::Identity,
+            dtype: ObsDtype::F32,
+        }],
+    }
 }
 
-/// Benchmark: Execute a compiled plan against a 10K-cell snapshot.
-fn bench_obs_execute_10k(c: &mut Criterion) {
+fn make_world_with_snapshot() -> LockstepWorld {
+    let ab = new_action_buffer();
+    let config = reference_profile(42, ab);
+    let mut world = LockstepWorld::new(config).unwrap();
+    world.step_sync(vec![]).unwrap();
+    world
+}
+
+fn make_agent_centers(n: usize) -> Vec<Coord> {
+    // 100x100 grid coordinates; deterministic spread.
+    (0..n)
+        .map(|i| {
+            let r = (i % 100) as i32;
+            let c = ((i * 7) % 100) as i32;
+            smallvec![r, c]
+        })
+        .collect()
+}
+
+/// Benchmark: compile fixed and agent-relative plans.
+fn bench_obs_compile(c: &mut Criterion) {
     let ab = new_action_buffer();
     let config = reference_profile(42, ab);
     let space = config.space.as_ref();
 
-    let spec = simple_obs_spec();
+    let mut group = c.benchmark_group("obs_compile");
+    for (name, spec) in [
+        ("fixed_all", fixed_obs_spec()),
+        ("agent_disk_r3", agent_obs_spec()),
+    ] {
+        group.bench_with_input(BenchmarkId::new("compile", name), &spec, |b, spec| {
+            b.iter(|| {
+                let result = ObsPlan::compile(spec, space).unwrap();
+                std::hint::black_box(&result);
+            });
+        });
+    }
+    group.finish();
+}
+
+/// Benchmark: execute fixed-region extraction over a 10K-cell snapshot.
+fn bench_obs_execute_fixed_10k(c: &mut Criterion) {
+    let ab = new_action_buffer();
+    let config = reference_profile(42, ab);
+    let space = config.space.as_ref();
+
+    let spec = fixed_obs_spec();
     let plan_result = ObsPlan::compile(&spec, space).unwrap();
 
-    // Create a world and step once to get a valid snapshot.
-    let ab2 = new_action_buffer();
-    let config2 = reference_profile(42, ab2);
-    let mut world = LockstepWorld::new(config2).unwrap();
-    world.step_sync(vec![]).unwrap();
+    let world = make_world_with_snapshot();
 
     let output_len = plan_result.output_len;
     let mask_len = plan_result.mask_len;
@@ -63,55 +101,106 @@ fn bench_obs_execute_10k(c: &mut Criterion) {
     let mut output = vec![0.0f32; output_len];
     let mut mask = vec![0u8; mask_len];
 
-    c.bench_function("obs_execute_10k", |b| {
+    let mut group = c.benchmark_group("obs_execute_fixed");
+    group.throughput(Throughput::Elements(output_len as u64));
+    group.bench_function("all_10k", |b| {
         b.iter(|| {
             let snap = world.snapshot();
             let meta = plan.execute(&snap, None, &mut output, &mut mask).unwrap();
             std::hint::black_box(&meta);
         });
     });
+    group.finish();
 }
 
-/// Benchmark: Execute a plan for 16 agents via 16 sequential execute calls.
-fn bench_obs_execute_batch_16(c: &mut Criterion) {
+/// Benchmark: execute agent-relative extraction for representative batch sizes.
+fn bench_obs_execute_agents(c: &mut Criterion) {
     let ab = new_action_buffer();
     let config = reference_profile(42, ab);
     let space = config.space.as_ref();
 
-    let spec = simple_obs_spec();
+    let spec = agent_obs_spec();
     let plan_result = ObsPlan::compile(&spec, space).unwrap();
+    let world = make_world_with_snapshot();
+    let plan = plan_result.plan;
+    let per_agent_output = plan_result.output_len;
+    let per_agent_mask = plan_result.mask_len;
 
-    // Create a world and step once.
-    let ab2 = new_action_buffer();
-    let config2 = reference_profile(42, ab2);
-    let mut world = LockstepWorld::new(config2).unwrap();
-    world.step_sync(vec![]).unwrap();
+    let mut group = c.benchmark_group("obs_execute_agents");
+    for n_agents in [16usize, 64usize] {
+        let centers = make_agent_centers(n_agents);
+        let mut output = vec![0.0f32; per_agent_output * n_agents];
+        let mut mask = vec![0u8; per_agent_mask * n_agents];
+        group.throughput(Throughput::Elements(n_agents as u64));
+        group.bench_with_input(
+            BenchmarkId::new("agent_disk_r3", n_agents),
+            &centers,
+            |b, centers| {
+                b.iter(|| {
+                    let snap = world.snapshot();
+                    let meta = plan
+                        .execute_agents(&snap, space, centers, None, &mut output, &mut mask)
+                        .unwrap();
+                    std::hint::black_box(&meta);
+                });
+            },
+        );
+    }
+    group.finish();
+}
 
-    let output_len = plan_result.output_len;
-    let mask_len = plan_result.mask_len;
+/// Benchmark: execute simple fixed-region batch extraction.
+fn bench_obs_execute_batch(c: &mut Criterion) {
+    let ab = new_action_buffer();
+    let config = reference_profile(42, ab);
+    let space = config.space.as_ref();
+
+    let spec = fixed_obs_spec();
+    let plan_result = ObsPlan::compile(&spec, space).unwrap();
+    let world = make_world_with_snapshot();
     let plan = plan_result.plan;
 
-    // Pre-allocate 16 output buffers.
-    let mut outputs: Vec<Vec<f32>> = (0..16).map(|_| vec![0.0f32; output_len]).collect();
-    let mut masks: Vec<Vec<u8>> = (0..16).map(|_| vec![0u8; mask_len]).collect();
+    let per_env_output = plan_result.output_len;
+    let per_env_mask = plan_result.mask_len;
 
-    c.bench_function("obs_execute_batch_16", |b| {
+    let mut output_16 = vec![0.0f32; per_env_output * 16];
+    let mut mask_16 = vec![0u8; per_env_mask * 16];
+    let mut output_64 = vec![0.0f32; per_env_output * 64];
+    let mut mask_64 = vec![0u8; per_env_mask * 64];
+
+    let mut group = c.benchmark_group("obs_execute_batch");
+    group.throughput(Throughput::Elements((per_env_output * 16) as u64));
+    group.bench_function("fixed_all/16", |b| {
         b.iter(|| {
             let snap = world.snapshot();
-            for i in 0..16 {
-                let meta = plan
-                    .execute(&snap, None, &mut outputs[i], &mut masks[i])
-                    .unwrap();
-                std::hint::black_box(&meta);
-            }
+            let snap_ref: &dyn SnapshotAccess = &snap;
+            let snaps = [snap_ref; 16];
+            let meta = plan
+                .execute_batch(&snaps, None, &mut output_16, &mut mask_16)
+                .unwrap();
+            std::hint::black_box(&meta);
         });
     });
+    group.throughput(Throughput::Elements((per_env_output * 64) as u64));
+    group.bench_function("fixed_all/64", |b| {
+        b.iter(|| {
+            let snap = world.snapshot();
+            let snap_ref: &dyn SnapshotAccess = &snap;
+            let snaps = [snap_ref; 64];
+            let meta = plan
+                .execute_batch(&snaps, None, &mut output_64, &mut mask_64)
+                .unwrap();
+            std::hint::black_box(&meta);
+        });
+    });
+    group.finish();
 }
 
 criterion_group!(
     benches,
-    bench_obs_compile_simple,
-    bench_obs_execute_10k,
-    bench_obs_execute_batch_16
+    bench_obs_compile,
+    bench_obs_execute_fixed_10k,
+    bench_obs_execute_agents,
+    bench_obs_execute_batch
 );
 criterion_main!(benches);

@@ -17,6 +17,17 @@ pub(crate) struct StepMetrics {
     pub(crate) propagator_us: Vec<(String, u64)>,
     pub(crate) sparse_retired_ranges: u32,
     pub(crate) sparse_pending_retired: u32,
+    pub(crate) sparse_reuse_hits: u32,
+    pub(crate) sparse_reuse_misses: u32,
+    pub(crate) queue_full_rejections: u64,
+    pub(crate) tick_disabled_rejections: u64,
+    pub(crate) rollback_events: u64,
+    pub(crate) tick_disabled_transitions: u64,
+    pub(crate) worker_stall_events: u64,
+    pub(crate) ring_not_available_events: u64,
+    pub(crate) ring_eviction_events: u64,
+    pub(crate) ring_stale_read_events: u64,
+    pub(crate) ring_skew_retry_events: u64,
 }
 
 #[pymethods]
@@ -63,6 +74,72 @@ impl StepMetrics {
         self.sparse_pending_retired
     }
 
+    /// Number of sparse alloc() calls that reused a retired range this tick.
+    #[getter]
+    fn sparse_reuse_hits(&self) -> u32 {
+        self.sparse_reuse_hits
+    }
+
+    /// Number of sparse alloc() calls that fell through to bump allocation this tick.
+    #[getter]
+    fn sparse_reuse_misses(&self) -> u32 {
+        self.sparse_reuse_misses
+    }
+
+    /// Cumulative number of ingress rejections due to full queue.
+    #[getter]
+    fn queue_full_rejections(&self) -> u64 {
+        self.queue_full_rejections
+    }
+
+    /// Cumulative number of ingress rejections due to tick-disabled state.
+    #[getter]
+    fn tick_disabled_rejections(&self) -> u64 {
+        self.tick_disabled_rejections
+    }
+
+    /// Cumulative number of rollback events.
+    #[getter]
+    fn rollback_events(&self) -> u64 {
+        self.rollback_events
+    }
+
+    /// Cumulative number of transitions into tick-disabled state.
+    #[getter]
+    fn tick_disabled_transitions(&self) -> u64 {
+        self.tick_disabled_transitions
+    }
+
+    /// Cumulative number of worker stall force-unpin events.
+    #[getter]
+    fn worker_stall_events(&self) -> u64 {
+        self.worker_stall_events
+    }
+
+    /// Cumulative number of ring "not available" events.
+    #[getter]
+    fn ring_not_available_events(&self) -> u64 {
+        self.ring_not_available_events
+    }
+
+    /// Cumulative number of snapshot evictions due to ring overwrite.
+    #[getter]
+    fn ring_eviction_events(&self) -> u64 {
+        self.ring_eviction_events
+    }
+
+    /// Cumulative number of stale/not-yet-written position reads.
+    #[getter]
+    fn ring_stale_read_events(&self) -> u64 {
+        self.ring_stale_read_events
+    }
+
+    /// Cumulative number of reader retries caused by overwrite skew.
+    #[getter]
+    fn ring_skew_retry_events(&self) -> u64 {
+        self.ring_skew_retry_events
+    }
+
     /// Convert to a plain Python dict.
     fn to_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
         let d = PyDict::new(py);
@@ -73,17 +150,39 @@ impl StepMetrics {
         d.set_item("propagator_us", &self.propagator_us)?;
         d.set_item("sparse_retired_ranges", self.sparse_retired_ranges)?;
         d.set_item("sparse_pending_retired", self.sparse_pending_retired)?;
+        d.set_item("sparse_reuse_hits", self.sparse_reuse_hits)?;
+        d.set_item("sparse_reuse_misses", self.sparse_reuse_misses)?;
+        d.set_item("queue_full_rejections", self.queue_full_rejections)?;
+        d.set_item("tick_disabled_rejections", self.tick_disabled_rejections)?;
+        d.set_item("rollback_events", self.rollback_events)?;
+        d.set_item("tick_disabled_transitions", self.tick_disabled_transitions)?;
+        d.set_item("worker_stall_events", self.worker_stall_events)?;
+        d.set_item("ring_not_available_events", self.ring_not_available_events)?;
+        d.set_item("ring_eviction_events", self.ring_eviction_events)?;
+        d.set_item("ring_stale_read_events", self.ring_stale_read_events)?;
+        d.set_item("ring_skew_retry_events", self.ring_skew_retry_events)?;
         Ok(d)
     }
 
     fn __repr__(&self) -> String {
         format!(
-            "StepMetrics(total={}us, mem={}B, propagators={}, sparse_retired={}, sparse_pending={})",
+            "StepMetrics(total={}us, mem={}B, propagators={}, sparse_retired={}, sparse_pending={}, reuse_hits={}, reuse_misses={}, queue_full={}, tick_disabled_rejections={}, rollbacks={}, tick_disabled_transitions={}, worker_stalls={}, ring_not_available={}, ring_evictions={}, ring_stale_reads={}, ring_skew_retries={})",
             self.total_us,
             self.memory_bytes,
             self.propagator_us.len(),
             self.sparse_retired_ranges,
             self.sparse_pending_retired,
+            self.sparse_reuse_hits,
+            self.sparse_reuse_misses,
+            self.queue_full_rejections,
+            self.tick_disabled_rejections,
+            self.rollback_events,
+            self.tick_disabled_transitions,
+            self.worker_stall_events,
+            self.ring_not_available_events,
+            self.ring_eviction_events,
+            self.ring_stale_read_events,
+            self.ring_skew_retry_events,
         )
     }
 }
@@ -117,6 +216,17 @@ impl StepMetrics {
             propagator_us,
             sparse_retired_ranges: m.sparse_retired_ranges,
             sparse_pending_retired: m.sparse_pending_retired,
+            sparse_reuse_hits: m.sparse_reuse_hits,
+            sparse_reuse_misses: m.sparse_reuse_misses,
+            queue_full_rejections: m.queue_full_rejections,
+            tick_disabled_rejections: m.tick_disabled_rejections,
+            rollback_events: m.rollback_events,
+            tick_disabled_transitions: m.tick_disabled_transitions,
+            worker_stall_events: m.worker_stall_events,
+            ring_not_available_events: m.ring_not_available_events,
+            ring_eviction_events: m.ring_eviction_events,
+            ring_stale_read_events: m.ring_stale_read_events,
+            ring_skew_retry_events: m.ring_skew_retry_events,
         }
     }
 }
@@ -135,8 +245,30 @@ mod tests {
             propagator_us: vec![],
             sparse_retired_ranges: 5,
             sparse_pending_retired: 3,
+            sparse_reuse_hits: 10,
+            sparse_reuse_misses: 4,
+            queue_full_rejections: 11,
+            tick_disabled_rejections: 4,
+            rollback_events: 2,
+            tick_disabled_transitions: 1,
+            worker_stall_events: 3,
+            ring_not_available_events: 7,
+            ring_eviction_events: 9,
+            ring_stale_read_events: 4,
+            ring_skew_retry_events: 2,
         };
         assert_eq!(m.sparse_retired_ranges, 5);
         assert_eq!(m.sparse_pending_retired, 3);
+        assert_eq!(m.sparse_reuse_hits, 10);
+        assert_eq!(m.sparse_reuse_misses, 4);
+        assert_eq!(m.queue_full_rejections, 11);
+        assert_eq!(m.tick_disabled_rejections, 4);
+        assert_eq!(m.rollback_events, 2);
+        assert_eq!(m.tick_disabled_transitions, 1);
+        assert_eq!(m.worker_stall_events, 3);
+        assert_eq!(m.ring_not_available_events, 7);
+        assert_eq!(m.ring_eviction_events, 9);
+        assert_eq!(m.ring_stale_read_events, 4);
+        assert_eq!(m.ring_skew_retry_events, 2);
     }
 }

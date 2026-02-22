@@ -2,8 +2,9 @@
 
 Generated 2026-02-17 from static analysis triage of 110 source reports.
 Updated 2026-02-21 with wave-4 deep audit findings (#54-#94).
+Updated 2026-02-22: closed #53 (v0.1.7), #97 (v0.1.8).
 
-**Status (updated 2026-02-21):** 96 fixed, 0 partially fixed, 2 open.
+**Status (updated 2026-02-22):** 98 fixed, 0 partially fixed, 0 open.
 
 ## Open Bugs
 
@@ -25,19 +26,20 @@ Updated 2026-02-21 with wave-4 deep audit findings (#54-#94).
 |---|--------|-------|---------|--------|
 | — | (none) | — | — | — |
 
-### Low (2 open)
+### Low (0 open)
 
 | # | Ticket | Crate | Summary | Status |
 |---|--------|-------|---------|--------|
-| 53 | [ffi-cbindgen-missing-c-header](ffi-cbindgen-missing-c-header.md) | murk-ffi | No generated C header; C consumers must hand-write 28+ extern declarations | Open |
-| 97 | [arena-sparse-fragmentation-metric](arena-sparse-fragmentation-metric.md) | murk-arena | Sparse reclamation metrics not wired to engine metrics or FFI/Python | Open |
+| — | (none) | — | — | — |
 
-## Closed Bugs (96 fixed)
+## Closed Bugs (98 fixed)
 
 Tickets moved to [closed/](closed/).
 
 | # | Ticket | Crate | Summary | Fix Commit |
 |---|--------|-------|---------|------------|
+| 53 | [ffi-cbindgen-missing-c-header](closed/ffi-cbindgen-missing-c-header.md) | murk-ffi | cbindgen auto-generates C header with 42+ functions, 8 structs, 8 enums | v0.1.7 |
+| 97 | [arena-sparse-fragmentation-metric](closed/arena-sparse-fragmentation-metric.md) | murk-arena | Sparse reuse_hits/reuse_misses wired through engine, FFI, and Python | v0.1.8 |
 | 29 | [arena-sparse-segment-memory-leak](closed/arena-sparse-segment-memory-leak.md) | murk-arena | Two-phase retired range reclamation in SparseSlab; pending→retired→reuse | (this session) |
 | 39 | [python-metrics-race-between-step-and-propagator-query](closed/python-metrics-race-between-step-and-propagator-query.md) | murk-python | Thread-local propagator timing snapshot during step; eliminates TOCTOU race | (this session) |
 | 95 | [arena-sparse-no-match-fallback-untested](closed/arena-sparse-no-match-fallback-untested.md) | murk-arena | Two regression tests: no-match fallback to bump, multi-field interleaved CoW | (this session) |
@@ -140,8 +142,8 @@ Tickets moved to [closed/](closed/).
 | Crate | Critical | High | Medium | Low | Total Open |
 |-------|----------|------|--------|-----|------------|
 | murk-engine | 0 | 0 | 0 | 0 | 0 |
-| murk-arena | 0 | 0 | 0 | 1 | 1 |
-| murk-ffi | 0 | 0 | 0 | 1 | 1 |
+| murk-arena | 0 | 0 | 0 | 0 | 0 |
+| murk-ffi | 0 | 0 | 0 | 0 | 0 |
 | murk-python | 0 | 0 | 0 | 0 | 0 |
 | murk-propagator | 0 | 0 | 0 | 0 | 0 |
 | murk-propagators | 0 | 0 | 0 | 0 | 0 |
@@ -154,7 +156,7 @@ Tickets moved to [closed/](closed/).
 | examples | 0 | 0 | 0 | 0 | 0 |
 | scripts | 0 | 0 | 0 | 0 | 0 |
 | workspace (cross-crate) | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **0** | **0** | **0** | **2** | **2** |
+| **Total** | **0** | **0** | **0** | **0** | **0** |
 
 Note: Workspace-wide tickets (#90-#92) affect multiple crates and are counted once under "workspace".
 

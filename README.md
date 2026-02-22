@@ -23,6 +23,7 @@ generational allocation for deterministic, zero-GC memory management.
 - [Examples](#examples)
 - [Modeling Concepts](#modeling-concepts)
 - [Documentation](#documentation)
+- [Changelog](#changelog)
 - [Design](#design)
 - [Testing](#testing)
 - [Next Steps](#next-steps)
@@ -33,7 +34,8 @@ generational allocation for deterministic, zero-GC memory management.
 - **Spatial backends** — Line1D, Ring1D, Square4, Square8, Hex2D, and
   composable ProductSpace (e.g. Hex2D × Line1D)
 - **Propagator pipeline** — stateless per-tick operators with automatic
-  write-conflict detection, Euler/Jacobi read modes, and CFL validation
+  write-conflict detection, Euler/Jacobi read modes, and topology-aware
+  CFL validation (`max_dt(space)`)
 - **Observation extraction** — ObsSpec → ObsPlan → flat `f32` tensors with
   validity masks, foveation, pooling, and multi-agent batching
 - **Two runtime modes** — `LockstepWorld` (synchronous, borrow-checker
@@ -46,8 +48,12 @@ generational allocation for deterministic, zero-GC memory management.
   hashing and divergence reports
 - **Arena allocation** — double-buffered ping-pong arenas with Static/PerTick/Sparse
   field mutability classes; no GC pauses, no `Box<dyn>` per cell
-- **C FFI** — stable ABI with handle tables (slot+generation), safe
-  double-destroy, versioned
+- **Step metrics observability** — per-step timings plus sparse retirement
+  and sparse reuse counters (`sparse_retired_ranges`, `sparse_pending_retired`,
+  `sparse_reuse_hits`, `sparse_reuse_misses`)
+- **C FFI** — stable ABI v3.0 with handle tables (slot+generation),
+  panic-safe boundary (`MurkStatus::Panicked`, `murk_last_panic_message`),
+  and safe double-destroy
 - **Python bindings** — PyO3/maturin native extension with Gymnasium `Env`/`VecEnv`
   and `BatchedVecEnv` for high-throughput training
 - **Zero `unsafe` in simulation logic** — only `murk-arena` and `murk-ffi`
@@ -108,9 +114,9 @@ flowchart TD
 - Install Rust toolchain (stable, 1.87+) via [rustup.rs](https://rustup.rs/)
 
 **Python** (for the Gymnasium bindings):
-- Install Python 3.9+
-- Install [maturin](https://www.maturin.rs/): `pip install maturin`
-- Install numpy >= 1.24 and gymnasium >= 0.29 (or let them install automatically)
+- Install Python 3.12+
+- Install `murk` from PyPI (dependencies like numpy/gymnasium are installed automatically)
+- Install [maturin](https://www.maturin.rs/) only if you are developing Murk itself from source
 
 ## Quick Start
 
@@ -122,12 +128,18 @@ flowchart TD
 cargo add murk
 ```
 
-**Python** (PyPI release planned; install from source for now):
+**Python** (from [PyPI](https://pypi.org/project/murk/)):
+
+```bash
+python -m pip install murk
+```
+
+**Python source build** (contributors working on Murk internals):
 
 ```bash
 git clone https://github.com/tachyon-beep/murk.git
 cd murk/crates/murk-python
-pip install maturin
+python -m pip install maturin
 maturin develop --release
 ```
 
@@ -542,6 +554,11 @@ zero per-tick overhead.
 ## Documentation
 
 - **[API Reference (rustdoc)](https://tachyon-beep.github.io/murk/api/)** — auto-published on every push to `main`
+- **[mdBook Guides](https://tachyon-beep.github.io/murk/)** — tutorials and conceptual guides
+
+## Changelog
+
+- **[CHANGELOG.md](CHANGELOG.md)** — release notes and unreleased changes
 
 ## Design
 

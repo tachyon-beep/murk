@@ -14,11 +14,11 @@ description = "Simulation engine orchestrating Murk environments"
 readme = "README.md"
 
 [dependencies]
-murk-core = { path = "../murk-core", version = "0.1.7" }
-murk-arena = { path = "../murk-arena", version = "0.1.7" }
-murk-space = { path = "../murk-space", version = "0.1.7" }
-murk-propagator = { path = "../murk-propagator", version = "0.1.7" }
-murk-obs = { path = "../murk-obs", version = "0.1.7" }
+murk-core = { path = "../murk-core", version = "0.1.8" }
+murk-arena = { path = "../murk-arena", version = "0.1.8" }
+murk-space = { path = "../murk-space", version = "0.1.8" }
+murk-propagator = { path = "../murk-propagator", version = "0.1.8" }
+murk-obs = { path = "../murk-obs", version = "0.1.8" }
 crossbeam-channel = { workspace = true }
 indexmap = { workspace = true }
 smallvec = { workspace = true }

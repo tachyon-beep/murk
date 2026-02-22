@@ -19,6 +19,8 @@ Complete reference of all error types in the Murk simulation framework, organize
 - [ReplayError (murk-replay)](#replayerror)
 - [SubmitError (murk-engine)](#submiterror)
 - [BatchError (murk-engine)](#batcherror)
+- [InternalError (FFI status)](#internalerror)
+- [Panicked (FFI status)](#panicked)
 
 ---
 
@@ -724,3 +726,55 @@ A method argument failed validation (e.g., wrong number of command lists, buffer
 Remediation:
 1. Read the `reason` message for specifics.
 2. Common causes: `commands.len() != num_worlds`, output buffer too small.
+
+---
+
+## InternalError
+
+**Layer:** `murk-ffi` / `murk-python` | **Status code:** `-20`
+
+Returned when an internal mutex lock fails, most commonly due to mutex poisoning after a panic in a prior call.
+
+### Quick reference
+
+| Code | Description |
+|------|-------------|
+| `-20` | Internal error (typically poisoned mutex on affected handle) |
+
+### Details
+
+`InternalError` indicates the API cannot safely continue the requested operation because protected internal state is no longer trusted.
+
+Murk currently follows a **world-fatal** policy for poisoning:
+1. The affected handle is treated as unhealthy.
+2. Subsequent operations on that handle may continue returning `InternalError`.
+3. Other independent handles may still operate normally.
+
+Remediation:
+1. Treat `InternalError` as non-retryable for the same handle.
+2. Destroy and recreate the affected world/plan/config handle.
+3. If preceded by `Panicked`, capture panic text with `murk_last_panic_message`.
+4. See `docs/design/ffi-poisoning-policy.md` for policy and recovery expectations.
+
+---
+
+## Panicked
+
+**Layer:** `murk-ffi` / `murk-python` | **Status code:** `-128`
+
+FFI boundary panic status returned when Rust catches a panic inside an exported `extern "C"` function via `ffi_guard!`.
+
+### Quick reference
+
+| Code | Description |
+|------|-------------|
+| `-128` | Rust panic caught at FFI boundary |
+
+### Details
+
+`Panicked` means an internal Rust panic occurred while executing an API call. The panic is caught and converted into a status code instead of unwinding across the C boundary.
+
+Remediation:
+1. Treat this as a bug in murk or a custom propagator.
+2. Retrieve panic text via `murk_last_panic_message` (or Python exception text) and include it in bug reports.
+3. Recreate the affected world/batch handle if subsequent calls report internal errors.

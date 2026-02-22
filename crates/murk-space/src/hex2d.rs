@@ -226,6 +226,17 @@ impl Space for Hex2D {
             .collect()
     }
 
+    fn max_neighbour_degree(&self) -> usize {
+        match (self.rows, self.cols) {
+            (1, 1) => 0,
+            (1, 2) | (2, 1) => 1,
+            (1, _) | (_, 1) => 2,
+            (2, 2) => 3,
+            (2, _) | (_, 2) => 4,
+            _ => 6,
+        }
+    }
+
     fn distance(&self, a: &Coord, b: &Coord) -> f64 {
         Self::cube_distance(a[0], a[1], b[0], b[1]) as f64
     }
@@ -321,6 +332,19 @@ impl Space for Hex2D {
     }
 
     fn canonical_rank(&self, coord: &Coord) -> Option<usize> {
+        if coord.len() != 2 {
+            return None;
+        }
+        let q = coord[0];
+        let r = coord[1];
+        if q >= 0 && q < self.cols as i32 && r >= 0 && r < self.rows as i32 {
+            Some(r as usize * self.cols as usize + q as usize)
+        } else {
+            None
+        }
+    }
+
+    fn canonical_rank_slice(&self, coord: &[i32]) -> Option<usize> {
         if coord.len() != 2 {
             return None;
         }

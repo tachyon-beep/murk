@@ -29,6 +29,10 @@ pub struct SnapshotRing {
     /// and their lock acquisition.
     slots: Vec<Mutex<Slot>>,
     write_pos: AtomicU64,
+    not_available_events: AtomicU64,
+    eviction_events: AtomicU64,
+    stale_read_events: AtomicU64,
+    skew_retry_events: AtomicU64,
     capacity: usize,
 }
 
@@ -54,6 +58,10 @@ impl SnapshotRing {
         Self {
             slots,
             write_pos: AtomicU64::new(0),
+            not_available_events: AtomicU64::new(0),
+            eviction_events: AtomicU64::new(0),
+            stale_read_events: AtomicU64::new(0),
+            skew_retry_events: AtomicU64::new(0),
             capacity,
         }
     }
@@ -73,6 +81,9 @@ impl SnapshotRing {
             *slot = Some((pos, Arc::clone(&arc)));
             prev
         };
+        if evicted.is_some() {
+            self.eviction_events.fetch_add(1, Ordering::Relaxed);
+        }
 
         // Release-store ensures the snapshot data is visible before
         // consumers observe the new write_pos.
@@ -90,11 +101,27 @@ impl SnapshotRing {
     /// lapping the consumer), falls back to a full scan of all
     /// slots, guaranteeing `Some` whenever the ring is non-empty.
     pub fn latest(&self) -> Option<Arc<OwnedSnapshot>> {
+        self.latest_impl(true)
+    }
+
+    /// Peek the latest snapshot without mutating read-side telemetry counters.
+    ///
+    /// This is intended for non-failing readiness/health checks (for example
+    /// `RealtimeAsyncWorld::preflight`) that should not be counted as
+    /// observation read failures or skew retries.
+    pub fn peek_latest(&self) -> Option<Arc<OwnedSnapshot>> {
+        self.latest_impl(false)
+    }
+
+    fn latest_impl(&self, record_events: bool) -> Option<Arc<OwnedSnapshot>> {
         // Fast path: bounded retry targeting the most recent snapshot.
         // Succeeds immediately under normal contention.
         for _ in 0..self.capacity {
             let pos = self.write_pos.load(Ordering::Acquire);
             if pos == 0 {
+                if record_events {
+                    self.not_available_events.fetch_add(1, Ordering::Relaxed);
+                }
                 return None;
             }
             let target_pos = pos - 1;
@@ -105,7 +132,12 @@ impl SnapshotRing {
                 // Producer overwrote this slot between our write_pos
                 // read and lock acquisition. Re-read write_pos and
                 // try the new latest slot.
-                _ => continue,
+                _ => {
+                    if record_events {
+                        self.skew_retry_events.fetch_add(1, Ordering::Relaxed);
+                    }
+                    continue;
+                }
             }
         }
 
@@ -125,7 +157,14 @@ impl SnapshotRing {
                 }
             }
         }
-        best.map(|(_, arc)| arc)
+        if let Some((_, arc)) = best {
+            Some(arc)
+        } else {
+            if record_events {
+                self.not_available_events.fetch_add(1, Ordering::Relaxed);
+            }
+            None
+        }
     }
 
     /// Get a snapshot by its monotonic write position.
@@ -137,11 +176,13 @@ impl SnapshotRing {
 
         // Not yet written.
         if pos >= current {
+            self.stale_read_events.fetch_add(1, Ordering::Relaxed);
             return None;
         }
 
         // Evicted: the position is older than what the ring retains.
         if current - pos > self.capacity as u64 {
+            self.stale_read_events.fetch_add(1, Ordering::Relaxed);
             return None;
         }
 
@@ -151,7 +192,11 @@ impl SnapshotRing {
             Some((tag, arc)) if *tag == pos => Some(Arc::clone(arc)),
             // The producer overwrote this slot between our bounds check
             // and lock acquisition — the requested position is gone.
-            _ => None,
+            _ => {
+                self.stale_read_events.fetch_add(1, Ordering::Relaxed);
+                self.skew_retry_events.fetch_add(1, Ordering::Relaxed);
+                None
+            }
         }
     }
 
@@ -174,6 +219,38 @@ impl SnapshotRing {
     /// The current monotonic write position.
     pub fn write_pos(&self) -> u64 {
         self.write_pos.load(Ordering::Acquire)
+    }
+
+    /// Oldest retained write position currently available in the ring.
+    ///
+    /// Returns `None` when no snapshots have been pushed yet.
+    pub fn oldest_retained_pos(&self) -> Option<u64> {
+        let current = self.write_pos();
+        if current == 0 {
+            return None;
+        }
+        let retained = current.min(self.capacity as u64);
+        Some(current - retained)
+    }
+
+    /// Number of times an observation request found no snapshot available.
+    pub fn not_available_events(&self) -> u64 {
+        self.not_available_events.load(Ordering::Relaxed)
+    }
+
+    /// Number of push operations that evicted an older retained snapshot.
+    pub fn eviction_events(&self) -> u64 {
+        self.eviction_events.load(Ordering::Relaxed)
+    }
+
+    /// Number of read attempts that targeted stale or not-yet-written positions.
+    pub fn stale_read_events(&self) -> u64 {
+        self.stale_read_events.load(Ordering::Relaxed)
+    }
+
+    /// Number of read retries caused by producer/consumer overwrite skew.
+    pub fn skew_retry_events(&self) -> u64 {
+        self.skew_retry_events.load(Ordering::Relaxed)
     }
 }
 
@@ -220,7 +297,12 @@ mod tests {
         assert!(ring.is_empty());
         assert_eq!(ring.capacity(), 4);
         assert_eq!(ring.write_pos(), 0);
+        assert_eq!(ring.not_available_events(), 0);
+        assert_eq!(ring.eviction_events(), 0);
+        assert_eq!(ring.stale_read_events(), 0);
+        assert_eq!(ring.skew_retry_events(), 0);
         assert!(ring.latest().is_none());
+        assert_eq!(ring.not_available_events(), 1);
     }
 
     #[test]
@@ -229,9 +311,31 @@ mod tests {
         ring.push(make_test_snapshot(1));
         assert_eq!(ring.len(), 1);
         assert!(!ring.is_empty());
+        assert_eq!(ring.not_available_events(), 0);
 
         let latest = ring.latest().unwrap();
         assert_eq!(latest.tick_id(), TickId(1));
+        assert_eq!(ring.not_available_events(), 0);
+        assert_eq!(ring.oldest_retained_pos(), Some(0));
+    }
+
+    #[test]
+    fn test_ring_peek_latest_does_not_increment_not_available_on_empty() {
+        let ring = SnapshotRing::new(4);
+        assert!(ring.peek_latest().is_none());
+        assert_eq!(ring.not_available_events(), 0);
+        assert_eq!(ring.skew_retry_events(), 0);
+    }
+
+    #[test]
+    fn test_ring_peek_latest_returns_snapshot_without_counter_mutation() {
+        let ring = SnapshotRing::new(4);
+        ring.push(make_test_snapshot(5));
+
+        let latest = ring.peek_latest().unwrap();
+        assert_eq!(latest.tick_id(), TickId(5));
+        assert_eq!(ring.not_available_events(), 0);
+        assert_eq!(ring.skew_retry_events(), 0);
     }
 
     #[test]
@@ -250,6 +354,8 @@ mod tests {
         assert!(evicted.is_some());
         assert_eq!(evicted.unwrap().tick_id(), TickId(1));
         assert_eq!(ring.len(), 4);
+        assert_eq!(ring.eviction_events(), 1);
+        assert_eq!(ring.oldest_retained_pos(), Some(1));
     }
 
     #[test]
@@ -278,6 +384,7 @@ mod tests {
 
         // Position 4 not yet written.
         assert!(ring.get_by_pos(4).is_none());
+        assert_eq!(ring.stale_read_events(), 1);
     }
 
     #[test]
@@ -289,6 +396,7 @@ mod tests {
         // Positions 0-3 have been evicted (overwritten by positions 4-7).
         assert!(ring.get_by_pos(0).is_none());
         assert!(ring.get_by_pos(3).is_none());
+        assert_eq!(ring.stale_read_events(), 2);
 
         // Positions 4-7 should still be available.
         let snap = ring.get_by_pos(4).unwrap();

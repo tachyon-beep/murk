@@ -19,7 +19,7 @@ Look for issues labeled `good-first-issue` for accessible entry points.
 **Requirements:**
 - Rust stable (1.87+) via [rustup](https://rustup.rs/)
 - Rust nightly (for Miri only): `rustup toolchain install nightly --component miri`
-- Python 3.9+
+- Python 3.12+
 - [maturin](https://www.maturin.rs/): `pip install maturin`
 
 **Setup:**
@@ -75,7 +75,7 @@ murk-ffi → murk-python
 ## Running Tests
 
 ```bash
-# Full workspace test suite (580+ tests)
+# Full workspace test suite (700+ tests)
 cargo test --workspace
 
 # Single crate
@@ -207,14 +207,15 @@ Use a scope when helpful: `feat(space):`, `fix(python):`, `ci(release):`.
 
 Releases are manual, triggered by pushing a git tag:
 
-1. **Bump the version** in root `Cargo.toml` under `[workspace.package]`.
-   The Python package version is derived automatically (via `dynamic = ["version"]`
-   in `pyproject.toml`), so there's nothing else to update.
+1. **Bump the version** in root `Cargo.toml` under `[workspace.package]`,
+   and update all inter-crate `version = "x.y.z"` dependency strings in
+   each crate's `Cargo.toml`. The Python package version is derived
+   automatically (via `dynamic = ["version"]` in `pyproject.toml`).
 2. **Commit and push** to `main`.
 3. **Tag and push the tag:**
    ```bash
-   git tag murk-v0.1.5
-   git push origin murk-v0.1.5
+   git tag murk-v<version>
+   git push origin murk-v<version>
    ```
 4. **The release workflow** runs CI, publishes Rust crates to crates.io, builds
    Python wheels, and publishes them to PyPI. It also creates a GitHub Release

@@ -1,10 +1,19 @@
 # Troubleshooting
 
+For normal usage, prefer the published wheel:
+
+```bash
+python -m pip install murk
+```
+
+The `maturin develop` guidance below is for contributors working on Murk
+internals from a source checkout.
+
 ## Build Issues
 
-### maturin develop fails with "pyo3 not found"
+### Contributor setup: maturin develop fails with "pyo3 not found"
 
-Ensure you have a compatible Python version (3.9+) and that your virtual
+Ensure you have a compatible Python version (3.12+) and that your virtual
 environment is activated:
 
 ```bash
@@ -36,7 +45,14 @@ cargo +nightly miri test -p murk-arena
 
 ### Python import error: "No module named murk._murk"
 
-The native extension needs to be built first:
+If you installed from PyPI, reinstall in the active environment:
+
+```bash
+python -m pip install --upgrade --force-reinstall murk
+```
+
+If you are working from a source checkout, build the extension in your
+active virtual environment:
 
 ```bash
 cd crates/murk-python
@@ -51,7 +67,7 @@ running on the same platform and Rust version as CI. See
 
 ## Import Issues
 
-### `maturin develop` succeeds but `import murk` fails
+### Contributor setup: `maturin develop` succeeds but `import murk` fails
 
 The native extension was built, but Python cannot find it. Check the
 following:
@@ -151,5 +167,6 @@ causes:
 
 3. **Timestep too large (CFL violation).** If `dt` exceeds the CFL
    stability limit for your propagator, diffusion can blow up or
-   oscillate. The engine checks `max_dt()` at startup, but only if the
-   propagator declares it. Reduce `dt` or add a `max_dt` declaration.
+   oscillate. The engine checks topology-aware `max_dt(space)` at
+   startup, but only if the propagator declares it. Reduce `dt` or add
+   a `max_dt` declaration.

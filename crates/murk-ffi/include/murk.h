@@ -241,6 +241,10 @@ enum MurkStatus {
    * Command type not supported by the tick executor.
    */
   UnsupportedCommand = -21,
+  /**
+   * A Rust panic was caught at the FFI boundary.
+   */
+  Panicked = -128,
 };
 typedef int32_t MurkStatus;
 
@@ -407,6 +411,50 @@ typedef struct MurkStepMetrics {
    * Number of sparse segment ranges pending promotion (freed this tick).
    */
   uint32_t sparse_pending_retired;
+  /**
+   * Number of sparse alloc() calls that reused a retired range this tick.
+   */
+  uint32_t sparse_reuse_hits;
+  /**
+   * Number of sparse alloc() calls that fell through to bump allocation this tick.
+   */
+  uint32_t sparse_reuse_misses;
+  /**
+   * Cumulative number of ingress rejections due to full queue.
+   */
+  uint64_t queue_full_rejections;
+  /**
+   * Cumulative number of ingress rejections due to tick-disabled state.
+   */
+  uint64_t tick_disabled_rejections;
+  /**
+   * Cumulative number of rollback events.
+   */
+  uint64_t rollback_events;
+  /**
+   * Cumulative number of transitions into tick-disabled state.
+   */
+  uint64_t tick_disabled_transitions;
+  /**
+   * Cumulative number of worker stall force-unpin events.
+   */
+  uint64_t worker_stall_events;
+  /**
+   * Cumulative number of ring "not available" events.
+   */
+  uint64_t ring_not_available_events;
+  /**
+   * Cumulative number of snapshot evictions due to ring overwrite.
+   */
+  uint64_t ring_eviction_events;
+  /**
+   * Cumulative number of stale/not-yet-written position reads.
+   */
+  uint64_t ring_stale_read_events;
+  /**
+   * Cumulative number of reader retries caused by overwrite skew.
+   */
+  uint64_t ring_skew_retry_events;
 } MurkStepMetrics;
 
 /**
@@ -550,10 +598,49 @@ typedef struct MurkReceipt {
 } MurkReceipt;
 
 /**
+ * Lightweight world readiness snapshot for non-blocking preflight checks.
+ */
+typedef struct MurkWorldPreflight {
+  /**
+   * Number of command batches currently waiting in ingress.
+   */
+  uint32_t ingress_queue_depth;
+  /**
+   * Maximum number of command batches ingress can hold.
+   */
+  uint32_t ingress_queue_capacity;
+  /**
+   * Current world tick.
+   */
+  uint64_t current_tick;
+  /**
+   * Whether ticking is disabled due to consecutive rollbacks.
+   */
+  uint8_t tick_disabled;
+  /**
+   * Number of consecutive rollback ticks.
+   */
+  uint32_t consecutive_rollbacks;
+} MurkWorldPreflight;
+
+/**
+ * Retrieve the panic message stored by the most recent `ffi_guard!` catch
+ * on this thread.
+ *
+ * - If `buf` is null, returns the full message length (in bytes) without
+ *   copying anything. Returns `0` if no panic has been recorded.
+ * - Otherwise, if `cap > 0`, copies up to `cap - 1` bytes into `buf`,
+ *   null-terminates, and returns the full message length.
+ * - If `cap == 0`, performs no writes and returns only the full message
+ *   length.
+ */
+int32_t murk_last_panic_message(char *buf, uintptr_t cap);
+
+/**
  * ABI version: major in upper 16 bits, minor in lower 16.
  *
  * Bump major on breaking changes, minor on additions.
- * Current: v2.0 (v1→v2: MurkStepMetrics layout grew from 40 to 48 bytes).
+ * Current: v3.0 (v2.1→v3.0: MurkStepMetrics layout expansion for ring retention/skew counters)
  */
 uint32_t murk_abi_version(void);
 
@@ -892,6 +979,14 @@ uint32_t murk_consecutive_rollbacks(uint64_t world_handle);
  * `InvalidHandle` or `InternalError` without writing to `out`.
  */
 int32_t murk_consecutive_rollbacks_get(uint64_t world_handle, uint32_t *out);
+
+/**
+ * Non-blocking world preflight with queue-depth/readiness counters.
+ *
+ * Writes a snapshot into `*out` and returns `MURK_OK`. Returns
+ * `InvalidHandle` or `InternalError` without writing to `out`.
+ */
+int32_t murk_world_preflight_get(uint64_t world_handle, struct MurkWorldPreflight *out);
 
 /**
  * The world's current seed.

@@ -204,7 +204,9 @@ impl TickThreadState {
 
                     // 5. Check for stalled workers (adaptive threshold).
                     let effective_hold_ns = self.effective_hold_ns();
-                    let had_rejection = self.check_stalled_workers(effective_hold_ns);
+                    let stall_events = self.check_stalled_workers(effective_hold_ns);
+                    self.engine.record_worker_stall_events(stall_events);
+                    let had_rejection = stall_events > 0;
                     self.backoff.record_tick(had_rejection);
 
                     drop(result);
@@ -215,6 +217,16 @@ impl TickThreadState {
                     // enters idle_until_shutdown.
                 }
             }
+
+            // Update ring "not available" totals from egress-side observations.
+            self.engine
+                .set_ring_not_available_events(self.ring.not_available_events());
+            self.engine
+                .set_ring_eviction_events(self.ring.eviction_events());
+            self.engine
+                .set_ring_stale_read_events(self.ring.stale_read_events());
+            self.engine
+                .set_ring_skew_retry_events(self.ring.skew_retry_events());
 
             // 6. Sleep for remaining budget, interruptible by shutdown.
             // Uses park_timeout instead of thread::sleep so the shutdown
@@ -249,10 +261,10 @@ impl TickThreadState {
     }
 
     /// Check for stalled workers and force-unpin them.
-    /// Returns `true` if any worker was force-unpinned.
-    fn check_stalled_workers(&self, effective_hold_ns: u64) -> bool {
+    /// Returns the number of workers that were force-unpinned.
+    fn check_stalled_workers(&self, effective_hold_ns: u64) -> u64 {
         let now_ns = crate::epoch::monotonic_nanos();
-        let mut had_rejection = false;
+        let mut stall_events: u64 = 0;
 
         for worker in self.worker_epochs.iter() {
             // Use pin_snapshot() for a consistent (epoch, pin_start_ns) read.
@@ -272,12 +284,12 @@ impl TickThreadState {
                 if hold_ns > effective_hold_ns + self.cancel_grace_ns {
                     worker.unpin();
                     worker.clear_cancel();
-                    had_rejection = true;
+                    stall_events = stall_events.saturating_add(1);
                 }
             }
         }
 
-        had_rejection
+        stall_events
     }
 
     /// Spin on the command channel and shutdown flag when tick is disabled.

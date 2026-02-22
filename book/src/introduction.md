@@ -11,10 +11,11 @@ generational allocation for deterministic, zero-GC memory management.
 ## Features
 
 - **Spatial backends** — Line1D, Ring1D, Square4, Square8, Hex2D, and
-  composable ProductSpace (e.g. Hex2D x Line1D)
+  composable ProductSpace (e.g. Hex2D × Line1D)
 - **Propagator pipeline** — stateless per-tick operators with automatic
-  write-conflict detection, Euler/Jacobi read modes, and CFL validation
-- **Observation extraction** — ObsSpec, ObsPlan, flat `f32` tensors with
+  write-conflict detection, Euler/Jacobi read modes, and topology-aware
+  CFL validation (`max_dt(space)`)
+- **Observation extraction** — ObsSpec → ObsPlan → flat `f32` tensors with
   validity masks, foveation, pooling, and multi-agent batching
 - **Two runtime modes** — `LockstepWorld` (synchronous, borrow-checker
   enforced) and `RealtimeAsyncWorld` (background tick thread with epoch-based
@@ -26,10 +27,14 @@ generational allocation for deterministic, zero-GC memory management.
   hashing and divergence reports
 - **Arena allocation** — double-buffered ping-pong arenas with Static/PerTick/Sparse
   field mutability classes; no GC pauses, no `Box<dyn>` per cell
-- **C FFI** — stable ABI with handle tables (slot+generation), safe
-  double-destroy, versioned
-- **Python bindings** — PyO3/maturin native extension with Gymnasium `Env`
-  and `VecEnv` adapters
+- **Step metrics observability** — per-step timings plus sparse retirement
+  and sparse reuse counters (`sparse_retired_ranges`, `sparse_pending_retired`,
+  `sparse_reuse_hits`, `sparse_reuse_misses`)
+- **C FFI** — stable ABI v3.0 with handle tables (slot+generation),
+  panic-safe boundary (`MurkStatus::Panicked`, `murk_last_panic_message`),
+  and safe double-destroy
+- **Python bindings** — PyO3/maturin native extension with Gymnasium `Env`/`VecEnv`
+  and `BatchedVecEnv` for high-throughput training
 - **Zero `unsafe` in simulation logic** — only `murk-arena` and `murk-ffi`
   are permitted `unsafe`; everything else is `#![forbid(unsafe_code)]`
 

@@ -122,6 +122,10 @@ class MurkEnv(gymnasium.Env):
         """StepMetrics from the most recent step() call."""
         return self._last_step_metrics
 
+    def preflight(self) -> dict[str, Any]:
+        """Return non-blocking queue/readiness counters from the world."""
+        return self._world.preflight()
+
     # ── Override hooks ────────────────────────────────────────
 
     def _action_to_commands(self, action: Any) -> list[Command] | None:

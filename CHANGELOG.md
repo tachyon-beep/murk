@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-02-22
+
+FFI panic safety hardening and observability improvements.
+
+### Added
+
+- `ffi_guard!` macro: all 41 `extern "C"` functions wrapped in `catch_unwind`
+- `MurkStatus::Panicked` (-128) error code for caught panics
+- `murk_last_panic_message()` FFI function for panic diagnostics
+- `Propagator::max_dt()` now receives `&dyn Space` for topology-aware CFL bounds
+- `sparse_reuse_hits` and `sparse_reuse_misses` metrics in StepMetrics/FFI/Python
+- Formal semantic documentation for ProductSpace (CR-1)
+- Python maps `MurkStatus::Panicked` (-128) to `RuntimeError` including the last panic message
+- Integration coverage for panicking propagator path (panic status, panic message, poisoned-world follow-up)
+- `SnapshotRing::peek_latest()` for non-mutating snapshot visibility checks (used by realtime preflight)
+- Regression tests for non-mutating preflight polling and full-topology CFL degree coverage
+
+### Changed
+
+- ABI version bumped from v2.0 to v2.1
+- `MurkStepMetrics` layout: 48 → 56 bytes (added reuse counters)
+- `ScalarDiffusion` CFL bound derived from space topology (no longer defaults to 12-neighbour worst-case)
+- Deprecated `DiffusionPropagator` now derives CFL bound from actual space topology
+- `validate_pipeline()` signature extended with `space: &dyn Space` parameter
+- Regenerated `crates/murk-ffi/include/murk.h` with `Panicked = -128` and `murk_last_panic_message`
+- `murk-obs` pooled extraction and batch execution hot paths now avoid per-call allocations and redundant work
+- `ProductSpace::canonical_rank()` now uses cached mixed-radix strides and slice-based ranking to avoid sub-coordinate allocation overhead
+- `Space` trait includes `canonical_rank_slice(&[i32])` with optimized overrides for `Line1D`, `Ring1D`, `Square4`, `Square8`, and `Hex2D`
+- `ScalarDiffusion::max_dt()` now derives its degree bound from full topology traversal (worst-case cell), preserving CFL soundness
+
+### Fixed
+
+- Realtime preflight polling no longer inflates ring read-failure counters (`ring_not_available_events`, `ring_skew_retry_events`)
+- Added targeted test coverage for the skewed-topology CFL scenario that sampled probes could miss
+
 ## [0.1.7] - 2026-02-21
 
 Major stabilisation release: 90+ bug fixes across all crates, 6 new library

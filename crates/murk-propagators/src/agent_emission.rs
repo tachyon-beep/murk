@@ -164,7 +164,7 @@ impl Propagator for AgentEmission {
         vec![(self.emission_field, WriteMode::Full)]
     }
 
-    fn max_dt(&self) -> Option<f64> {
+    fn max_dt(&self, _space: &dyn murk_space::Space) -> Option<f64> {
         None
     }
 
@@ -287,7 +287,8 @@ mod tests {
 
         assert_eq!(prop.name(), "AgentEmission");
         assert!(prop.reads().is_empty(), "reads() should be empty");
-        assert!(prop.max_dt().is_none());
+        let space = murk_space::Square4::new(4, 4, murk_space::EdgeBehavior::Wrap).unwrap();
+        assert!(prop.max_dt(&space).is_none());
 
         // Additive mode reads_previous includes both presence and emission.
         let rp = prop.reads_previous();

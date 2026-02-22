@@ -45,11 +45,33 @@ pub struct MurkStepMetrics {
     pub sparse_retired_ranges: u32,
     /// Number of sparse segment ranges pending promotion (freed this tick).
     pub sparse_pending_retired: u32,
+    /// Number of sparse alloc() calls that reused a retired range this tick.
+    pub sparse_reuse_hits: u32,
+    /// Number of sparse alloc() calls that fell through to bump allocation this tick.
+    pub sparse_reuse_misses: u32,
+    /// Cumulative number of ingress rejections due to full queue.
+    pub queue_full_rejections: u64,
+    /// Cumulative number of ingress rejections due to tick-disabled state.
+    pub tick_disabled_rejections: u64,
+    /// Cumulative number of rollback events.
+    pub rollback_events: u64,
+    /// Cumulative number of transitions into tick-disabled state.
+    pub tick_disabled_transitions: u64,
+    /// Cumulative number of worker stall force-unpin events.
+    pub worker_stall_events: u64,
+    /// Cumulative number of ring "not available" events.
+    pub ring_not_available_events: u64,
+    /// Cumulative number of snapshot evictions due to ring overwrite.
+    pub ring_eviction_events: u64,
+    /// Cumulative number of stale/not-yet-written position reads.
+    pub ring_stale_read_events: u64,
+    /// Cumulative number of reader retries caused by overwrite skew.
+    pub ring_skew_retry_events: u64,
 }
 
 // Compile-time layout assertions for ABI stability.
-// 3×u64 + 1×u64 + 3×u32 + 4 bytes padding = 48 bytes, align 8.
-const _: () = assert!(std::mem::size_of::<MurkStepMetrics>() == 48);
+// 4×u64 + 5×u32 + 4 bytes padding + 9×u64 = 128 bytes, align 8.
+const _: () = assert!(std::mem::size_of::<MurkStepMetrics>() == 128);
 const _: () = assert!(std::mem::align_of::<MurkStepMetrics>() == 8);
 
 impl MurkStepMetrics {
@@ -62,6 +84,17 @@ impl MurkStepMetrics {
             n_propagators: m.propagator_us.len() as u32,
             sparse_retired_ranges: m.sparse_retired_ranges,
             sparse_pending_retired: m.sparse_pending_retired,
+            sparse_reuse_hits: m.sparse_reuse_hits,
+            sparse_reuse_misses: m.sparse_reuse_misses,
+            queue_full_rejections: m.queue_full_rejections,
+            tick_disabled_rejections: m.tick_disabled_rejections,
+            rollback_events: m.rollback_events,
+            tick_disabled_transitions: m.tick_disabled_transitions,
+            worker_stall_events: m.worker_stall_events,
+            ring_not_available_events: m.ring_not_available_events,
+            ring_eviction_events: m.ring_eviction_events,
+            ring_stale_read_events: m.ring_stale_read_events,
+            ring_skew_retry_events: m.ring_skew_retry_events,
         }
     }
 }
@@ -85,34 +118,36 @@ pub extern "C" fn murk_step_metrics_propagator(
     name_cap: usize,
     us_out: *mut u64,
 ) -> i32 {
-    if us_out.is_null() {
-        return MurkStatus::InvalidArgument as i32;
-    }
-
-    LAST_PROPAGATOR_US.with(|cell| {
-        let data = cell.borrow();
-        let idx = index as usize;
-        if idx >= data.len() {
+    ffi_guard!({
+        if us_out.is_null() {
             return MurkStatus::InvalidArgument as i32;
         }
 
-        let (ref name, us) = data[idx];
-
-        // SAFETY: us_out is valid per caller contract.
-        unsafe { *us_out = us };
-
-        // Write name if buffer provided.
-        if !name_buf.is_null() && name_cap > 0 {
-            let bytes = name.as_bytes();
-            let copy_len = bytes.len().min(name_cap - 1);
-            // SAFETY: name_buf points to name_cap valid bytes.
-            unsafe {
-                std::ptr::copy_nonoverlapping(bytes.as_ptr(), name_buf as *mut u8, copy_len);
-                *name_buf.add(copy_len) = 0; // null-terminate
+        LAST_PROPAGATOR_US.with(|cell| {
+            let data = cell.borrow();
+            let idx = index as usize;
+            if idx >= data.len() {
+                return MurkStatus::InvalidArgument as i32;
             }
-        }
 
-        MurkStatus::Ok as i32
+            let (ref name, us) = data[idx];
+
+            // SAFETY: us_out is valid per caller contract.
+            unsafe { *us_out = us };
+
+            // Write name if buffer provided.
+            if !name_buf.is_null() && name_cap > 0 {
+                let bytes = name.as_bytes();
+                let copy_len = bytes.len().min(name_cap - 1);
+                // SAFETY: name_buf points to name_cap valid bytes.
+                unsafe {
+                    std::ptr::copy_nonoverlapping(bytes.as_ptr(), name_buf as *mut u8, copy_len);
+                    *name_buf.add(copy_len) = 0; // null-terminate
+                }
+            }
+
+            MurkStatus::Ok as i32
+        })
     })
 }
 
@@ -120,25 +155,27 @@ pub extern "C" fn murk_step_metrics_propagator(
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_step_metrics(world_handle: u64, out: *mut MurkStepMetrics) -> i32 {
-    use crate::world::worlds;
+    ffi_guard!({
+        use crate::world::worlds;
 
-    if out.is_null() {
-        return MurkStatus::InvalidArgument as i32;
-    }
-
-    let world_arc = {
-        let table = ffi_lock!(worlds());
-        match table.get(world_handle).cloned() {
-            Some(arc) => arc,
-            None => return MurkStatus::InvalidHandle as i32,
+        if out.is_null() {
+            return MurkStatus::InvalidArgument as i32;
         }
-    };
-    let world = ffi_lock!(world_arc);
 
-    let metrics = MurkStepMetrics::from_rust(world.last_metrics());
-    // SAFETY: out is valid per caller contract.
-    unsafe { *out = metrics };
-    MurkStatus::Ok as i32
+        let world_arc = {
+            let table = ffi_lock!(worlds());
+            match table.get(world_handle).cloned() {
+                Some(arc) => arc,
+                None => return MurkStatus::InvalidHandle as i32,
+            }
+        };
+        let world = ffi_lock!(world_arc);
+
+        let metrics = MurkStepMetrics::from_rust(world.last_metrics());
+        // SAFETY: out is valid per caller contract.
+        unsafe { *out = metrics };
+        MurkStatus::Ok as i32
+    })
 }
 
 #[cfg(test)]
@@ -155,10 +192,32 @@ mod tests {
             memory_bytes: 8192,
             sparse_retired_ranges: 7,
             sparse_pending_retired: 2,
+            sparse_reuse_hits: 5,
+            sparse_reuse_misses: 3,
+            queue_full_rejections: 11,
+            tick_disabled_rejections: 4,
+            rollback_events: 2,
+            tick_disabled_transitions: 1,
+            worker_stall_events: 3,
+            ring_not_available_events: 7,
+            ring_eviction_events: 9,
+            ring_stale_read_events: 4,
+            ring_skew_retry_events: 2,
         };
         let ffi = MurkStepMetrics::from_rust(&rust_metrics);
         assert_eq!(ffi.sparse_retired_ranges, 7);
         assert_eq!(ffi.sparse_pending_retired, 2);
+        assert_eq!(ffi.sparse_reuse_hits, 5);
+        assert_eq!(ffi.sparse_reuse_misses, 3);
+        assert_eq!(ffi.queue_full_rejections, 11);
+        assert_eq!(ffi.tick_disabled_rejections, 4);
+        assert_eq!(ffi.rollback_events, 2);
+        assert_eq!(ffi.tick_disabled_transitions, 1);
+        assert_eq!(ffi.worker_stall_events, 3);
+        assert_eq!(ffi.ring_not_available_events, 7);
+        assert_eq!(ffi.ring_eviction_events, 9);
+        assert_eq!(ffi.ring_stale_read_events, 4);
+        assert_eq!(ffi.ring_skew_retry_events, 2);
     }
 
     #[test]
@@ -166,5 +225,16 @@ mod tests {
         let m = MurkStepMetrics::default();
         assert_eq!(m.sparse_retired_ranges, 0);
         assert_eq!(m.sparse_pending_retired, 0);
+        assert_eq!(m.sparse_reuse_hits, 0);
+        assert_eq!(m.sparse_reuse_misses, 0);
+        assert_eq!(m.queue_full_rejections, 0);
+        assert_eq!(m.tick_disabled_rejections, 0);
+        assert_eq!(m.rollback_events, 0);
+        assert_eq!(m.tick_disabled_transitions, 0);
+        assert_eq!(m.worker_stall_events, 0);
+        assert_eq!(m.ring_not_available_events, 0);
+        assert_eq!(m.ring_eviction_events, 0);
+        assert_eq!(m.ring_stale_read_events, 0);
+        assert_eq!(m.ring_skew_retry_events, 0);
     }
 }

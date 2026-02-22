@@ -455,16 +455,17 @@ impl Propagator for ScalarDiffusion {
         w
     }
 
-    fn max_dt(&self) -> Option<f64> {
-        if self.coefficient > 0.0 {
-            // CFL stability constraint: dt <= 1 / (max_degree * D)
-            // Default max_degree is 12 (worst-case Fcc12). Users can lower
-            // this via the builder when the topology is known (e.g. 4 for
-            // Square4, 6 for Hex2D).
-            Some(1.0 / (self.max_degree as f64 * self.coefficient))
-        } else {
-            None
+    fn max_dt(&self, space: &dyn murk_space::Space) -> Option<f64> {
+        if self.coefficient <= 0.0 {
+            return None;
         }
+        let space_degree = space.max_neighbour_degree() as u32;
+
+        let effective_degree = space_degree.max(self.max_degree);
+        if effective_degree == 0 {
+            return None;
+        }
+        Some(1.0 / (effective_degree as f64 * self.coefficient))
     }
 
     fn step(&self, ctx: &mut StepContext<'_>) -> Result<(), PropagatorError> {
@@ -482,10 +483,11 @@ impl Propagator for ScalarDiffusion {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use murk_core::TickId;
+    use murk_core::{Coord, SpaceInstanceId, TickId};
     use murk_propagator::scratch::ScratchRegion;
-    use murk_space::{EdgeBehavior, Space};
+    use murk_space::{EdgeBehavior, RegionPlan, RegionSpec, Space, SpaceError};
     use murk_test_utils::{MockFieldReader, MockFieldWriter};
+    use smallvec::{smallvec, SmallVec};
 
     // Test field IDs far from the hardcoded constants to avoid collision.
     const F_HEAT: FieldId = FieldId(100);
@@ -740,6 +742,8 @@ mod tests {
 
     #[test]
     fn max_dt_constraint() {
+        // Default max_degree=12, Square4 has degree 4 → effective_degree = max(4, 12) = 12
+        let space = Square4::new(8, 8, EdgeBehavior::Wrap).unwrap();
         let prop = ScalarDiffusion::builder()
             .input_field(F_HEAT)
             .output_field(F_HEAT)
@@ -747,7 +751,7 @@ mod tests {
             .build()
             .unwrap();
         // 1 / (12 * 0.25) = 1/3
-        let dt = prop.max_dt().unwrap();
+        let dt = prop.max_dt(&space).unwrap();
         assert!((dt - 1.0 / 3.0).abs() < 1e-10);
 
         let prop2 = ScalarDiffusion::builder()
@@ -757,7 +761,7 @@ mod tests {
             .build()
             .unwrap();
         // 1 / (12 * 1.0) = 1/12
-        let dt2 = prop2.max_dt().unwrap();
+        let dt2 = prop2.max_dt(&space).unwrap();
         assert!((dt2 - 1.0 / 12.0).abs() < 1e-10);
 
         // Zero coefficient -> no constraint
@@ -767,7 +771,7 @@ mod tests {
             .coefficient(0.0)
             .build()
             .unwrap();
-        assert!(prop3.max_dt().is_none());
+        assert!(prop3.max_dt(&space).is_none());
     }
 
     #[test]
@@ -1131,5 +1135,142 @@ mod tests {
             "source should override diffusion+decay, got {}",
             result[4]
         );
+    }
+
+    // ---------------------------------------------------------------
+    // Topology-aware CFL tests
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn max_dt_uses_space_degree_for_square4() {
+        let prop = ScalarDiffusion::builder()
+            .input_field(F_HEAT)
+            .output_field(F_HEAT)
+            .coefficient(1.0)
+            .max_degree(0) // no floor — use space degree only
+            .build()
+            .unwrap();
+        let space = murk_space::Square4::new(8, 8, murk_space::EdgeBehavior::Wrap).unwrap();
+        // Square4 interior cell has degree 4 → max_dt = 1 / (4 * 1.0) = 0.25
+        assert_eq!(prop.max_dt(&space), Some(0.25));
+    }
+
+    #[test]
+    fn max_dt_uses_space_degree_for_hex2d() {
+        let prop = ScalarDiffusion::builder()
+            .input_field(F_HEAT)
+            .output_field(F_HEAT)
+            .coefficient(1.0)
+            .max_degree(0)
+            .build()
+            .unwrap();
+        let space = murk_space::Hex2D::new(8, 8).unwrap();
+        // Hex2D interior cell has degree 6 → max_dt = 1 / (6 * 1.0) ≈ 0.1667
+        assert!((prop.max_dt(&space).unwrap() - 1.0 / 6.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn max_degree_builder_acts_as_floor() {
+        let prop = ScalarDiffusion::builder()
+            .input_field(F_HEAT)
+            .output_field(F_HEAT)
+            .coefficient(1.0)
+            .max_degree(8)
+            .build()
+            .unwrap();
+        let space = murk_space::Square4::new(8, 8, murk_space::EdgeBehavior::Wrap).unwrap();
+        // Square4 degree=4, max_degree=8 → effective=max(4,8)=8 → max_dt = 1/8 = 0.125
+        assert_eq!(prop.max_dt(&space), Some(1.0 / 8.0));
+    }
+
+    #[test]
+    fn max_dt_none_when_effective_degree_is_zero() {
+        let prop = ScalarDiffusion::builder()
+            .input_field(F_HEAT)
+            .output_field(F_HEAT)
+            .coefficient(1.0)
+            .max_degree(0)
+            .build()
+            .unwrap();
+        let space = murk_space::Square4::new(1, 1, murk_space::EdgeBehavior::Absorb).unwrap();
+        assert_eq!(prop.max_dt(&space), None);
+    }
+
+    #[derive(Debug)]
+    struct SkewDegreeSpace {
+        instance_id: SpaceInstanceId,
+    }
+
+    impl SkewDegreeSpace {
+        fn new() -> Self {
+            Self {
+                instance_id: SpaceInstanceId::next(),
+            }
+        }
+    }
+
+    impl Space for SkewDegreeSpace {
+        fn ndim(&self) -> usize {
+            1
+        }
+
+        fn cell_count(&self) -> usize {
+            8
+        }
+
+        fn neighbours(&self, coord: &Coord) -> SmallVec<[Coord; 8]> {
+            let i = coord[0];
+            if i == 1 {
+                (0..8).filter(|&j| j != 1).map(|j| smallvec![j]).collect()
+            } else {
+                smallvec![smallvec![1]]
+            }
+        }
+
+        fn distance(&self, a: &Coord, b: &Coord) -> f64 {
+            (a[0] - b[0]).abs() as f64
+        }
+
+        fn compile_region(&self, spec: &RegionSpec) -> Result<RegionPlan, SpaceError> {
+            let _ = spec;
+            Err(SpaceError::InvalidRegion {
+                reason: "SkewDegreeSpace test backend does not support compile_region".into(),
+            })
+        }
+
+        fn canonical_ordering(&self) -> Vec<Coord> {
+            (0..8).map(|i| smallvec![i]).collect()
+        }
+
+        fn canonical_rank(&self, coord: &Coord) -> Option<usize> {
+            if coord.len() == 1 && (0..8).contains(&coord[0]) {
+                Some(coord[0] as usize)
+            } else {
+                None
+            }
+        }
+
+        fn instance_id(&self) -> SpaceInstanceId {
+            self.instance_id
+        }
+
+        fn topology_eq(&self, other: &dyn Space) -> bool {
+            other.downcast_ref::<Self>().is_some()
+        }
+    }
+
+    #[test]
+    fn max_dt_scans_full_topology_for_worst_case_degree() {
+        let prop = ScalarDiffusion::builder()
+            .input_field(F_HEAT)
+            .output_field(F_HEAT)
+            .coefficient(1.0)
+            .max_degree(0)
+            .build()
+            .unwrap();
+        let space = SkewDegreeSpace::new();
+
+        // Worst-case degree is 7 at coordinate [1]. max_dt must respect it.
+        assert_eq!(prop.max_dt(&space), Some(1.0 / 7.0));
     }
 }

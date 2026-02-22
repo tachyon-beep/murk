@@ -217,6 +217,7 @@ pub fn validate_pipeline(
     propagators: &[Box<dyn Propagator>],
     defined_fields: &FieldSet,
     dt: f64,
+    space: &dyn murk_space::Space,
 ) -> Result<ReadResolutionPlan, PipelineError> {
     // 0. dt must be finite and positive
     if !dt.is_finite() || dt <= 0.0 {
@@ -283,7 +284,7 @@ pub fn validate_pipeline(
         let mut min_max_dt = f64::INFINITY;
         let mut constraining = String::new();
         for prop in propagators {
-            if let Some(max) = prop.max_dt() {
+            if let Some(max) = prop.max_dt(space) {
                 if !max.is_finite() || max <= 0.0 {
                     return Err(PipelineError::InvalidMaxDt {
                         propagator: prop.name().to_string(),
@@ -435,7 +436,7 @@ mod tests {
         fn writes(&self) -> Vec<(FieldId, WriteMode)> {
             vec![(FieldId(0), WriteMode::Full)]
         }
-        fn max_dt(&self) -> Option<f64> {
+        fn max_dt(&self, _space: &dyn murk_space::Space) -> Option<f64> {
             Some(self.max)
         }
         fn step(&self, _ctx: &mut StepContext<'_>) -> Result<(), PropagatorError> {
@@ -467,12 +468,16 @@ mod tests {
         [FieldId(0), FieldId(1), FieldId(2)].into_iter().collect()
     }
 
+    fn test_space() -> Box<dyn murk_space::Space> {
+        Box::new(murk_space::Square4::new(4, 4, murk_space::EdgeBehavior::Wrap).unwrap())
+    }
+
     // ── Valid pipeline ─────────────────────────────────────────
 
     #[test]
     fn valid_two_stage_pipeline() {
         let props: Vec<Box<dyn Propagator>> = vec![Box::new(PropAB), Box::new(PropBC)];
-        let plan = validate_pipeline(&props, &fields_0_1_2(), 0.1).unwrap();
+        let plan = validate_pipeline(&props, &fields_0_1_2(), 0.1, &*test_space()).unwrap();
         assert_eq!(plan.len(), 2);
 
         // PropAB reads field 0 → BaseGen (no prior writer)
@@ -493,7 +498,7 @@ mod tests {
         // always BaseGen implicitly.
         let props: Vec<Box<dyn Propagator>> = vec![Box::new(PropJacobi)];
         let fields = [FieldId(0), FieldId(1)].into_iter().collect();
-        let plan = validate_pipeline(&props, &fields, 0.1).unwrap();
+        let plan = validate_pipeline(&props, &fields, 0.1, &*test_space()).unwrap();
         // reads_previous is not stored in the plan — it always routes to BaseGen
         assert_eq!(plan.source(0, FieldId(0)), None);
     }
@@ -503,7 +508,7 @@ mod tests {
     #[test]
     fn empty_pipeline_rejected() {
         let props: Vec<Box<dyn Propagator>> = vec![];
-        let result = validate_pipeline(&props, &FieldSet::empty(), 0.1);
+        let result = validate_pipeline(&props, &FieldSet::empty(), 0.1, &*test_space());
         assert!(matches!(result, Err(PipelineError::EmptyPipeline)));
     }
 
@@ -512,7 +517,7 @@ mod tests {
     #[test]
     fn write_conflict_detected() {
         let props: Vec<Box<dyn Propagator>> = vec![Box::new(PropAB), Box::new(PropConflict)];
-        let result = validate_pipeline(&props, &fields_0_1_2(), 0.1);
+        let result = validate_pipeline(&props, &fields_0_1_2(), 0.1, &*test_space());
         match result {
             Err(PipelineError::WriteConflict(conflicts)) => {
                 assert_eq!(conflicts.len(), 1);
@@ -529,7 +534,7 @@ mod tests {
     #[test]
     fn undefined_read_field_rejected() {
         let props: Vec<Box<dyn Propagator>> = vec![Box::new(PropBadRef)];
-        let result = validate_pipeline(&props, &FieldSet::empty(), 0.1);
+        let result = validate_pipeline(&props, &FieldSet::empty(), 0.1, &*test_space());
         match result {
             Err(PipelineError::UndefinedField {
                 propagator,
@@ -547,7 +552,7 @@ mod tests {
         // PropAB writes field 1 — but we only define field 0
         let props: Vec<Box<dyn Propagator>> = vec![Box::new(PropAB)];
         let fields = [FieldId(0)].into_iter().collect();
-        let result = validate_pipeline(&props, &fields, 0.1);
+        let result = validate_pipeline(&props, &fields, 0.1, &*test_space());
         assert!(matches!(result, Err(PipelineError::UndefinedField { .. })));
     }
 
@@ -556,7 +561,7 @@ mod tests {
         // PropJacobi reads_previous field 0 — define only field 1
         let props: Vec<Box<dyn Propagator>> = vec![Box::new(PropJacobi)];
         let fields = [FieldId(1)].into_iter().collect();
-        let result = validate_pipeline(&props, &fields, 0.1);
+        let result = validate_pipeline(&props, &fields, 0.1, &*test_space());
         assert!(matches!(result, Err(PipelineError::UndefinedField { .. })));
     }
 
@@ -566,15 +571,15 @@ mod tests {
     fn dt_within_bound_accepted() {
         let props: Vec<Box<dyn Propagator>> = vec![Box::new(PropDtConstrained { max: 0.5 })];
         let fields = [FieldId(0)].into_iter().collect();
-        assert!(validate_pipeline(&props, &fields, 0.5).is_ok());
-        assert!(validate_pipeline(&props, &fields, 0.1).is_ok());
+        assert!(validate_pipeline(&props, &fields, 0.5, &*test_space()).is_ok());
+        assert!(validate_pipeline(&props, &fields, 0.1, &*test_space()).is_ok());
     }
 
     #[test]
     fn dt_exceeds_max_dt_rejected() {
         let props: Vec<Box<dyn Propagator>> = vec![Box::new(PropDtConstrained { max: 0.5 })];
         let fields = [FieldId(0)].into_iter().collect();
-        let result = validate_pipeline(&props, &fields, 1.0);
+        let result = validate_pipeline(&props, &fields, 1.0, &*test_space());
         match result {
             Err(PipelineError::DtTooLarge {
                 configured_dt,
@@ -603,7 +608,7 @@ mod tests {
             fn writes(&self) -> Vec<(FieldId, WriteMode)> {
                 vec![(FieldId(0), WriteMode::Full)]
             }
-            fn max_dt(&self) -> Option<f64> {
+            fn max_dt(&self, _space: &dyn murk_space::Space) -> Option<f64> {
                 Some(0.5)
             }
             fn step(&self, _ctx: &mut StepContext<'_>) -> Result<(), PropagatorError> {
@@ -621,7 +626,7 @@ mod tests {
             fn writes(&self) -> Vec<(FieldId, WriteMode)> {
                 vec![(FieldId(1), WriteMode::Full)]
             }
-            fn max_dt(&self) -> Option<f64> {
+            fn max_dt(&self, _space: &dyn murk_space::Space) -> Option<f64> {
                 Some(0.2)
             }
             fn step(&self, _ctx: &mut StepContext<'_>) -> Result<(), PropagatorError> {
@@ -631,7 +636,7 @@ mod tests {
 
         let props: Vec<Box<dyn Propagator>> = vec![Box::new(PropDt05), Box::new(PropDt02)];
         let fields = [FieldId(0), FieldId(1)].into_iter().collect();
-        let result = validate_pipeline(&props, &fields, 0.3);
+        let result = validate_pipeline(&props, &fields, 0.3, &*test_space());
         match result {
             Err(PipelineError::DtTooLarge {
                 constraining_propagator,
@@ -699,7 +704,7 @@ mod tests {
         let props: Vec<Box<dyn Propagator>> =
             vec![Box::new(PropA), Box::new(PropB), Box::new(PropC)];
         let fields = [FieldId(0), FieldId(1), FieldId(2)].into_iter().collect();
-        let plan = validate_pipeline(&props, &fields, 0.1).unwrap();
+        let plan = validate_pipeline(&props, &fields, 0.1, &*test_space()).unwrap();
 
         // B reads field 1 → Staged from A (index 0)
         assert_eq!(
@@ -722,7 +727,7 @@ mod tests {
     fn unread_field_not_in_plan() {
         // PropAB reads field 0, writes field 1. Field 2 is never read by PropAB.
         let props: Vec<Box<dyn Propagator>> = vec![Box::new(PropAB)];
-        let plan = validate_pipeline(&props, &fields_0_1_2(), 0.1).unwrap();
+        let plan = validate_pipeline(&props, &fields_0_1_2(), 0.1, &*test_space()).unwrap();
         // Field 2 not in PropAB's routes
         assert_eq!(plan.source(0, FieldId(2)), None);
     }
@@ -733,7 +738,7 @@ mod tests {
     fn write_mode_full_recorded_in_plan() {
         // PropAB writes field 1 as Full
         let props: Vec<Box<dyn Propagator>> = vec![Box::new(PropAB)];
-        let plan = validate_pipeline(&props, &fields_0_1_2(), 0.1).unwrap();
+        let plan = validate_pipeline(&props, &fields_0_1_2(), 0.1, &*test_space()).unwrap();
 
         assert_eq!(plan.write_mode(0, FieldId(1)), Some(WriteMode::Full));
         // Field 0 is read, not written — no write mode
@@ -762,7 +767,7 @@ mod tests {
         }
 
         let props: Vec<Box<dyn Propagator>> = vec![Box::new(PropIncremental)];
-        let plan = validate_pipeline(&props, &fields_0_1_2(), 0.1).unwrap();
+        let plan = validate_pipeline(&props, &fields_0_1_2(), 0.1, &*test_space()).unwrap();
 
         assert_eq!(plan.write_mode(0, FieldId(1)), Some(WriteMode::Incremental));
         assert_eq!(plan.incremental_fields_for(0), vec![FieldId(1)]);
@@ -789,7 +794,7 @@ mod tests {
         }
 
         let props: Vec<Box<dyn Propagator>> = vec![Box::new(PropAB), Box::new(PropIncrC)];
-        let plan = validate_pipeline(&props, &fields_0_1_2(), 0.1).unwrap();
+        let plan = validate_pipeline(&props, &fields_0_1_2(), 0.1, &*test_space()).unwrap();
 
         // PropAB (index 0): Full write on field 1
         assert_eq!(plan.write_mode(0, FieldId(1)), Some(WriteMode::Full));
@@ -805,35 +810,35 @@ mod tests {
     #[test]
     fn nan_dt_rejected() {
         let props: Vec<Box<dyn Propagator>> = vec![Box::new(PropAB)];
-        let result = validate_pipeline(&props, &fields_0_1_2(), f64::NAN);
+        let result = validate_pipeline(&props, &fields_0_1_2(), f64::NAN, &*test_space());
         assert!(matches!(result, Err(PipelineError::InvalidDt { .. })));
     }
 
     #[test]
     fn inf_dt_rejected() {
         let props: Vec<Box<dyn Propagator>> = vec![Box::new(PropAB)];
-        let result = validate_pipeline(&props, &fields_0_1_2(), f64::INFINITY);
+        let result = validate_pipeline(&props, &fields_0_1_2(), f64::INFINITY, &*test_space());
         assert!(matches!(result, Err(PipelineError::InvalidDt { .. })));
     }
 
     #[test]
     fn neg_inf_dt_rejected() {
         let props: Vec<Box<dyn Propagator>> = vec![Box::new(PropAB)];
-        let result = validate_pipeline(&props, &fields_0_1_2(), f64::NEG_INFINITY);
+        let result = validate_pipeline(&props, &fields_0_1_2(), f64::NEG_INFINITY, &*test_space());
         assert!(matches!(result, Err(PipelineError::InvalidDt { .. })));
     }
 
     #[test]
     fn zero_dt_rejected() {
         let props: Vec<Box<dyn Propagator>> = vec![Box::new(PropAB)];
-        let result = validate_pipeline(&props, &fields_0_1_2(), 0.0);
+        let result = validate_pipeline(&props, &fields_0_1_2(), 0.0, &*test_space());
         assert!(matches!(result, Err(PipelineError::InvalidDt { .. })));
     }
 
     #[test]
     fn negative_dt_rejected() {
         let props: Vec<Box<dyn Propagator>> = vec![Box::new(PropAB)];
-        let result = validate_pipeline(&props, &fields_0_1_2(), -0.1);
+        let result = validate_pipeline(&props, &fields_0_1_2(), -0.1, &*test_space());
         assert!(matches!(result, Err(PipelineError::InvalidDt { .. })));
     }
 
@@ -843,7 +848,7 @@ mod tests {
     fn nan_max_dt_rejected() {
         let props: Vec<Box<dyn Propagator>> = vec![Box::new(PropDtConstrained { max: f64::NAN })];
         let fields = [FieldId(0)].into_iter().collect();
-        let result = validate_pipeline(&props, &fields, 0.1);
+        let result = validate_pipeline(&props, &fields, 0.1, &*test_space());
         match result {
             Err(PipelineError::InvalidMaxDt { propagator, value }) => {
                 assert_eq!(propagator, "PropDtConstrained");
@@ -858,7 +863,7 @@ mod tests {
         let props: Vec<Box<dyn Propagator>> =
             vec![Box::new(PropDtConstrained { max: f64::INFINITY })];
         let fields = [FieldId(0)].into_iter().collect();
-        let result = validate_pipeline(&props, &fields, 0.1);
+        let result = validate_pipeline(&props, &fields, 0.1, &*test_space());
         match result {
             Err(PipelineError::InvalidMaxDt { propagator, .. }) => {
                 assert_eq!(propagator, "PropDtConstrained");
@@ -873,7 +878,7 @@ mod tests {
             max: f64::NEG_INFINITY,
         })];
         let fields = [FieldId(0)].into_iter().collect();
-        let result = validate_pipeline(&props, &fields, 0.1);
+        let result = validate_pipeline(&props, &fields, 0.1, &*test_space());
         assert!(matches!(result, Err(PipelineError::InvalidMaxDt { .. })));
     }
 
@@ -881,7 +886,7 @@ mod tests {
     fn zero_max_dt_rejected() {
         let props: Vec<Box<dyn Propagator>> = vec![Box::new(PropDtConstrained { max: 0.0 })];
         let fields = [FieldId(0)].into_iter().collect();
-        let result = validate_pipeline(&props, &fields, 0.1);
+        let result = validate_pipeline(&props, &fields, 0.1, &*test_space());
         assert!(matches!(result, Err(PipelineError::InvalidMaxDt { .. })));
     }
 
@@ -889,7 +894,7 @@ mod tests {
     fn negative_max_dt_rejected() {
         let props: Vec<Box<dyn Propagator>> = vec![Box::new(PropDtConstrained { max: -1.0 })];
         let fields = [FieldId(0)].into_iter().collect();
-        let result = validate_pipeline(&props, &fields, 0.1);
+        let result = validate_pipeline(&props, &fields, 0.1, &*test_space());
         assert!(matches!(result, Err(PipelineError::InvalidMaxDt { .. })));
     }
 }

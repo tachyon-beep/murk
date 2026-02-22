@@ -248,6 +248,12 @@ impl Space for Fcc12 {
         result
     }
 
+    fn max_neighbour_degree(&self) -> usize {
+        // FCC has 12 stencil offsets. For Absorb boundaries this is a
+        // conservative upper bound; Clamp/Wrap can realize all 12 moves.
+        12
+    }
+
     fn distance(&self, a: &Coord, b: &Coord) -> f64 {
         let dx = axis_distance_u32(a[0], b[0], self.w, self.edge);
         let dy = axis_distance_u32(a[1], b[1], self.h, self.edge);

@@ -31,6 +31,6 @@ pub use epoch::{EpochCounter, WorkerEpoch, EPOCH_UNPINNED};
 pub use ingress::{DrainResult, DrainedCommand, IngressQueue};
 pub use lockstep::{LockstepWorld, StepResult};
 pub use metrics::StepMetrics;
-pub use realtime::{RealtimeAsyncWorld, ShutdownReport, SubmitError};
+pub use realtime::{RealtimeAsyncWorld, RealtimePreflight, ShutdownReport, SubmitError};
 pub use ring::SnapshotRing;
 pub use tick::{TickEngine, TickError, TickResult};

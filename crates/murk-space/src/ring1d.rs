@@ -86,6 +86,10 @@ impl Space for Ring1D {
         line1d::wrap_neighbours_1d(coord[0], self.len)
     }
 
+    fn max_neighbour_degree(&self) -> usize {
+        2
+    }
+
     fn distance(&self, a: &Coord, b: &Coord) -> f64 {
         line1d::wrap_distance_1d(a[0], b[0], self.len)
     }
@@ -99,6 +103,18 @@ impl Space for Ring1D {
     }
 
     fn canonical_rank(&self, coord: &Coord) -> Option<usize> {
+        if coord.len() != 1 {
+            return None;
+        }
+        let i = coord[0];
+        if i >= 0 && i < self.len as i32 {
+            Some(i as usize)
+        } else {
+            None
+        }
+    }
+
+    fn canonical_rank_slice(&self, coord: &[i32]) -> Option<usize> {
         if coord.len() != 1 {
             return None;
         }

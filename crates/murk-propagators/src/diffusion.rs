@@ -301,15 +301,18 @@ impl Propagator for DiffusionPropagator {
         ]
     }
 
-    fn max_dt(&self) -> Option<f64> {
-        if self.diffusivity > 0.0 {
-            // CFL stability constraint: dt <= 1 / (max_degree * D)
-            // Use 12 (Fcc12) as worst-case to be safe for all space topologies.
-            // Square4=4, Hex2D=6, Fcc12=12.
-            Some(1.0 / (12.0 * self.diffusivity))
-        } else {
-            None
+    fn max_dt(&self, space: &dyn murk_space::Space) -> Option<f64> {
+        if self.diffusivity <= 0.0 {
+            return None;
         }
+
+        let max_degree = space.max_neighbour_degree();
+        if max_degree == 0 {
+            return None;
+        }
+
+        // CFL stability constraint: dt <= 1 / (max_degree * D).
+        Some(1.0 / (max_degree as f64 * self.diffusivity))
     }
 
     fn step(&self, ctx: &mut StepContext<'_>) -> Result<(), PropagatorError> {
@@ -332,7 +335,7 @@ mod tests {
     use crate::fields::{HEAT, HEAT_GRADIENT, VELOCITY};
     use murk_core::TickId;
     use murk_propagator::scratch::ScratchRegion;
-    use murk_space::{EdgeBehavior, Space};
+    use murk_space::{EdgeBehavior, Fcc12, Space};
     use murk_test_utils::{MockFieldReader, MockFieldWriter};
 
     fn make_ctx<'a>(
@@ -457,15 +460,21 @@ mod tests {
 
     #[test]
     fn max_dt_constraint() {
+        let space = Square4::new(4, 4, EdgeBehavior::Wrap).unwrap();
         let prop = DiffusionPropagator::new(0.25);
-        // 1 / (12 * 0.25) ≈ 0.333...
-        let dt = prop.max_dt().unwrap();
-        assert!((dt - 1.0 / 3.0).abs() < 1e-10);
+        // Square4 has degree 4, so 1 / (4 * 0.25) = 1.0.
+        let dt = prop.max_dt(&space).unwrap();
+        assert!((dt - 1.0).abs() < 1e-10);
 
         let prop2 = DiffusionPropagator::new(1.0);
-        // 1 / (12 * 1.0) ≈ 0.0833...
-        let dt2 = prop2.max_dt().unwrap();
-        assert!((dt2 - 1.0 / 12.0).abs() < 1e-10);
+        // Square4 has degree 4, so 1 / (4 * 1.0) = 0.25.
+        let dt2 = prop2.max_dt(&space).unwrap();
+        assert!((dt2 - 1.0 / 4.0).abs() < 1e-10);
+
+        // Fcc12 still resolves to the previous 12-neighbour bound.
+        let fcc = Fcc12::new(4, 4, 4, EdgeBehavior::Wrap).unwrap();
+        let dt3 = prop2.max_dt(&fcc).unwrap();
+        assert!((dt3 - 1.0 / 12.0).abs() < 1e-10);
     }
 
     #[test]
@@ -875,11 +884,12 @@ mod tests {
 
     #[test]
     fn zero_diffusivity_max_dt_is_none() {
+        let space = Square4::new(4, 4, EdgeBehavior::Wrap).unwrap();
         let prop = DiffusionPropagator::new(0.0);
         assert!(
-            prop.max_dt().is_none(),
+            prop.max_dt(&space).is_none(),
             "zero diffusivity should give max_dt=None, got {:?}",
-            prop.max_dt()
+            prop.max_dt(&space)
         );
     }
 

@@ -502,7 +502,7 @@ checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 
 [[package]]
 name = "murk"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "murk-arena",
  "murk-core",
@@ -516,7 +516,7 @@ dependencies = [
 
 [[package]]
 name = "murk-arena"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "indexmap",
  "murk-core",
@@ -525,7 +525,7 @@ dependencies = [
 
 [[package]]
 name = "murk-bench"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "criterion",
  "murk-arena",
@@ -541,7 +541,7 @@ dependencies = [
 
 [[package]]
 name = "murk-core"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "proptest",
  "smallvec",
@@ -549,7 +549,7 @@ dependencies = [
 
 [[package]]
 name = "murk-engine"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "crossbeam-channel",
  "indexmap",
@@ -568,7 +568,7 @@ dependencies = [
 
 [[package]]
 name = "murk-ffi"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "cbindgen",
  "murk-core",
@@ -583,7 +583,7 @@ dependencies = [
 
 [[package]]
 name = "murk-obs"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "indexmap",
  "murk-core",
@@ -595,7 +595,7 @@ dependencies = [
 
 [[package]]
 name = "murk-propagator"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "indexmap",
  "murk-core",
@@ -606,7 +606,7 @@ dependencies = [
 
 [[package]]
 name = "murk-propagators"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "murk-core",
  "murk-engine",
@@ -620,7 +620,7 @@ dependencies = [
 
 [[package]]
 name = "murk-python"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "murk-core",
  "murk-ffi",
@@ -632,7 +632,7 @@ dependencies = [
 
 [[package]]
 name = "murk-replay"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "murk-bench",
  "murk-core",
@@ -646,7 +646,7 @@ dependencies = [
 
 [[package]]
 name = "murk-space"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "indexmap",
  "murk-core",
@@ -656,7 +656,7 @@ dependencies = [
 
 [[package]]
 name = "murk-test-utils"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "murk-core",
  "murk-propagator",

@@ -1,10 +1,14 @@
 //! Criterion micro-benchmarks for space/topology operations.
+//!
+//! Phase 3 baseline focus:
+//! - coordinate-to-rank lookup latency
+//! - canonical ordering materialization cost
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use murk_space::{EdgeBehavior, Hex2D, Line1D, ProductSpace, Space, Square4};
 use smallvec::smallvec;
 
-/// Benchmark: Call neighbours() on all 10K cells of a 100x100 Square4.
+/// Benchmark: call neighbours() on all 10K cells of a 100x100 Square4.
 fn bench_neighbours_square4_10k(c: &mut Criterion) {
     let space = Square4::new(100, 100, EdgeBehavior::Absorb).unwrap();
 
@@ -21,9 +25,7 @@ fn bench_neighbours_square4_10k(c: &mut Criterion) {
     });
 }
 
-/// Benchmark: Call neighbours() on all Hex2D cells for a hex grid of similar size.
-///
-/// Hex2D(100, 100) = 10K cells.
+/// Benchmark: call neighbours() on all Hex2D cells for a hex grid of similar size.
 fn bench_neighbours_hex2d_10k(c: &mut Criterion) {
     let space = Hex2D::new(100, 100).unwrap();
 
@@ -40,7 +42,7 @@ fn bench_neighbours_hex2d_10k(c: &mut Criterion) {
     });
 }
 
-/// Benchmark: Compute distance() for 1000 random pairs in a Hex2D x Line1D ProductSpace.
+/// Benchmark: compute distance() for 1000 deterministic pairs in a product space.
 fn bench_distance_product_space(c: &mut Criterion) {
     let hex = Hex2D::new(20, 20).unwrap();
     let line = Line1D::new(10, EdgeBehavior::Absorb).unwrap();
@@ -72,10 +74,77 @@ fn bench_distance_product_space(c: &mut Criterion) {
     });
 }
 
+/// Benchmark: canonical_rank lookups over all 10K Square4 coordinates.
+fn bench_canonical_rank_square4_10k(c: &mut Criterion) {
+    let space = Square4::new(100, 100, EdgeBehavior::Absorb).unwrap();
+    let coords: Vec<_> = (0..100i32)
+        .flat_map(|r| (0..100i32).map(move |col| smallvec![r, col]))
+        .collect();
+
+    let mut group = c.benchmark_group("space_rank_lookup");
+    group.throughput(Throughput::Elements(coords.len() as u64));
+    group.bench_function("square4_10k", |b| {
+        b.iter(|| {
+            for coord in &coords {
+                let rank = space.canonical_rank(coord);
+                std::hint::black_box(rank);
+            }
+        });
+    });
+    group.finish();
+}
+
+/// Benchmark: canonical_rank lookups in a 3D product space.
+fn bench_canonical_rank_product_space(c: &mut Criterion) {
+    let square = Square4::new(100, 100, EdgeBehavior::Absorb).unwrap();
+    let line = Line1D::new(10, EdgeBehavior::Absorb).unwrap();
+    let space = ProductSpace::new(vec![Box::new(square), Box::new(line)]).unwrap();
+
+    // 4096 deterministic coordinates to model repeated tensor index mappings.
+    let coords: Vec<_> = (0..4096u64)
+        .map(|i| {
+            let r = (i % 100) as i32;
+            let c = ((i * 7) % 100) as i32;
+            let z = ((i * 3) % 10) as i32;
+            smallvec![r, c, z]
+        })
+        .collect();
+
+    let mut group = c.benchmark_group("space_rank_lookup");
+    group.throughput(Throughput::Elements(coords.len() as u64));
+    group.bench_with_input(
+        BenchmarkId::new("product_square4xline1d", coords.len()),
+        &coords,
+        |b, coords| {
+            b.iter(|| {
+                for coord in coords {
+                    let rank = space.canonical_rank(coord);
+                    std::hint::black_box(rank);
+                }
+            });
+        },
+    );
+    group.finish();
+}
+
+/// Benchmark: canonical_ordering materialization for a 10K-cell topology.
+fn bench_canonical_ordering_square4_10k(c: &mut Criterion) {
+    let space = Square4::new(100, 100, EdgeBehavior::Absorb).unwrap();
+    c.bench_function("canonical_ordering_square4_10k", |b| {
+        b.iter(|| {
+            let ordering = space.canonical_ordering();
+            std::hint::black_box(ordering);
+        });
+    });
+}
+
 criterion_group!(
     benches,
     bench_neighbours_square4_10k,
     bench_neighbours_hex2d_10k,
-    bench_distance_product_space
+    bench_distance_product_space,
+    bench_canonical_rank_square4_10k,
+    bench_canonical_rank_product_space,
+    bench_canonical_ordering_square4_10k
 );
 criterion_main!(benches);
