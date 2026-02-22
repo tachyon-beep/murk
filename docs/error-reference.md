@@ -19,6 +19,7 @@ Complete reference of all error types in the Murk simulation framework, organize
 - [ReplayError (murk-replay)](#replayerror)
 - [SubmitError (murk-engine)](#submiterror)
 - [BatchError (murk-engine)](#batcherror)
+- [Panicked (FFI status)](#panicked)
 
 ---
 
@@ -724,3 +725,26 @@ A method argument failed validation (e.g., wrong number of command lists, buffer
 Remediation:
 1. Read the `reason` message for specifics.
 2. Common causes: `commands.len() != num_worlds`, output buffer too small.
+
+---
+
+## Panicked
+
+**Layer:** `murk-ffi` / `murk-python` | **Status code:** `-128`
+
+FFI boundary panic status returned when Rust catches a panic inside an exported `extern "C"` function via `ffi_guard!`.
+
+### Quick reference
+
+| Code | Description |
+|------|-------------|
+| `-128` | Rust panic caught at FFI boundary |
+
+### Details
+
+`Panicked` means an internal Rust panic occurred while executing an API call. The panic is caught and converted into a status code instead of unwinding across the C boundary.
+
+Remediation:
+1. Treat this as a bug in murk or a custom propagator.
+2. Retrieve panic text via `murk_last_panic_message` (or Python exception text) and include it in bug reports.
+3. Recreate the affected world/batch handle if subsequent calls report internal errors.

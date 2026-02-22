@@ -485,6 +485,9 @@ impl Propagator for ScalarDiffusion {
         }
 
         let effective_degree = space_degree.max(self.max_degree);
+        if effective_degree == 0 {
+            return None;
+        }
         Some(1.0 / (effective_degree as f64 * self.coefficient))
     }
 
@@ -1202,5 +1205,18 @@ mod tests {
         let space = murk_space::Square4::new(8, 8, murk_space::EdgeBehavior::Wrap).unwrap();
         // Square4 degree=4, max_degree=8 → effective=max(4,8)=8 → max_dt = 1/8 = 0.125
         assert_eq!(prop.max_dt(&space), Some(1.0 / 8.0));
+    }
+
+    #[test]
+    fn max_dt_none_when_effective_degree_is_zero() {
+        let prop = ScalarDiffusion::builder()
+            .input_field(F_HEAT)
+            .output_field(F_HEAT)
+            .coefficient(1.0)
+            .max_degree(0)
+            .build()
+            .unwrap();
+        let space = murk_space::Square4::new(1, 1, murk_space::EdgeBehavior::Absorb).unwrap();
+        assert_eq!(prop.max_dt(&space), None);
     }
 }
