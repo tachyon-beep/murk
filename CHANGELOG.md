@@ -19,13 +19,17 @@ FFI panic safety hardening and observability improvements.
 - `Propagator::max_dt()` now receives `&dyn Space` for topology-aware CFL bounds
 - `sparse_reuse_hits` and `sparse_reuse_misses` metrics in StepMetrics/FFI/Python
 - Formal semantic documentation for ProductSpace (CR-1)
+- Python maps `MurkStatus::Panicked` (-128) to `RuntimeError` including the last panic message
+- Integration coverage for panicking propagator path (panic status, panic message, poisoned-world follow-up)
 
 ### Changed
 
 - ABI version bumped from v2.0 to v2.1
 - `MurkStepMetrics` layout: 48 → 56 bytes (added reuse counters)
 - `ScalarDiffusion` CFL bound derived from space topology (no longer defaults to 12-neighbour worst-case)
+- Deprecated `DiffusionPropagator` now derives CFL bound from actual space topology
 - `validate_pipeline()` signature extended with `space: &dyn Space` parameter
+- Regenerated `crates/murk-ffi/include/murk.h` with `Panicked = -128` and `murk_last_panic_message`
 
 ## [0.1.7] - 2026-02-21
 
