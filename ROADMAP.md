@@ -12,7 +12,7 @@ engine.
 
 ## Current State — v0.1.x (Released)
 
-Murk v0.1.7 is the current release. Everything below is implemented,
+Murk v0.1.8 is the current release. Everything below is implemented,
 tested, and published — not planned, not stubbed.
 
 ### Engine
@@ -32,8 +32,8 @@ tested, and published — not planned, not stubbed.
 
 | Layer | What's There | Evidence |
 |-------|-------------|----------|
-| **C FFI** | 28+ extern functions, slot+generation handle tables, versioned ABI (v1.0) | Safe double-destroy, null validation; `#![forbid(unsafe_code)]` on everything above FFI |
-| **Python** | PyO3/maturin bindings, Gymnasium `Env` + `VecEnv` adapters, `BatchedWorld` + `BatchedVecEnv` high-throughput training, 28+ exposed types, PEP 561 type stubs | 72+ passing Python tests including batched engine and PPO training smoke test |
+| **C FFI** | 41+ extern functions, slot+generation handle tables, panic-safe boundary, versioned ABI (v2.1) | Safe double-destroy, null validation, panic-to-status conversion; `#![forbid(unsafe_code)]` on everything above FFI |
+| **Python** | PyO3/maturin bindings, Gymnasium `Env` + `VecEnv` adapters, `BatchedWorld` + `BatchedVecEnv` high-throughput training, 28+ exposed types, PEP 561 type stubs | 87 passing Python tests including batched engine and PPO training smoke test |
 | **CI/CD** | 7 CI jobs (check, MSRV, test, clippy, fmt, Miri, deny), cross-platform (Ubuntu/macOS/Windows) | Manual release workflow publishing to crates.io and PyPI |
 | **Documentation** | Architecture guide, concepts guide, error reference (19K), replay format spec, determinism catalogue | `#![deny(missing_docs)]` enforced across all 11 public crates |
 

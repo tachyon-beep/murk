@@ -151,5 +151,6 @@ causes:
 
 3. **Timestep too large (CFL violation).** If `dt` exceeds the CFL
    stability limit for your propagator, diffusion can blow up or
-   oscillate. The engine checks `max_dt()` at startup, but only if the
-   propagator declares it. Reduce `dt` or add a `max_dt` declaration.
+   oscillate. The engine checks topology-aware `max_dt(space)` at
+   startup, but only if the propagator declares it. Reduce `dt` or add
+   a `max_dt` declaration.

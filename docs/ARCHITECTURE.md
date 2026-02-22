@@ -332,7 +332,7 @@ pub trait Propagator: Send + Sync {
     fn reads(&self) -> FieldSet;          // current-tick values (Euler)
     fn reads_previous(&self) -> FieldSet; // frozen tick-start values (Jacobi)
     fn writes(&self) -> Vec<(FieldId, WriteMode)>;
-    fn max_dt(&self) -> Option<f64>;      // CFL constraint
+    fn max_dt(&self, space: &dyn Space) -> Option<f64>; // topology-aware CFL constraint
     fn step(&self, ctx: &mut StepContext<'_>) -> Result<(), PropagatorError>;
 }
 ```
@@ -346,8 +346,9 @@ Key properties:
   (Jacobi style). This supports both integration approaches.
 - **Write-conflict detection** — the pipeline validates at startup that
   no two propagators write the same field in conflicting modes.
-- **CFL validation** — if a propagator declares `max_dt()`, the engine
-  checks `dt <= max_dt` at configuration time.
+- **CFL validation** — if a propagator declares `max_dt(space)`, the
+  engine checks `dt <= max_dt` at configuration time for the configured
+  topology.
 - **Deterministic execution order** — propagators run in the order they
   are registered. The pipeline is a strict ordered list.
 
@@ -509,7 +510,12 @@ Stable, handle-based C ABI:
   slot+generation for safe double-destroy.
 - Caller-allocated buffers for tensor output (no allocation on the
   hot path).
-- Versioned API with explicit error codes.
+- Versioned API with explicit error codes (current ABI: v2.1).
+- Panic-safe FFI boundary: all `extern "C"` entry points are guarded;
+  panics return `MurkStatus::Panicked` (-128) instead of unwinding.
+- Panic diagnostics are retrievable via `murk_last_panic_message`.
+- `MurkStepMetrics` includes sparse observability counters:
+  retired ranges, pending retired ranges, reuse hits, and reuse misses.
 
 ### Python (`murk-python`)
 
@@ -526,3 +532,5 @@ PyO3/maturin native extension:
   reward/termination logic.
 - Direct NumPy array filling via the C FFI path.
 - Python-defined propagators for prototyping.
+- FFI panic status (`-128`) maps to Python `RuntimeError` with the
+  captured panic message.
