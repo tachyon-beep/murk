@@ -98,8 +98,10 @@ macro_rules! ffi_guard_or {
 ///
 /// - If `buf` is null, returns the full message length (in bytes) without
 ///   copying anything. Returns `0` if no panic has been recorded.
-/// - Otherwise copies up to `cap - 1` bytes into `buf`, null-terminates, and
-///   returns the full message length.
+/// - Otherwise, if `cap > 0`, copies up to `cap - 1` bytes into `buf`,
+///   null-terminates, and returns the full message length.
+/// - If `cap == 0`, performs no writes and returns only the full message
+///   length.
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_last_panic_message(buf: *mut std::ffi::c_char, cap: usize) -> i32 {
@@ -114,9 +116,11 @@ pub extern "C" fn murk_last_panic_message(buf: *mut std::ffi::c_char, cap: usize
         }
         let copy_len = if cap > 0 { len.min(cap - 1) } else { 0 };
         // SAFETY: caller guarantees buf points to at least cap writable bytes.
-        unsafe {
-            std::ptr::copy_nonoverlapping(msg.as_ptr(), buf as *mut u8, copy_len);
-            *buf.add(copy_len) = 0; // null terminator
+        if cap > 0 {
+            unsafe {
+                std::ptr::copy_nonoverlapping(msg.as_ptr(), buf as *mut u8, copy_len);
+                *buf.add(copy_len) = 0; // null terminator
+            }
         }
         len as i32
     })
@@ -222,5 +226,18 @@ mod tests {
         LAST_PANIC.with(|cell| cell.borrow_mut().clear());
         let len = murk_last_panic_message(std::ptr::null_mut(), 0);
         assert_eq!(len, 0);
+    }
+
+    #[test]
+    fn last_panic_message_with_zero_cap_non_null_buffer_only_returns_length() {
+        let _ = ffi_guard!({
+            panic!("zero-cap test");
+        });
+
+        let mut sentinel = [0x7Au8; 1];
+        let len = murk_last_panic_message(sentinel.as_mut_ptr() as *mut std::ffi::c_char, 0);
+
+        assert_eq!(len, "zero-cap test".len() as i32);
+        assert_eq!(sentinel[0], 0x7A);
     }
 }

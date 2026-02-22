@@ -331,9 +331,12 @@ impl TickEngine {
         let publish_start = Instant::now();
         self.arena
             .publish(next_tick, self.param_version)
-            .map_err(|_| TickError {
-                kind: StepError::AllocationFailed,
-                receipts: vec![],
+            .map_err(|_| {
+                self.arena.reset_sparse_reuse_counters();
+                TickError {
+                    kind: StepError::AllocationFailed,
+                    receipts: vec![],
+                }
             })?;
         let snapshot_publish_us = publish_start.elapsed().as_micros() as u64;
 
@@ -379,6 +382,7 @@ impl TickEngine {
         accepted_start: usize,
     ) -> Result<TickResult, TickError> {
         // Guard was dropped → staging buffer abandoned (free rollback).
+        self.arena.reset_sparse_reuse_counters();
         self.consecutive_rollback_count += 1;
         if self.consecutive_rollback_count >= self.max_consecutive_rollbacks {
             self.tick_disabled = true;
@@ -463,6 +467,7 @@ mod tests {
     use murk_core::{BoundaryBehavior, FieldDef, FieldMutability, FieldType};
     use murk_propagator::propagator::WriteMode;
     use murk_space::{EdgeBehavior, Line1D};
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use murk_test_utils::{ConstPropagator, FailingPropagator, IdentityPropagator};
 
     fn scalar_field(name: &str) -> FieldDef {
@@ -470,6 +475,17 @@ mod tests {
             name: name.to_string(),
             field_type: FieldType::Scalar,
             mutability: FieldMutability::PerTick,
+            units: None,
+            bounds: None,
+            boundary_behavior: BoundaryBehavior::Clamp,
+        }
+    }
+
+    fn sparse_scalar_field(name: &str) -> FieldDef {
+        FieldDef {
+            name: name.to_string(),
+            field_type: FieldType::Scalar,
+            mutability: FieldMutability::Sparse,
             units: None,
             bounds: None,
             boundary_behavior: BoundaryBehavior::Clamp,
@@ -1040,6 +1056,90 @@ mod tests {
 
         let metrics = engine.last_metrics();
         assert!(metrics.memory_bytes > 0);
+    }
+
+    #[test]
+    fn rollback_clears_sparse_reuse_counters_for_next_success() {
+        struct MaybeFailPropagator {
+            output: FieldId,
+            fail_on_call: Option<usize>,
+            call_count: AtomicUsize,
+        }
+
+        impl MaybeFailPropagator {
+            fn new(output: FieldId, fail_on_call: Option<usize>) -> Self {
+                Self {
+                    output,
+                    fail_on_call,
+                    call_count: AtomicUsize::new(0),
+                }
+            }
+        }
+
+        impl Propagator for MaybeFailPropagator {
+            fn name(&self) -> &str {
+                "maybe_fail"
+            }
+
+            fn reads(&self) -> murk_core::FieldSet {
+                murk_core::FieldSet::empty()
+            }
+
+            fn writes(&self) -> Vec<(FieldId, WriteMode)> {
+                vec![(self.output, WriteMode::Full)]
+            }
+
+            fn step(
+                &self,
+                ctx: &mut murk_propagator::StepContext<'_>,
+            ) -> Result<(), murk_core::PropagatorError> {
+                let n = self.call_count.fetch_add(1, Ordering::Relaxed);
+                if self.fail_on_call == Some(n) {
+                    return Err(murk_core::PropagatorError::ExecutionFailed {
+                        reason: format!("deliberate failure on call {n}"),
+                    });
+                }
+
+                let output = ctx.writes().write(self.output).ok_or_else(|| {
+                    murk_core::PropagatorError::ExecutionFailed {
+                        reason: format!("field {:?} not writable", self.output),
+                    }
+                })?;
+                output.fill(n as f32);
+                Ok(())
+            }
+        }
+
+        fn sparse_engine(fail_on_call: Option<usize>) -> TickEngine {
+            let config = WorldConfig {
+                space: Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()),
+                fields: vec![sparse_scalar_field("sparse0"), scalar_field("field1")],
+                propagators: vec![
+                    Box::new(ConstPropagator::new("write_sparse", FieldId(0), 3.0)),
+                    Box::new(MaybeFailPropagator::new(FieldId(1), fail_on_call)),
+                ],
+                dt: 0.1,
+                seed: 42,
+                ring_buffer_size: 8,
+                max_ingress_queue: 1024,
+                tick_rate_hz: None,
+                backoff: crate::config::BackoffConfig::default(),
+            };
+            let mut engine = TickEngine::new(config).unwrap();
+            engine.arena.reset_sparse_reuse_counters();
+            engine
+        }
+
+        let mut rollback_engine = sparse_engine(Some(1)); // fail on tick 2
+        rollback_engine.execute_tick().unwrap();
+
+        let rollback = rollback_engine.execute_tick();
+        assert!(rollback.is_err(), "tick 2 should fail and roll back");
+        assert_eq!(rollback_engine.arena.sparse_reuse_hits(), 0);
+        assert_eq!(rollback_engine.arena.sparse_reuse_misses(), 0);
+
+        // A subsequent tick should still execute successfully after rollback.
+        rollback_engine.execute_tick().unwrap();
     }
 
     // ── Bug-fix regression tests ─────────────────────────────

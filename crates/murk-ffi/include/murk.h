@@ -567,8 +567,10 @@ typedef struct MurkReceipt {
  *
  * - If `buf` is null, returns the full message length (in bytes) without
  *   copying anything. Returns `0` if no panic has been recorded.
- * - Otherwise copies up to `cap - 1` bytes into `buf`, null-terminates, and
- *   returns the full message length.
+ * - Otherwise, if `cap > 0`, copies up to `cap - 1` bytes into `buf`,
+ *   null-terminates, and returns the full message length.
+ * - If `cap == 0`, performs no writes and returns only the full message
+ *   length.
  */
 int32_t murk_last_panic_message(char *buf, uintptr_t cap);
 
