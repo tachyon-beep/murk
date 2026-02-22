@@ -2,7 +2,7 @@
 
 Binary format for deterministic replay recording and playback. All integers are little-endian. Strings and byte arrays are length-prefixed with a `u32` length. No compression, no alignment padding, no self-describing schema.
 
-**Current version:** 2
+**Current version:** 3
 **Magic:** `b"MURK"` (4 bytes)
 **Byte order:** Little-endian throughout
 
@@ -39,7 +39,7 @@ The header is written once at file creation by `ReplayWriter::new()` and validat
 Offset  Size     Type                Description
 ──────  ────     ────                ───────────
 0       4        [u8; 4]             Magic bytes: b"MURK"
-4       1        u8                  Format version (currently 2)
+4       1        u8                  Format version (currently 3)
 ```
 
 ### Build Metadata
@@ -111,11 +111,13 @@ Offset  Size     Type                Description
 +7+N    0 or 8   u64 LE              source_id value (only if presence flag = 1)
 +...    1        u8                  source_seq presence flag (0 = absent, 1 = present)
 +...    0 or 8   u64 LE              source_seq value (only if presence flag = 1)
++...    8        u64 LE              expires_after_tick
++...    8        u64 LE              arrival_seq
 ```
 
 **Command size:** varies from 8 bytes (minimum: 1 + 4 + 0 + 1 + 1 + 1 = 8 with empty payload, no source fields) to unbounded depending on payload size and source field presence.
 
-**Not serialized:** `expires_after_tick` and `arrival_seq` are not recorded in the replay format. On deserialization, `expires_after_tick` is set to `TickId(u64::MAX)` and `arrival_seq` is set to `0`.
+`expires_after_tick` and `arrival_seq` are serialized in format version 3.
 
 ### Presence Flag Encoding
 
@@ -262,13 +264,19 @@ The hash is computed by `snapshot_hash()` in `crates/murk-replay/src/hash.rs` an
 
 ## Version History
 
-### Version 2 (current)
+### Version 3 (current)
+
+- **expires_after_tick and arrival_seq** are appended per command as `u64 LE` values.
+- This preserves command expiry and deterministic ordering metadata through replay.
+
+### Version 2
 
 - **source_id and source_seq** use presence-flag encoding: a `u8` flag (`0` = absent, `1` = present) followed by an optional `u64` value.
 - This correctly distinguishes `None` from `Some(0)`.
+- **Superseded** by version 3. Files with version 2 are rejected with `ReplayError::UnsupportedVersion { found: 2 }`.
 
 ### Version 1
 
 - **source_id and source_seq** were encoded as bare `u64` values where `0` meant "not set".
 - Bug: `Some(0)` was indistinguishable from `None`, causing incorrect replay of commands with `source_id = Some(0)`.
-- **Superseded** by version 2. Files with version 1 are rejected with `ReplayError::UnsupportedVersion { found: 1 }`.
+- **Superseded** by later versions. Files with version 1 are rejected with `ReplayError::UnsupportedVersion { found: 1 }`.

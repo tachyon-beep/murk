@@ -27,6 +27,12 @@ type ObsPlanArc = Arc<Mutex<ObsPlanState>>;
 
 static OBS_PLANS: Mutex<HandleTable<ObsPlanArc>> = Mutex::new(HandleTable::new());
 
+/// Hard limits for FFI agent-batch execution to avoid pathological allocations.
+///
+/// These are API-facing guardrails, not core engine limits.
+const MAX_EXECUTE_AGENTS: usize = 1_000_000;
+const MAX_EXECUTE_AGENT_DIMS: usize = 16;
+
 /// Clone the Arc for a plan handle, briefly locking the global table.
 ///
 /// Returns `None` if the handle is invalid or the mutex is poisoned.
@@ -329,13 +335,14 @@ pub extern "C" fn murk_obsplan_execute_agents(
         }
         let n = n_agents as usize;
         let dim = ndim as usize;
+        if n > MAX_EXECUTE_AGENTS || dim > MAX_EXECUTE_AGENT_DIMS {
+            return MurkStatus::InvalidArgument as i32;
+        }
 
-        // SAFETY: agent_centers points to n * dim valid i32 values.
-        let centers_flat = unsafe { std::slice::from_raw_parts(agent_centers, n * dim) };
-        let centers: Vec<Coord> = centers_flat
-            .chunks_exact(dim)
-            .map(|chunk| chunk.iter().copied().collect())
-            .collect();
+        let centers_len = match n.checked_mul(dim) {
+            Some(v) => v,
+            None => return MurkStatus::InvalidArgument as i32,
+        };
 
         // Acquire per-plan Arc briefly, then drop global table lock.
         let plan_arc = match get_obs_plan(plan_handle) {
@@ -343,6 +350,34 @@ pub extern "C" fn murk_obsplan_execute_agents(
             None => return MurkStatus::InvalidHandle as i32,
         };
         let mut plan_state = ffi_lock!(plan_arc);
+
+        // Validate caller buffers before doing heavier work.
+        let expected_out = match plan_state
+            .cache
+            .output_len()
+            .and_then(|per_agent| per_agent.checked_mul(n))
+        {
+            Some(v) => v,
+            None => return MurkStatus::InvalidArgument as i32,
+        };
+        let expected_mask = match plan_state
+            .cache
+            .mask_len()
+            .and_then(|per_agent| per_agent.checked_mul(n))
+        {
+            Some(v) => v,
+            None => return MurkStatus::InvalidArgument as i32,
+        };
+        if output_len < expected_out || mask_len < expected_mask {
+            return MurkStatus::BufferTooSmall as i32;
+        }
+
+        // SAFETY: agent_centers points to `centers_len` valid i32 values.
+        let centers_flat = unsafe { std::slice::from_raw_parts(agent_centers, centers_len) };
+        let centers: Vec<Coord> = centers_flat
+            .chunks_exact(dim)
+            .map(|chunk| chunk.iter().copied().collect())
+            .collect();
 
         // SAFETY: output/mask point to output_len/mask_len valid elements.
         let out_slice = unsafe { std::slice::from_raw_parts_mut(output, output_len) };
@@ -713,5 +748,47 @@ mod tests {
         assert_eq!(status, MurkStatus::InvalidObsSpec as i32);
 
         crate::world::murk_lockstep_destroy(world_h);
+    }
+
+    #[test]
+    fn execute_agents_rejects_excessive_agent_count() {
+        let mut output = [0.0f32; 1];
+        let mut mask = [0u8; 1];
+        let centers = [0i32; 1];
+
+        let status = murk_obsplan_execute_agents(
+            0,
+            0,
+            centers.as_ptr(),
+            1,
+            i32::MAX,
+            output.as_mut_ptr(),
+            output.len(),
+            mask.as_mut_ptr(),
+            mask.len(),
+            std::ptr::null_mut(),
+        );
+        assert_eq!(status, MurkStatus::InvalidArgument as i32);
+    }
+
+    #[test]
+    fn execute_agents_rejects_excessive_dimensions() {
+        let mut output = [0.0f32; 1];
+        let mut mask = [0u8; 1];
+        let centers = [0i32; 1];
+
+        let status = murk_obsplan_execute_agents(
+            0,
+            0,
+            centers.as_ptr(),
+            17,
+            1,
+            output.as_mut_ptr(),
+            output.len(),
+            mask.as_mut_ptr(),
+            mask.len(),
+            std::ptr::null_mut(),
+        );
+        assert_eq!(status, MurkStatus::InvalidArgument as i32);
     }
 }
