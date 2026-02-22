@@ -86,6 +86,10 @@ impl Space for Ring1D {
         line1d::wrap_neighbours_1d(coord[0], self.len)
     }
 
+    fn max_neighbour_degree(&self) -> usize {
+        2
+    }
+
     fn distance(&self, a: &Coord, b: &Coord) -> f64 {
         line1d::wrap_distance_1d(a[0], b[0], self.len)
     }

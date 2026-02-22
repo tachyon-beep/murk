@@ -124,6 +124,25 @@ impl Space for Square8 {
             .collect()
     }
 
+    fn max_neighbour_degree(&self) -> usize {
+        match self.edge {
+            EdgeBehavior::Clamp | EdgeBehavior::Wrap => 8,
+            EdgeBehavior::Absorb => {
+                let axis_max = |len: u32| -> usize {
+                    match len {
+                        0 | 1 => 0,
+                        2 => 1,
+                        _ => 2,
+                    }
+                };
+                let v = axis_max(self.rows);
+                let h = axis_max(self.cols);
+                // Degree = cardinals + diagonals.
+                (v + h) + (v * h)
+            }
+        }
+    }
+
     fn distance(&self, a: &Coord, b: &Coord) -> f64 {
         // Chebyshev (L-inf) distance — matches graph geodesic for 8-connected.
         let dr = grid2d::axis_distance(a[0], b[0], self.rows, self.edge);

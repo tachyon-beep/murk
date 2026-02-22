@@ -360,6 +360,13 @@ impl Space for ProductSpace {
         result
     }
 
+    fn max_neighbour_degree(&self) -> usize {
+        self.components
+            .iter()
+            .map(|c| c.max_neighbour_degree())
+            .sum()
+    }
+
     /// Default product-space distance: L1 (Manhattan) sum of per-component distances.
     ///
     /// d(a, b) = sum_i d_i(a_i, b_i)

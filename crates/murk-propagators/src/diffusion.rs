@@ -306,12 +306,7 @@ impl Propagator for DiffusionPropagator {
             return None;
         }
 
-        let ordering = space.canonical_ordering();
-        let max_degree = ordering
-            .iter()
-            .map(|coord| space.neighbours(coord).len())
-            .max()
-            .unwrap_or(0);
+        let max_degree = space.max_neighbour_degree();
         if max_degree == 0 {
             return None;
         }

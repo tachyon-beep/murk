@@ -226,6 +226,17 @@ impl Space for Hex2D {
             .collect()
     }
 
+    fn max_neighbour_degree(&self) -> usize {
+        match (self.rows, self.cols) {
+            (1, 1) => 0,
+            (1, 2) | (2, 1) => 1,
+            (1, _) | (_, 1) => 2,
+            (2, 2) => 3,
+            (2, _) | (_, 2) => 4,
+            _ => 6,
+        }
+    }
+
     fn distance(&self, a: &Coord, b: &Coord) -> f64 {
         Self::cube_distance(a[0], a[1], b[0], b[1]) as f64
     }

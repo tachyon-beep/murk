@@ -459,12 +459,7 @@ impl Propagator for ScalarDiffusion {
         if self.coefficient <= 0.0 {
             return None;
         }
-        let ordering = space.canonical_ordering();
-        let space_degree = ordering
-            .iter()
-            .map(|coord| space.neighbours(coord).len() as u32)
-            .max()
-            .unwrap_or(0);
+        let space_degree = space.max_neighbour_degree() as u32;
 
         let effective_degree = space_degree.max(self.max_degree);
         if effective_degree == 0 {

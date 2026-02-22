@@ -127,6 +127,22 @@ impl Space for Square4 {
             .collect()
     }
 
+    fn max_neighbour_degree(&self) -> usize {
+        match self.edge {
+            EdgeBehavior::Clamp | EdgeBehavior::Wrap => 4,
+            EdgeBehavior::Absorb => {
+                let axis_max = |len: u32| -> usize {
+                    match len {
+                        0 | 1 => 0,
+                        2 => 1,
+                        _ => 2,
+                    }
+                };
+                axis_max(self.rows) + axis_max(self.cols)
+            }
+        }
+    }
+
     fn distance(&self, a: &Coord, b: &Coord) -> f64 {
         // Manhattan (L1) distance — matches graph geodesic for 4-connected.
         let dr = grid2d::axis_distance(a[0], b[0], self.rows, self.edge);
