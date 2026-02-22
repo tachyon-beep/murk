@@ -23,6 +23,7 @@ generational allocation for deterministic, zero-GC memory management.
 - [Examples](#examples)
 - [Modeling Concepts](#modeling-concepts)
 - [Documentation](#documentation)
+- [Changelog](#changelog)
 - [Design](#design)
 - [Testing](#testing)
 - [Next Steps](#next-steps)
@@ -553,6 +554,11 @@ zero per-tick overhead.
 ## Documentation
 
 - **[API Reference (rustdoc)](https://tachyon-beep.github.io/murk/api/)** — auto-published on every push to `main`
+- **[mdBook Guides](https://tachyon-beep.github.io/murk/)** — tutorials and conceptual guides
+
+## Changelog
+
+- **[CHANGELOG.md](CHANGELOG.md)** — release notes and unreleased changes
 
 ## Design
 

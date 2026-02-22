@@ -38,14 +38,17 @@ Command:
 
 ```bash
 rg -n "FORMAT_VERSION|Current version|requires-python|QueueFull|tick_disabled|MurkStepMetrics" \
-  docs/replay-format.md crates/murk-replay/src/lib.rs README.md book/src/getting-started.md \
+  docs/replay-format.md crates/murk-replay/src/lib.rs README.md CHANGELOG.md book/src/getting-started.md \
   crates/murk-python/pyproject.toml crates/murk-engine/src crates/murk-ffi/src
+python scripts/check_replay_format_version.py
+python scripts/check_install_docs_consistency.py
 ```
 
 Result summary:
 
 - Replay version alignment found (`docs/replay-format.md`, `crates/murk-replay/src/lib.rs`).
 - Install Python version contract found (`crates/murk-python/pyproject.toml`).
+- README/book/changelog consistency checks pass via scripted docs checks.
 - Realtime/drop/disabled telemetry surfaces found across engine + FFI metrics/status paths.
 
 ### 2) Classification-only analysis diff

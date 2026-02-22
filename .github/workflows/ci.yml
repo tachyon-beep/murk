@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@v6
       - name: Validate replay format docs match code
         run: python3 scripts/check_replay_format_version.py
-      - name: Validate install docs consistency
+      - name: Validate docs consistency (README/book/changelog)
         run: python3 scripts/check_install_docs_consistency.py
       - name: Ensure generated artifacts are not tracked
         run: |
