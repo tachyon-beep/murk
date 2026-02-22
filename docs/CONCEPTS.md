@@ -170,7 +170,7 @@ def my_propagator(reads, reads_prev, writes, tick_id, dt, cell_count):
 
 ```rust
 fn step(&self, ctx: &mut StepContext<'_>) -> Result<(), PropagatorError> {
-    let prev_heat = ctx.reads_previous().read_field(HEAT_ID)?;
+    let prev_heat = ctx.reads_previous().read(HEAT_ID)?;
     let space = ctx.space();
     let writer = ctx.writes();
     // ... compute new values, write to output ...
@@ -244,6 +244,7 @@ user input, network messages) enter the tick loop.
 | `Spawn(coord, field_values)` | Create a new entity |
 | `Despawn(entity_id)` | Remove an entity |
 | `SetParameter(key, value)` | Change a global simulation parameter |
+| `SetParameterBatch(pairs)` | Change multiple parameters atomically |
 | `Custom(type_id, data)` | User-defined command type |
 
 In the Python API, the most common command is `SetField`:
@@ -252,6 +253,11 @@ In the Python API, the most common command is `SetField`:
 cmd = Command.set_field(field_id=1, coord=[5, 3], value=1.0)
 receipts, metrics = world.step([cmd])
 ```
+
+Python currently exposes `Command.set_field(...)` and
+`Command.set_parameter(...)` convenience constructors. The full command
+surface (including `SetParameterBatch`, `Move`, `Spawn`, and `Despawn`)
+is available at the core/engine level.
 
 ### Receipts
 
@@ -269,7 +275,8 @@ is stale (refers to an old tick), or the world is shutting down.
 ### Command ordering
 
 Commands are applied in this order: `priority_class` (lower = higher
-priority), then `source_id`, then `arrival_seq` (monotonic counter).
+priority), then `source_id`, then `source_seq`, then `arrival_seq`
+(monotonic counter).
 System commands (priority 0) run before user commands (priority 1).
 
 ---
@@ -291,7 +298,7 @@ suitable for neural networks.
 # 1. Specify what to observe
 obs_entries = [
     ObsEntry(field_id=0, region_type=RegionType.All),
-    ObsEntry(field_id=1, region_type=RegionType.AgentDisk, radius=3),
+    ObsEntry(field_id=1, region_type=RegionType.AgentDisk, region_params=[3]),
 ]
 
 # 2. MurkEnv compiles the plan internally
@@ -304,8 +311,8 @@ obs, reward, terminated, truncated, info = env.step(action)
 | Region | Description | When to use |
 |--------|-------------|-------------|
 | `All` | Every cell in the space | Full observability, small grids |
-| `AgentDisk(radius)` | Cells within `radius` graph-distance of the agent | Partial observability, foveation |
-| `AgentRect(half_extent)` | Axis-aligned bounding box around agent | Rectangular partial observability |
+| `AgentDisk` | Cells within `region_params=[radius]` graph-distance of the agent | Partial observability, foveation |
+| `AgentRect` | Axis-aligned bounding box around agent (`region_params=[half_w, half_h, ...]`) | Rectangular partial observability |
 
 `All` is the simplest — you get `cell_count` floats per entry. Agent-centered
 regions give partial observability and scale better on large grids.
@@ -322,12 +329,13 @@ Transforms are applied to field values during extraction:
 
 For large observations, pooling reduces dimensionality:
 
+- `PoolKernel.NoPool` — no pooling (default)
 - `PoolKernel.Mean` — average of each window
 - `PoolKernel.Max` — maximum of each window
 - `PoolKernel.Min` — minimum of each window
 - `PoolKernel.Sum` — sum of each window
 
-Pooling is configured per-entry with `kernel_size` and `stride`.
+Pooling is configured per-entry with `pool_kernel_size` and `pool_stride`.
 
 ### Observation layout
 
@@ -540,7 +548,7 @@ config.set_seed(42)
 # 4. Observations: define what the agent sees
 obs_entries = [
     ObsEntry(0, region_type=RegionType.All),       # Full temperature grid
-    ObsEntry(2, region_type=RegionType.AgentDisk, radius=5),  # Agent's local view
+    ObsEntry(2, region_type=RegionType.AgentDisk, region_params=[5]),  # Agent's local view
 ]
 
 # 5. Environment: wraps everything in the Gymnasium interface

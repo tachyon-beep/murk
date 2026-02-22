@@ -197,10 +197,11 @@ let heat = result.snapshot.read(FieldId(0)).unwrap();
 An autonomous tick thread running at a configurable rate (e.g., 60 Hz).
 
 ```rust
-let world = RealtimeAsyncWorld::start(config)?;
+let async_config = AsyncConfig::default();
+let mut world = RealtimeAsyncWorld::new(config, async_config)?;
 world.submit_commands(commands)?;
 let snapshot = world.latest_snapshot();
-let report = world.shutdown(Duration::from_secs(5))?;
+let report = world.shutdown();
 ```
 
 - Non-blocking command submission and observation extraction.
@@ -382,7 +383,8 @@ invalidated and must be recompiled.
 Commands are the way external actions enter the simulation. Each
 command carries:
 
-- **Payload**: `SetField`, `SpawnEntity`, `RemoveEntity`, or custom.
+- **Payload**: `SetField`, `Move`, `Spawn`, `Despawn`,
+  `SetParameter`, `SetParameterBatch`, or `Custom`.
 - **TTL**: `expires_after_tick` — tick-based expiry (never wall clock).
 - **Priority class**: determines application order within a tick.
 - **Ordering provenance**: `source_id`, `source_seq`, and
@@ -391,7 +393,8 @@ command carries:
 The TickEngine drains and applies commands in deterministic order:
 1. Resolve `apply_tick_id` for each command.
 2. Group by tick.
-3. Sort within tick by priority class, then source ordering.
+3. Sort within tick by priority class, then `source_id`, then
+   `source_seq`, then `arrival_seq`.
 
 Every command produces a `Receipt` reporting whether it was accepted,
 which tick it was applied at, and a reason code if rejected.
