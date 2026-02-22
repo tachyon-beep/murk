@@ -100,11 +100,12 @@ impl ProductSpace {
         let component_cell_counts: Vec<usize> = components.iter().map(|c| c.cell_count()).collect();
         let mut total_cells: usize = 1;
         for count in &component_cell_counts {
-            total_cells = total_cells.checked_mul(*count).ok_or_else(|| {
-                SpaceError::InvalidComposition {
-                    reason: "total cell count overflows usize".to_string(),
-                }
-            })?;
+            total_cells =
+                total_cells
+                    .checked_mul(*count)
+                    .ok_or_else(|| SpaceError::InvalidComposition {
+                        reason: "total cell count overflows usize".to_string(),
+                    })?;
         }
 
         // rank_strides[i] = product(component_cell_counts[j] for j > i)

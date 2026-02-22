@@ -624,7 +624,7 @@ typedef struct MurkWorldPreflight {
 } MurkWorldPreflight;
 
 /**
- * Retrieve the panic message stored by the most recent [`ffi_guard!`] catch
+ * Retrieve the panic message stored by the most recent `ffi_guard!` catch
  * on this thread.
  *
  * - If `buf` is null, returns the full message length (in bytes) without
