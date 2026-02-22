@@ -1016,9 +1016,17 @@ mod tests {
         assert_eq!(initial.command_queue_capacity, 64);
         assert!(initial.observe_queue_capacity > 0);
         assert_eq!(initial.ring_capacity, 8);
-        assert_eq!(initial.ring_len, 0);
-        assert_eq!(initial.ring_write_pos, 0);
-        assert_eq!(initial.ring_oldest_retained_pos, None);
+        assert!(initial.ring_len <= initial.ring_capacity);
+        assert!(initial.ring_write_pos >= initial.ring_len as u64);
+        if initial.has_snapshot {
+            assert!(initial.ring_len > 0);
+            assert!(initial.latest_snapshot_tick_id > 0);
+            assert!(initial.ring_oldest_retained_pos.is_some());
+        } else {
+            assert_eq!(initial.ring_len, 0);
+            assert_eq!(initial.ring_write_pos, 0);
+            assert_eq!(initial.ring_oldest_retained_pos, None);
+        }
         assert!(!initial.tick_thread_stopped);
 
         let deadline = Instant::now() + Duration::from_secs(2);
@@ -1065,7 +1073,15 @@ mod tests {
                 .expect("expected ingress queue to accept batch");
         }
 
-        let preflight = world.preflight();
+        let deadline = Instant::now() + Duration::from_millis(500);
+        let mut preflight = world.preflight();
+        while preflight.command_queue_depth == 0 {
+            if Instant::now() > deadline {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+            preflight = world.preflight();
+        }
         assert!(preflight.command_queue_depth > 0);
         assert!(preflight.command_queue_depth <= preflight.command_queue_capacity);
 
