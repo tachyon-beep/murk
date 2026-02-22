@@ -1057,6 +1057,18 @@ mod tests {
             ..test_config()
         };
         let mut world = RealtimeAsyncWorld::new(config, AsyncConfig::default()).unwrap();
+
+        // Wait for the first publish so the tick thread enters budget sleep.
+        // Enqueueing after this point makes backlog visibility deterministic
+        // in slow/instrumented runners (e.g., tarpaulin).
+        let ready_deadline = Instant::now() + Duration::from_secs(5);
+        while world.latest_snapshot().is_none() {
+            if Instant::now() > ready_deadline {
+                panic!("no snapshot produced within 5s");
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
         let cmd_tx = world
             .cmd_tx
             .as_ref()
