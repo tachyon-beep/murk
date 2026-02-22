@@ -5,7 +5,7 @@
 //! - agent-relative extraction throughput under batched centers
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use murk_core::{Coord, FieldId};
+use murk_core::{Coord, FieldId, SnapshotAccess};
 use murk_engine::LockstepWorld;
 use murk_obs::{ObsDtype, ObsEntry, ObsPlan, ObsRegion, ObsSpec, ObsTransform};
 use murk_propagators::agent_movement::new_action_buffer;
@@ -149,10 +149,58 @@ fn bench_obs_execute_agents(c: &mut Criterion) {
     group.finish();
 }
 
+/// Benchmark: execute simple fixed-region batch extraction.
+fn bench_obs_execute_batch(c: &mut Criterion) {
+    let ab = new_action_buffer();
+    let config = reference_profile(42, ab);
+    let space = config.space.as_ref();
+
+    let spec = fixed_obs_spec();
+    let plan_result = ObsPlan::compile(&spec, space).unwrap();
+    let world = make_world_with_snapshot();
+    let plan = plan_result.plan;
+
+    let per_env_output = plan_result.output_len;
+    let per_env_mask = plan_result.mask_len;
+
+    let mut output_16 = vec![0.0f32; per_env_output * 16];
+    let mut mask_16 = vec![0u8; per_env_mask * 16];
+    let mut output_64 = vec![0.0f32; per_env_output * 64];
+    let mut mask_64 = vec![0u8; per_env_mask * 64];
+
+    let mut group = c.benchmark_group("obs_execute_batch");
+    group.throughput(Throughput::Elements((per_env_output * 16) as u64));
+    group.bench_function("fixed_all/16", |b| {
+        b.iter(|| {
+            let snap = world.snapshot();
+            let snap_ref: &dyn SnapshotAccess = &snap;
+            let snaps = [snap_ref; 16];
+            let meta = plan
+                .execute_batch(&snaps, None, &mut output_16, &mut mask_16)
+                .unwrap();
+            std::hint::black_box(&meta);
+        });
+    });
+    group.throughput(Throughput::Elements((per_env_output * 64) as u64));
+    group.bench_function("fixed_all/64", |b| {
+        b.iter(|| {
+            let snap = world.snapshot();
+            let snap_ref: &dyn SnapshotAccess = &snap;
+            let snaps = [snap_ref; 64];
+            let meta = plan
+                .execute_batch(&snaps, None, &mut output_64, &mut mask_64)
+                .unwrap();
+            std::hint::black_box(&meta);
+        });
+    });
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_obs_compile,
     bench_obs_execute_fixed_10k,
-    bench_obs_execute_agents
+    bench_obs_execute_agents,
+    bench_obs_execute_batch
 );
 criterion_main!(benches);

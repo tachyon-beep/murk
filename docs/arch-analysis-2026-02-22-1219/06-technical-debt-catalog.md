@@ -55,10 +55,10 @@
 - **Effort:** M–L
 - **Category:** Performance / Product Capability
 
-### [Open] Observations: avoidable allocations and redundant batch work
+### [Resolved] Observations: avoidable allocations and redundant batch work
 
 - **Evidence:** `crates/murk-obs/src/plan.rs`, `crates/murk-obs/src/pool.rs`
-- **Impact:** Increased heap churn and linear scaling penalties for large multi-agent or batched training workloads.
+- **Impact:** Previously increased heap churn and linear scaling penalties for large multi-agent or batched training workloads; pooled-path allocations are removed and batch hot path reduced.
 - **Effort:** M
 - **Category:** Performance
 

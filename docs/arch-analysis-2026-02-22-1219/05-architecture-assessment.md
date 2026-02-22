@@ -38,7 +38,7 @@
 
 ### 5) Scale/Perf Hotspots Are Predictable and Fixable
 
-- Observation execution has avoidable per-call allocations (pooling) and batch execution repeats work linearly (`crates/murk-obs/src/plan.rs`, `crates/murk-obs/src/pool.rs`).
+- Observation execution allocation/batch hotspots in `murk-obs` have been reduced; remaining scale debt is now concentrated in `murk-space` and `murk-arena`.
 - Space region lookup defaults are O(region size) unless backends override, and canonical ordering materialization can become expensive for large/high-D spaces (`crates/murk-space/src/space.rs`, `crates/murk-space/src/product.rs`).
 - Arena snapshots may copy more than necessary (owned snapshot strategy) and sparse reuse can degrade with linear scans (`crates/murk-arena/src/read.rs`, `crates/murk-arena/src/sparse.rs`).
 
@@ -48,4 +48,4 @@
 2. **[Resolved] Remove tracked binary/caches from the repo** and validate artifact-first packaging via release smoke tests.
 3. **[Resolved] Finish the FFI hardening pass** (checked arithmetic, bounded allocations, stable error reporting) and implement a documented poisoning recovery policy.
 4. **[Resolved] Add realtime-first telemetry**: queue saturation, rollbacks/tick-disabled transitions, worker-stall events, ring “not available” rates, and ring retention/skew signals are exposed in Rust/FFI/Python metrics plus realtime preflight.
-5. **[Open] Pay down the obvious perf debt** in `murk-obs`, `murk-space`, and snapshot handling before building v0.2 features that multiply observation complexity (LOS sensors, heterogeneous specs).
+5. **[PartiallyResolved] Pay down the obvious perf debt**: `murk-obs` is improved; `murk-space` and snapshot handling remain before building v0.2 features that multiply observation complexity (LOS sensors, heterogeneous specs).

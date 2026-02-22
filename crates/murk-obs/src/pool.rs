@@ -20,11 +20,26 @@ pub fn pool_2d(
     input_shape: &[usize],
     config: &PoolConfig,
 ) -> (Vec<f32>, Vec<u8>, Vec<usize>) {
+    let (out_h, out_w) = pool_2d_output_shape(input_shape, config);
+    let out_len = out_h * out_w;
+    let mut output = vec![0.0f32; out_len];
+    let mut output_mask = vec![0u8; out_len];
+    pool_2d_into(
+        input,
+        input_mask,
+        input_shape,
+        config,
+        &mut output,
+        &mut output_mask,
+    );
+    (output, output_mask, vec![out_h, out_w])
+}
+
+/// Return the output shape for a 2D pool operation.
+pub fn pool_2d_output_shape(input_shape: &[usize], config: &PoolConfig) -> (usize, usize) {
     assert_eq!(input_shape.len(), 2, "pool_2d requires 2D input shape");
     let h = input_shape[0];
     let w = input_shape[1];
-    assert_eq!(input.len(), h * w);
-    assert_eq!(input_mask.len(), h * w);
 
     let ks = config.kernel_size;
     let stride = config.stride;
@@ -33,11 +48,42 @@ pub fn pool_2d(
 
     let out_h = if h >= ks { (h - ks) / stride + 1 } else { 0 };
     let out_w = if w >= ks { (w - ks) / stride + 1 } else { 0 };
-    let out_len = out_h * out_w;
+    (out_h, out_w)
+}
 
-    let mut output = vec![0.0f32; out_len];
-    let mut output_mask = vec![0u8; out_len];
-    let output_shape = vec![out_h, out_w];
+/// Apply 2D pooling into caller-provided output buffers (no allocation).
+///
+/// Returns `(out_h, out_w)`.
+pub fn pool_2d_into(
+    input: &[f32],
+    input_mask: &[u8],
+    input_shape: &[usize],
+    config: &PoolConfig,
+    output: &mut [f32],
+    output_mask: &mut [u8],
+) -> (usize, usize) {
+    assert_eq!(input_shape.len(), 2, "pool_2d_into requires 2D input shape");
+    let h = input_shape[0];
+    let w = input_shape[1];
+    assert_eq!(input.len(), h * w);
+    assert_eq!(input_mask.len(), h * w);
+
+    let (out_h, out_w) = pool_2d_output_shape(input_shape, config);
+    let ks = config.kernel_size;
+    let stride = config.stride;
+    let out_len = out_h * out_w;
+    assert!(
+        output.len() >= out_len,
+        "output buffer too small: {} < {}",
+        output.len(),
+        out_len
+    );
+    assert!(
+        output_mask.len() >= out_len,
+        "output_mask buffer too small: {} < {}",
+        output_mask.len(),
+        out_len
+    );
 
     for oh in 0..out_h {
         for ow in 0..out_w {
@@ -90,11 +136,14 @@ pub fn pool_2d(
                     PoolKernel::Mean => accum / valid_count as f32,
                     PoolKernel::Max | PoolKernel::Min | PoolKernel::Sum => accum,
                 };
+            } else {
+                output_mask[out_idx] = 0;
+                output[out_idx] = 0.0;
             }
         }
     }
 
-    (output, output_mask, output_shape)
+    (out_h, out_w)
 }
 
 #[cfg(test)]
@@ -211,5 +260,24 @@ mod tests {
         let (output, _, out_shape) = pool_2d(&input, &mask, &[2, 2], &cfg);
         assert_eq!(out_shape, vec![0, 0]);
         assert!(output.is_empty());
+    }
+
+    #[test]
+    fn pool_2d_into_matches_allocating_variant() {
+        let input: Vec<f32> = (1..=16).map(|x| x as f32).collect();
+        let mask = vec![1u8; 16];
+        let cfg = pool_cfg(PoolKernel::Mean, 2, 2);
+
+        let (expected_output, expected_mask, expected_shape) =
+            pool_2d(&input, &mask, &[4, 4], &cfg);
+        let (out_h, out_w) = pool_2d_output_shape(&[4, 4], &cfg);
+        let mut output = vec![123.0f32; out_h * out_w];
+        let mut output_mask = vec![9u8; out_h * out_w];
+        let actual_shape =
+            pool_2d_into(&input, &mask, &[4, 4], &cfg, &mut output, &mut output_mask);
+
+        assert_eq!(actual_shape, (expected_shape[0], expected_shape[1]));
+        assert_eq!(output, expected_output);
+        assert_eq!(output_mask, expected_mask);
     }
 }

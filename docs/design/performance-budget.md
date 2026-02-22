@@ -30,6 +30,8 @@ cargo bench -p murk-bench --bench obs_ops --bench space_ops --bench arena_ops --
 | `murk-obs` | `obs_execute_fixed/all_10k` | `8.878 us` |
 | `murk-obs` | `obs_execute_agents/agent_disk_r3/16` | `1.833 us` |
 | `murk-obs` | `obs_execute_agents/agent_disk_r3/64` | `4.692 us` |
+| `murk-obs` | `obs_execute_batch/fixed_all/16` | `103.54 us` *(added in Task 11)* |
+| `murk-obs` | `obs_execute_batch/fixed_all/64` | `416.57 us` *(added in Task 11)* |
 | `murk-space` | `space_rank_lookup/square4_10k` | `13.762 us` |
 | `murk-space` | `space_rank_lookup/product_square4xline1d/4096` | `50.496 us` |
 | `murk-arena` | `arena_publish_snapshot/borrowed_snapshot_10k` | `2.292 us` |
@@ -46,6 +48,8 @@ Until Tasks 11-13 land, these benchmarks must stay within budget versus baseline
 | `obs_execute_fixed/all_10k` | `10.7 us` | `+20%` |
 | `obs_execute_agents/agent_disk_r3/16` | `2.2 us` | `+20%` |
 | `obs_execute_agents/agent_disk_r3/64` | `5.7 us` | `+22%` |
+| `obs_execute_batch/fixed_all/16` | `124.3 us` | `+20%` |
+| `obs_execute_batch/fixed_all/64` | `499.9 us` | `+20%` |
 | `space_rank_lookup/square4_10k` | `17.2 us` | `+25%` |
 | `space_rank_lookup/product_square4xline1d/4096` | `63.1 us` | `+25%` |
 | `arena_publish_snapshot/borrowed_snapshot_10k` | `2.8 us` | `+22%` |
@@ -64,6 +68,24 @@ These are the explicit "must improve" targets for the optimization tasks:
 - Task 13 (`murk-arena`):
   - `arena_owned_snapshot_10k` improves by at least `15%` (`<= 40.32 ms`).
   - `arena_sparse_reuse/publish_sparse/1024` improves by at least `15%` (`<= 2.27 us`).
+
+## Task 11 Result (`murk-obs`)
+
+Captured with:
+
+```bash
+cargo bench -p murk-bench --bench obs_ops -- --sample-size 20 --measurement-time 1
+```
+
+| Benchmark ID | Baseline | Post-Task11 | Delta |
+|---|---:|---:|---:|
+| `obs_execute_fixed/all_10k` | `8.878 us` | `6.393 us` | `-27.99%` |
+| `obs_execute_agents/agent_disk_r3/16` | `1.833 us` | `1.550 us` | `-15.45%` |
+| `obs_execute_agents/agent_disk_r3/64` | `4.692 us` | `3.441 us` | `-26.66%` |
+
+Task 11 target status:
+
+- `obs_execute_agents/agent_disk_r3/64 <= 3.75 us`: **met** (`3.441 us`).
 
 ## Evaluation Rule
 

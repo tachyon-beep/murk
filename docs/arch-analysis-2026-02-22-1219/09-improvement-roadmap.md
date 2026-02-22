@@ -23,7 +23,7 @@ This is a risk-first roadmap: correctness/security and “trust surfaces” (doc
 ## Phase 3: Scale-Up Performance (2–4 weeks)
 
 - **[Resolved] Performance harness + budgets:** representative obs/space/arena benchmarks and regression thresholds are documented for Phase 3 gatekeeping.
-- **[Open] `murk-obs`:** remove per-call pooling allocations; optimize `execute_batch` to avoid redundant work and scale better with `num_envs`.
+- **[Resolved] `murk-obs`:** removed pooled-path per-call allocations and optimized `execute_batch`; multi-agent batch benchmark target is now met.
 - **[Open] `murk-space`:** add caching/indexing for canonical ordering and coordinate→tensor mapping; reduce default O(n) scans.
 - **[Open] `murk-arena`:** reduce publish-time copying in owned snapshots (where possible) and optimize sparse reuse bookkeeping.
 
