@@ -817,12 +817,16 @@ mod tests {
         );
         assert!(metrics.n_propagators >= 1);
         assert!(metrics.memory_bytes > 0);
+        assert_eq!(metrics.worker_stall_events, 0);
+        assert_eq!(metrics.ring_not_available_events, 0);
 
         // Test murk_step_metrics too.
         let mut metrics2 = MurkStepMetrics::default();
         let status = murk_step_metrics(world_h, &mut metrics2);
         assert_eq!(status, MurkStatus::Ok as i32);
         assert!(metrics2.n_propagators >= 1);
+        assert_eq!(metrics2.worker_stall_events, 0);
+        assert_eq!(metrics2.ring_not_available_events, 0);
 
         murk_lockstep_destroy(world_h);
     }

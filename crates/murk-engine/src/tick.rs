@@ -92,6 +92,8 @@ pub struct TickEngine {
     total_tick_disabled_rejections: u64,
     total_rollback_events: u64,
     total_tick_disabled_transitions: u64,
+    total_worker_stall_events: u64,
+    total_ring_not_available_events: u64,
     propagator_scratch: PropagatorScratch,
     base_field_set: BaseFieldSet,
     base_cache: BaseFieldCache,
@@ -174,6 +176,8 @@ impl TickEngine {
             total_tick_disabled_rejections: 0,
             total_rollback_events: 0,
             total_tick_disabled_transitions: 0,
+            total_worker_stall_events: 0,
+            total_ring_not_available_events: 0,
             propagator_scratch,
             base_field_set,
             base_cache: BaseFieldCache::new(),
@@ -390,6 +394,8 @@ impl TickEngine {
             tick_disabled_rejections: self.total_tick_disabled_rejections,
             rollback_events: self.total_rollback_events,
             tick_disabled_transitions: self.total_tick_disabled_transitions,
+            worker_stall_events: self.total_worker_stall_events,
+            ring_not_available_events: self.total_ring_not_available_events,
         };
         self.arena.reset_sparse_reuse_counters();
         self.last_metrics = metrics.clone();
@@ -452,8 +458,20 @@ impl TickEngine {
         self.total_tick_disabled_rejections = 0;
         self.total_rollback_events = 0;
         self.total_tick_disabled_transitions = 0;
+        self.total_worker_stall_events = 0;
+        self.total_ring_not_available_events = 0;
         self.last_metrics = StepMetrics::default();
         Ok(())
+    }
+
+    pub(crate) fn record_worker_stall_events(&mut self, count: u64) {
+        self.total_worker_stall_events = self.total_worker_stall_events.saturating_add(count);
+        self.refresh_counter_metrics();
+    }
+
+    pub(crate) fn set_ring_not_available_events(&mut self, total: u64) {
+        self.total_ring_not_available_events = self.total_ring_not_available_events.max(total);
+        self.refresh_counter_metrics();
     }
 
     fn refresh_counter_metrics(&mut self) {
@@ -461,6 +479,8 @@ impl TickEngine {
         self.last_metrics.tick_disabled_rejections = self.total_tick_disabled_rejections;
         self.last_metrics.rollback_events = self.total_rollback_events;
         self.last_metrics.tick_disabled_transitions = self.total_tick_disabled_transitions;
+        self.last_metrics.worker_stall_events = self.total_worker_stall_events;
+        self.last_metrics.ring_not_available_events = self.total_ring_not_available_events;
     }
 
     /// Get a read-only snapshot of the current published generation.
@@ -985,6 +1005,8 @@ mod tests {
         assert_eq!(engine.last_metrics().tick_disabled_rejections, 0);
         assert_eq!(engine.last_metrics().rollback_events, 0);
         assert_eq!(engine.last_metrics().tick_disabled_transitions, 0);
+        assert_eq!(engine.last_metrics().worker_stall_events, 0);
+        assert_eq!(engine.last_metrics().ring_not_available_events, 0);
     }
 
     // ── Integration tests ────────────────────────────────────
@@ -1109,6 +1131,8 @@ mod tests {
         assert_eq!(result.metrics.tick_disabled_rejections, 0);
         assert_eq!(result.metrics.rollback_events, 0);
         assert_eq!(result.metrics.tick_disabled_transitions, 0);
+        assert_eq!(result.metrics.worker_stall_events, 0);
+        assert_eq!(result.metrics.ring_not_available_events, 0);
     }
 
     #[test]
@@ -1146,6 +1170,20 @@ mod tests {
         let result = engine.execute_tick().unwrap();
         assert_eq!(result.metrics.queue_full_rejections, 2);
         assert_eq!(result.metrics.tick_disabled_rejections, 0);
+    }
+
+    #[test]
+    fn external_realtime_counters_are_reflected_in_metrics() {
+        let mut engine = simple_engine();
+        engine.record_worker_stall_events(3);
+        engine.set_ring_not_available_events(7);
+
+        assert_eq!(engine.last_metrics().worker_stall_events, 3);
+        assert_eq!(engine.last_metrics().ring_not_available_events, 7);
+
+        let result = engine.execute_tick().unwrap();
+        assert_eq!(result.metrics.worker_stall_events, 3);
+        assert_eq!(result.metrics.ring_not_available_events, 7);
     }
 
     #[test]

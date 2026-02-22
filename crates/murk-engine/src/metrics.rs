@@ -36,6 +36,10 @@ pub struct StepMetrics {
     pub rollback_events: u64,
     /// Cumulative number of transitions into tick-disabled state.
     pub tick_disabled_transitions: u64,
+    /// Cumulative number of worker stall force-unpin events.
+    pub worker_stall_events: u64,
+    /// Cumulative number of ring "not available" events.
+    pub ring_not_available_events: u64,
 }
 
 #[cfg(test)]
@@ -58,6 +62,8 @@ mod tests {
         assert_eq!(m.tick_disabled_rejections, 0);
         assert_eq!(m.rollback_events, 0);
         assert_eq!(m.tick_disabled_transitions, 0);
+        assert_eq!(m.worker_stall_events, 0);
+        assert_eq!(m.ring_not_available_events, 0);
     }
 
     #[test]
@@ -76,6 +82,8 @@ mod tests {
             tick_disabled_rejections: 4,
             rollback_events: 2,
             tick_disabled_transitions: 1,
+            worker_stall_events: 3,
+            ring_not_available_events: 7,
         };
         assert_eq!(m.total_us, 100);
         assert_eq!(m.command_processing_us, 20);
@@ -92,5 +100,7 @@ mod tests {
         assert_eq!(m.tick_disabled_rejections, 4);
         assert_eq!(m.rollback_events, 2);
         assert_eq!(m.tick_disabled_transitions, 1);
+        assert_eq!(m.worker_stall_events, 3);
+        assert_eq!(m.ring_not_available_events, 7);
     }
 }

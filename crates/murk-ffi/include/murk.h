@@ -435,6 +435,14 @@ typedef struct MurkStepMetrics {
    * Cumulative number of transitions into tick-disabled state.
    */
   uint64_t tick_disabled_transitions;
+  /**
+   * Cumulative number of worker stall force-unpin events.
+   */
+  uint64_t worker_stall_events;
+  /**
+   * Cumulative number of ring "not available" events.
+   */
+  uint64_t ring_not_available_events;
 } MurkStepMetrics;
 
 /**

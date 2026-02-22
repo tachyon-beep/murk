@@ -104,6 +104,8 @@ def test_metrics_populated():
     assert metrics.tick_disabled_rejections >= 0
     assert metrics.rollback_events >= 0
     assert metrics.tick_disabled_transitions >= 0
+    assert metrics.worker_stall_events >= 0
+    assert metrics.ring_not_available_events >= 0
     name, us = metrics.propagator_us[0]
     assert name == "const"
     world.destroy()
@@ -121,4 +123,6 @@ def test_metrics_to_dict():
     assert "tick_disabled_rejections" in d
     assert "rollback_events" in d
     assert "tick_disabled_transitions" in d
+    assert "worker_stall_events" in d
+    assert "ring_not_available_events" in d
     world.destroy()

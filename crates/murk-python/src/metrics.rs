@@ -23,6 +23,8 @@ pub(crate) struct StepMetrics {
     pub(crate) tick_disabled_rejections: u64,
     pub(crate) rollback_events: u64,
     pub(crate) tick_disabled_transitions: u64,
+    pub(crate) worker_stall_events: u64,
+    pub(crate) ring_not_available_events: u64,
 }
 
 #[pymethods]
@@ -105,6 +107,18 @@ impl StepMetrics {
         self.tick_disabled_transitions
     }
 
+    /// Cumulative number of worker stall force-unpin events.
+    #[getter]
+    fn worker_stall_events(&self) -> u64 {
+        self.worker_stall_events
+    }
+
+    /// Cumulative number of ring "not available" events.
+    #[getter]
+    fn ring_not_available_events(&self) -> u64 {
+        self.ring_not_available_events
+    }
+
     /// Convert to a plain Python dict.
     fn to_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
         let d = PyDict::new(py);
@@ -121,12 +135,14 @@ impl StepMetrics {
         d.set_item("tick_disabled_rejections", self.tick_disabled_rejections)?;
         d.set_item("rollback_events", self.rollback_events)?;
         d.set_item("tick_disabled_transitions", self.tick_disabled_transitions)?;
+        d.set_item("worker_stall_events", self.worker_stall_events)?;
+        d.set_item("ring_not_available_events", self.ring_not_available_events)?;
         Ok(d)
     }
 
     fn __repr__(&self) -> String {
         format!(
-            "StepMetrics(total={}us, mem={}B, propagators={}, sparse_retired={}, sparse_pending={}, reuse_hits={}, reuse_misses={}, queue_full={}, tick_disabled_rejections={}, rollbacks={}, tick_disabled_transitions={})",
+            "StepMetrics(total={}us, mem={}B, propagators={}, sparse_retired={}, sparse_pending={}, reuse_hits={}, reuse_misses={}, queue_full={}, tick_disabled_rejections={}, rollbacks={}, tick_disabled_transitions={}, worker_stalls={}, ring_not_available={})",
             self.total_us,
             self.memory_bytes,
             self.propagator_us.len(),
@@ -138,6 +154,8 @@ impl StepMetrics {
             self.tick_disabled_rejections,
             self.rollback_events,
             self.tick_disabled_transitions,
+            self.worker_stall_events,
+            self.ring_not_available_events,
         )
     }
 }
@@ -177,6 +195,8 @@ impl StepMetrics {
             tick_disabled_rejections: m.tick_disabled_rejections,
             rollback_events: m.rollback_events,
             tick_disabled_transitions: m.tick_disabled_transitions,
+            worker_stall_events: m.worker_stall_events,
+            ring_not_available_events: m.ring_not_available_events,
         }
     }
 }
@@ -201,6 +221,8 @@ mod tests {
             tick_disabled_rejections: 4,
             rollback_events: 2,
             tick_disabled_transitions: 1,
+            worker_stall_events: 3,
+            ring_not_available_events: 7,
         };
         assert_eq!(m.sparse_retired_ranges, 5);
         assert_eq!(m.sparse_pending_retired, 3);
@@ -210,5 +232,7 @@ mod tests {
         assert_eq!(m.tick_disabled_rejections, 4);
         assert_eq!(m.rollback_events, 2);
         assert_eq!(m.tick_disabled_transitions, 1);
+        assert_eq!(m.worker_stall_events, 3);
+        assert_eq!(m.ring_not_available_events, 7);
     }
 }

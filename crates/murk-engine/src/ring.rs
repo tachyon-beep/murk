@@ -29,6 +29,7 @@ pub struct SnapshotRing {
     /// and their lock acquisition.
     slots: Vec<Mutex<Slot>>,
     write_pos: AtomicU64,
+    not_available_events: AtomicU64,
     capacity: usize,
 }
 
@@ -54,6 +55,7 @@ impl SnapshotRing {
         Self {
             slots,
             write_pos: AtomicU64::new(0),
+            not_available_events: AtomicU64::new(0),
             capacity,
         }
     }
@@ -95,6 +97,7 @@ impl SnapshotRing {
         for _ in 0..self.capacity {
             let pos = self.write_pos.load(Ordering::Acquire);
             if pos == 0 {
+                self.not_available_events.fetch_add(1, Ordering::Relaxed);
                 return None;
             }
             let target_pos = pos - 1;
@@ -125,7 +128,12 @@ impl SnapshotRing {
                 }
             }
         }
-        best.map(|(_, arc)| arc)
+        if let Some((_, arc)) = best {
+            Some(arc)
+        } else {
+            self.not_available_events.fetch_add(1, Ordering::Relaxed);
+            None
+        }
     }
 
     /// Get a snapshot by its monotonic write position.
@@ -175,6 +183,11 @@ impl SnapshotRing {
     pub fn write_pos(&self) -> u64 {
         self.write_pos.load(Ordering::Acquire)
     }
+
+    /// Number of times an observation request found no snapshot available.
+    pub fn not_available_events(&self) -> u64 {
+        self.not_available_events.load(Ordering::Relaxed)
+    }
 }
 
 #[cfg(test)]
@@ -220,7 +233,9 @@ mod tests {
         assert!(ring.is_empty());
         assert_eq!(ring.capacity(), 4);
         assert_eq!(ring.write_pos(), 0);
+        assert_eq!(ring.not_available_events(), 0);
         assert!(ring.latest().is_none());
+        assert_eq!(ring.not_available_events(), 1);
     }
 
     #[test]
@@ -229,9 +244,11 @@ mod tests {
         ring.push(make_test_snapshot(1));
         assert_eq!(ring.len(), 1);
         assert!(!ring.is_empty());
+        assert_eq!(ring.not_available_events(), 0);
 
         let latest = ring.latest().unwrap();
         assert_eq!(latest.tick_id(), TickId(1));
+        assert_eq!(ring.not_available_events(), 0);
     }
 
     #[test]
