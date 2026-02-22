@@ -113,9 +113,9 @@ flowchart TD
 - Install Rust toolchain (stable, 1.87+) via [rustup.rs](https://rustup.rs/)
 
 **Python** (for the Gymnasium bindings):
-- Install Python 3.9+
-- Install [maturin](https://www.maturin.rs/): `pip install maturin`
-- Install numpy >= 1.24 and gymnasium >= 0.29 (or let them install automatically)
+- Install Python 3.12+
+- Install `murk` from PyPI (dependencies like numpy/gymnasium are installed automatically)
+- Install [maturin](https://www.maturin.rs/) only if you are developing Murk itself from source
 
 ## Quick Start
 
@@ -127,12 +127,18 @@ flowchart TD
 cargo add murk
 ```
 
-**Python** (PyPI release planned; install from source for now):
+**Python** (from [PyPI](https://pypi.org/project/murk/)):
+
+```bash
+python -m pip install murk
+```
+
+**Python source build** (contributors working on Murk internals):
 
 ```bash
 git clone https://github.com/tachyon-beep/murk.git
 cd murk/crates/murk-python
-pip install maturin
+python -m pip install maturin
 maturin develop --release
 ```
 

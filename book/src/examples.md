@@ -26,8 +26,11 @@ and override hooks.
 ## Running the Python examples
 
 ```bash
-# Install murk first
-cd crates/murk-python && maturin develop --release && cd ../..
+# Install published murk package (default)
+python -m pip install murk
+
+# If you are developing Murk internals from source instead:
+# cd crates/murk-python && maturin develop --release && cd ../..
 
 # Run an example
 cd examples/heat_seeker

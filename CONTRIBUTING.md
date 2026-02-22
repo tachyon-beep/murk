@@ -19,7 +19,7 @@ Look for issues labeled `good-first-issue` for accessible entry points.
 **Requirements:**
 - Rust stable (1.87+) via [rustup](https://rustup.rs/)
 - Rust nightly (for Miri only): `rustup toolchain install nightly --component miri`
-- Python 3.9+
+- Python 3.12+
 - [maturin](https://www.maturin.rs/): `pip install maturin`
 
 **Setup:**

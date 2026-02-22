@@ -6,13 +6,22 @@
 - Rust toolchain (stable, 1.87+): [rustup.rs](https://rustup.rs/)
 
 **Python** (for the Gymnasium bindings):
-- Python 3.9+
-- [maturin](https://www.maturin.rs/) (`pip install maturin`)
-- numpy >= 1.24, gymnasium >= 0.29 (installed automatically)
+- Python 3.12+
+- Install `murk` from PyPI (numpy >= 1.24 and gymnasium >= 0.29 are installed automatically)
+- [maturin](https://www.maturin.rs/) only if you are developing Murk from source
 
 ## Installation
 
-Murk is not yet on PyPI or crates.io. Install from source:
+For normal use, install published packages:
+
+```bash
+cargo add murk
+python -m pip install murk
+```
+
+## Working on Murk itself (source checkout)
+
+If you are contributing to Murk internals, use a source build:
 
 ```bash
 git clone https://github.com/tachyon-beep/murk.git
@@ -24,7 +33,7 @@ cargo test --workspace
 
 # Python: build native extension in development mode
 cd crates/murk-python
-pip install maturin
+python -m pip install maturin
 maturin develop --release
 ```
 

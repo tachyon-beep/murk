@@ -1,0 +1,6 @@
+## Discovery
+- `crates/murk-obs` defines the full observation pipeline: `spec.rs` declares `ObsSpec`/`ObsEntry`/`ObsRegion` and optional pooling, `plan.rs` compiles and executes plans, `cache.rs` wraps lazy caching, while `geometry.rs`, `pool.rs`, and `metadata.rs` provide helpers for grid geometry, spatial pooling, and execution telemetry.
+- `ObsPlan::compile` chooses between the branch-free Simple plan (all `ObsRegion::Fixed`) and the Standard plan (agent-relative regions with pooling) based on the spec entries, building per-entry gather ops and template ops via `geometry.rs` for agent-centered regions.
+- Execution exposes `ObsPlan::execute` (Simple), `execute_batch` (vectorized simple plans), and `execute_agents` (Standard), so hot paths include precomputing fixed entries, pooling scratch reuse, and fast-path stride arithmetic backed by `GridGeometry`.
+- Masking relies on `CompiledEntry.valid_mask` for fixed regions plus per-agent mask writes when resolving agent-relative entries; metadata (`ObsMetadata`) captures coverage, tick, generation, and parameter version to inform observers.
+- `ObsPlanCache` keys on `SpaceInstanceId` + `cell_count` and exposes helpers (`execute`, `execute_agents`) to transparently recompile if topology changes while ignoring per-tick generation churn.
