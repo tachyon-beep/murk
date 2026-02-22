@@ -49,9 +49,24 @@ See [`crates/murk-engine/examples/quickstart.rs`](https://github.com/tachyon-bee
 for the full source. The essential pattern:
 
 ```rust
-let config = WorldConfig { space, fields, propagators, dt: 0.1, seed: 42, .. };
+use murk_core::{FieldDef, FieldId, FieldMutability, FieldType, SnapshotAccess};
+use murk_engine::{BackoffConfig, LockstepWorld, WorldConfig};
+use murk_space::{EdgeBehavior, Square4};
+
+let space = Square4::new(8, 8, EdgeBehavior::Absorb)?;
+let fields = vec![FieldDef {
+    name: "heat".into(),
+    field_type: FieldType::Scalar,
+    mutability: FieldMutability::PerTick,
+    ..Default::default()
+}];
+let config = WorldConfig {
+    space: Box::new(space), fields,
+    propagators: vec![Box::new(DiffusionPropagator)],
+    dt: 1.0, seed: 42, ..Default::default()
+};
 let mut world = LockstepWorld::new(config)?;
-let result = world.step_sync(commands)?;
+let result = world.step_sync(vec![])?;
 let heat = result.snapshot.read(FieldId(0)).unwrap();
 ```
 
@@ -59,12 +74,15 @@ let heat = result.snapshot.read(FieldId(0)).unwrap();
 
 ```python
 import murk
-from murk import Config, FieldMutability, EdgeBehavior, WriteMode, ObsEntry, RegionType
+from murk import Config, FieldType, FieldMutability, EdgeBehavior, WriteMode, ObsEntry, RegionType
 
 config = Config()
 config.set_space_square4(16, 16, EdgeBehavior.Absorb)
-config.add_field("heat", mutability=FieldMutability.PerTick)
-# ... add propagators ...
+config.add_field("heat", FieldType.Scalar, FieldMutability.PerTick)
+murk.add_propagator(
+    config, name="diffusion", step_fn=diffusion_step,
+    reads_previous=[0], writes=[(0, WriteMode.Full)],
+)
 
 env = murk.MurkEnv(config, obs_entries=[ObsEntry(0, region_type=RegionType.All)], n_actions=5)
 obs, info = env.reset()
