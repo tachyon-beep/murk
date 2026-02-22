@@ -24,7 +24,7 @@ This is a risk-first roadmap: correctness/security and “trust surfaces” (doc
 
 - **[Resolved] Performance harness + budgets:** representative obs/space/arena benchmarks and regression thresholds are documented for Phase 3 gatekeeping.
 - **[Resolved] `murk-obs`:** removed pooled-path per-call allocations and optimized `execute_batch`; multi-agent batch benchmark target is now met.
-- **[Open] `murk-space`:** add caching/indexing for canonical ordering and coordinate→tensor mapping; reduce default O(n) scans.
+- **[Resolved] `murk-space`:** added mixed-radix rank stride caching and slice-based coordinate ranking to remove hot-path coordinate allocation and reduce coordinate→rank lookup overhead; Task 12 benchmark target is now met.
 - **[Open] `murk-arena`:** reduce publish-time copying in owned snapshots (where possible) and optimize sparse reuse bookkeeping.
 
 **Exit criteria:** batch training and multi-agent observation extraction show improved throughput without changing user code.

@@ -62,11 +62,11 @@
 - **Effort:** M
 - **Category:** Performance
 
-### [Open] Space/regions: default O(n) lookups and expensive canonical materialization
+### [PartiallyResolved] Space/regions: default O(n) lookups and expensive canonical materialization
 
 - **Evidence:** `crates/murk-space/src/space.rs`, `crates/murk-space/src/product.rs`
-- **Impact:** Large spaces and high-dimensional product spaces become expensive in observation planning and coordinate→index mapping; constrains “scale-up” roadmap items (LOS sensors, heterogeneous observation plans).
-- **Effort:** L
+- **Impact:** Product-space coordinate→rank lookup hot paths have been reduced via cached mixed-radix ranking and slice-based canonical rank APIs, but large spaces still pay for canonical materialization/default O(n) lookup paths in non-optimized backends and region workflows.
+- **Effort:** M–L
 - **Category:** Performance / Scalability
 
 ### [Open] Arena: snapshot ownership and sparse reuse hotspots

@@ -76,6 +76,16 @@ pub trait Space: Any + Send + Sync + 'static {
         self.canonical_ordering().iter().position(|c| c == coord)
     }
 
+    /// Position of a coordinate slice in the canonical ordering.
+    ///
+    /// The default implementation delegates to [`canonical_rank`](Self::canonical_rank)
+    /// for backwards compatibility. Backends can override this to avoid
+    /// temporary `Coord` allocations when callers already have a slice.
+    fn canonical_rank_slice(&self, coord: &[i32]) -> Option<usize> {
+        let coord: Coord = SmallVec::from_slice(coord);
+        self.canonical_rank(&coord)
+    }
+
     /// Unique instance identifier for this space object.
     ///
     /// Allocated from a monotonic counter at construction time. Used by

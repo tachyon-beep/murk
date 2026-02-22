@@ -4,7 +4,7 @@
 
 - Baseline commit: `35f894b` (HEAD at baseline capture).
 - Implementation scope for this package is locked to Gate A + Gate B closure (Tasks 1-9).
-- Follow-on execution has completed Task 10 and Task 11 from Gate C; Tasks 12-14 remain deferred.
+- Follow-on execution has completed Tasks 10-12 from Gate C; Tasks 13-14 remain deferred.
 
 ## Recommendation Classification
 
@@ -14,7 +14,7 @@
 2. `[Resolved]` Packaging hygiene and artifact-first validation.
 3. `[Resolved]` FFI hardening + poisoning policy/recovery semantics.
 4. `[Resolved]` Realtime telemetry across Rust/FFI/Python plus preflight visibility.
-5. `[PartiallyResolved]` Phase 3 performance work (`murk-obs` resolved; `murk-space`/`murk-arena` open).
+5. `[PartiallyResolved]` Phase 3 performance work (`murk-obs` and `murk-space` resolved; `murk-arena` open).
 
 ### Technical Debt Catalog (`06-technical-debt-catalog.md`)
 
@@ -27,7 +27,7 @@
 
 - Phase 1: `[Resolved]`
 - Phase 2: telemetry + preflight `[Resolved]`, ring retention/skew signaling `[Resolved]`
-- Phase 3: performance harness/budgets `[Resolved]`, `murk-obs` optimization `[Resolved]`, remaining optimization work `[Open]`
+- Phase 3: performance harness/budgets `[Resolved]`, `murk-obs` optimization `[Resolved]`, `murk-space` optimization `[Resolved]`, remaining optimization work `[Open]`
 - Phase 4: `[Open]`
 
 ## Baseline Validation Commands
@@ -83,8 +83,10 @@ cargo test -p murk-engine -- realtime
 cargo test -p murk-ffi
 UV_CACHE_DIR=.uv-cache uv run pytest crates/murk-python/tests/test_vec_env.py -q
 cargo test -p murk-obs --lib
+cargo test -p murk-space
 cargo bench -p murk-bench --bench obs_ops --bench space_ops --bench arena_ops -- --sample-size 20 --measurement-time 1
 cargo bench -p murk-bench --bench obs_ops -- --sample-size 20 --measurement-time 1
+cargo bench -p murk-bench --bench space_ops -- --sample-size 20 --measurement-time 1
 ```
 
 Result summary:
@@ -93,10 +95,12 @@ Result summary:
 - PASS for FFI hardening + added negative/integration-like tests.
 - PASS for Python vec-env preflight surface test.
 - PASS for `murk-obs` correctness suite after allocation/batch-path optimization.
+- PASS for `murk-space` correctness suite after canonical-rank fast-path changes.
 - PASS for representative Phase 3 benchmark scenarios; baselines captured in `docs/design/performance-budget.md`.
 - PASS for `obs_ops` post-optimization run with Task 11 target met (`obs_execute_agents/agent_disk_r3/64`).
+- PASS for `space_ops` post-optimization run with Task 12 target met (`space_rank_lookup/product_square4xline1d/4096`).
 
 ## Remaining Risks (Deferred to Gates C/D)
 
-- `murk-space` and `murk-arena` optimization tasks (`Tasks 12-13`) are not started.
+- `murk-arena` optimization task (`Task 13`) is not started.
 - v0.2 feature-package kickoff plan (`Task 14`) is not started.

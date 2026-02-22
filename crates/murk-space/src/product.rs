@@ -53,6 +53,8 @@ pub enum ProductMetric {
 ///   See [`compile_region()`](Self::compile_region).
 pub struct ProductSpace {
     components: Vec<Box<dyn Space>>,
+    component_cell_counts: Vec<usize>,
+    rank_strides: Vec<usize>,
     dim_offsets: Vec<usize>,
     total_ndim: usize,
     total_cells: usize,
@@ -65,6 +67,8 @@ impl fmt::Debug for ProductSpace {
             .field("n_components", &self.components.len())
             .field("total_ndim", &self.total_ndim)
             .field("total_cells", &self.total_cells)
+            .field("component_cell_counts", &self.component_cell_counts)
+            .field("rank_strides", &self.rank_strides)
             .field("dim_offsets", &self.dim_offsets)
             .finish()
     }
@@ -93,17 +97,30 @@ impl ProductSpace {
         }
 
         // Overflow-checked cell count product.
+        let component_cell_counts: Vec<usize> = components.iter().map(|c| c.cell_count()).collect();
         let mut total_cells: usize = 1;
-        for comp in &components {
-            total_cells = total_cells.checked_mul(comp.cell_count()).ok_or_else(|| {
+        for count in &component_cell_counts {
+            total_cells = total_cells.checked_mul(*count).ok_or_else(|| {
                 SpaceError::InvalidComposition {
                     reason: "total cell count overflows usize".to_string(),
                 }
             })?;
         }
 
+        // rank_strides[i] = product(component_cell_counts[j] for j > i)
+        // rightmost component is fastest-varying in canonical order.
+        let n_components = components.len();
+        let mut rank_strides = vec![1usize; n_components];
+        if n_components > 1 {
+            for i in (0..n_components - 1).rev() {
+                rank_strides[i] = rank_strides[i + 1] * component_cell_counts[i + 1];
+            }
+        }
+
         Ok(Self {
             components,
+            component_cell_counts,
+            rank_strides,
             dim_offsets,
             total_ndim,
             total_cells,
@@ -288,6 +305,21 @@ impl ProductSpace {
             valid_mask,
             bounding_shape: BoundingShape::Rect(bounding_dims),
         }
+    }
+
+    fn canonical_rank_impl(&self, coord: &[i32]) -> Option<usize> {
+        if coord.len() != self.total_ndim {
+            return None;
+        }
+
+        let mut rank = 0usize;
+        for i in 0..self.components.len() {
+            let start = self.dim_offsets[i];
+            let end = self.dim_offsets[i + 1];
+            let comp_rank = self.components[i].canonical_rank_slice(&coord[start..end])?;
+            rank += comp_rank * self.rank_strides[i];
+        }
+        Some(rank)
     }
 }
 
@@ -490,21 +522,11 @@ impl Space for ProductSpace {
     }
 
     fn canonical_rank(&self, coord: &Coord) -> Option<usize> {
-        if coord.len() != self.total_ndim {
-            return None;
-        }
-        // rank = Σ comp_rank[i] * stride[i]
-        // where stride[i] = product(cell_count[j] for j > i)
-        let n = self.components.len();
-        let mut rank = 0usize;
-        let mut stride = 1usize;
-        for i in (0..n).rev() {
-            let sub = self.split_coord(coord, i);
-            let comp_rank = self.components[i].canonical_rank(&sub)?;
-            rank += comp_rank * stride;
-            stride *= self.components[i].cell_count();
-        }
-        Some(rank)
+        self.canonical_rank_impl(coord)
+    }
+
+    fn canonical_rank_slice(&self, coord: &[i32]) -> Option<usize> {
+        self.canonical_rank_impl(coord)
     }
 
     fn instance_id(&self) -> SpaceInstanceId {

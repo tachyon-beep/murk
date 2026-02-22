@@ -110,6 +110,18 @@ impl Space for Ring1D {
         }
     }
 
+    fn canonical_rank_slice(&self, coord: &[i32]) -> Option<usize> {
+        if coord.len() != 1 {
+            return None;
+        }
+        let i = coord[0];
+        if i >= 0 && i < self.len as i32 {
+            Some(i as usize)
+        } else {
+            None
+        }
+    }
+
     fn instance_id(&self) -> SpaceInstanceId {
         self.instance_id
     }

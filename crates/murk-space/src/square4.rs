@@ -160,6 +160,19 @@ impl Space for Square4 {
         grid2d::canonical_rank_2d(coord, self.rows, self.cols)
     }
 
+    fn canonical_rank_slice(&self, coord: &[i32]) -> Option<usize> {
+        if coord.len() != 2 {
+            return None;
+        }
+        let r = coord[0];
+        let c = coord[1];
+        if r >= 0 && r < self.rows as i32 && c >= 0 && c < self.cols as i32 {
+            Some(r as usize * self.cols as usize + c as usize)
+        } else {
+            None
+        }
+    }
+
     fn instance_id(&self) -> SpaceInstanceId {
         self.instance_id
     }

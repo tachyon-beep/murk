@@ -41,7 +41,7 @@ cargo bench -p murk-bench --bench obs_ops --bench space_ops --bench arena_ops --
 
 ## Regression Budgets (No-Regression Guard)
 
-Until Tasks 11-13 land, these benchmarks must stay within budget versus baseline.
+Until Task 13 lands, these benchmarks must stay within budget versus baseline.
 
 | Benchmark ID | Max allowed time | Allowed regression |
 |---|---:|---:|
@@ -86,6 +86,23 @@ cargo bench -p murk-bench --bench obs_ops -- --sample-size 20 --measurement-time
 Task 11 target status:
 
 - `obs_execute_agents/agent_disk_r3/64 <= 3.75 us`: **met** (`3.441 us`).
+
+## Task 12 Result (`murk-space`)
+
+Captured with:
+
+```bash
+cargo bench -p murk-bench --bench space_ops -- --sample-size 20 --measurement-time 1
+```
+
+| Benchmark ID | Baseline | Post-Task12 | Delta |
+|---|---:|---:|---:|
+| `space_rank_lookup/square4_10k` | `13.762 us` | `11.605 us` | `-15.67%` |
+| `space_rank_lookup/product_square4xline1d/4096` | `50.496 us` | `24.575 us` | `-51.33%` |
+
+Task 12 target status:
+
+- `space_rank_lookup/product_square4xline1d/4096 <= 40.40 us`: **met** (`24.575 us`).
 
 ## Evaluation Rule
 
