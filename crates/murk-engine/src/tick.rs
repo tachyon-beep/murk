@@ -88,6 +88,10 @@ pub struct TickEngine {
     consecutive_rollback_count: u32,
     tick_disabled: bool,
     max_consecutive_rollbacks: u32,
+    total_queue_full_rejections: u64,
+    total_tick_disabled_rejections: u64,
+    total_rollback_events: u64,
+    total_tick_disabled_transitions: u64,
     propagator_scratch: PropagatorScratch,
     base_field_set: BaseFieldSet,
     base_cache: BaseFieldCache,
@@ -166,6 +170,10 @@ impl TickEngine {
             consecutive_rollback_count: 0,
             tick_disabled: false,
             max_consecutive_rollbacks: 3,
+            total_queue_full_rejections: 0,
+            total_tick_disabled_rejections: 0,
+            total_rollback_events: 0,
+            total_tick_disabled_transitions: 0,
             propagator_scratch,
             base_field_set,
             base_cache: BaseFieldCache::new(),
@@ -178,7 +186,22 @@ impl TickEngine {
     ///
     /// Returns one receipt per command indicating acceptance or rejection.
     pub fn submit_commands(&mut self, commands: Vec<Command>) -> Vec<Receipt> {
-        self.ingress.submit(commands, self.tick_disabled)
+        let receipts = self.ingress.submit(commands, self.tick_disabled);
+        for receipt in &receipts {
+            match receipt.reason_code {
+                Some(IngressError::QueueFull) => {
+                    self.total_queue_full_rejections =
+                        self.total_queue_full_rejections.saturating_add(1);
+                }
+                Some(IngressError::TickDisabled) => {
+                    self.total_tick_disabled_rejections =
+                        self.total_tick_disabled_rejections.saturating_add(1);
+                }
+                _ => {}
+            }
+        }
+        self.refresh_counter_metrics();
+        receipts
     }
 
     /// Execute one tick.
@@ -363,6 +386,10 @@ impl TickEngine {
             sparse_pending_retired: self.arena.sparse_pending_retired_count() as u32,
             sparse_reuse_hits: self.arena.sparse_reuse_hits(),
             sparse_reuse_misses: self.arena.sparse_reuse_misses(),
+            queue_full_rejections: self.total_queue_full_rejections,
+            tick_disabled_rejections: self.total_tick_disabled_rejections,
+            rollback_events: self.total_rollback_events,
+            tick_disabled_transitions: self.total_tick_disabled_transitions,
         };
         self.arena.reset_sparse_reuse_counters();
         self.last_metrics = metrics.clone();
@@ -383,10 +410,16 @@ impl TickEngine {
     ) -> Result<TickResult, TickError> {
         // Guard was dropped → staging buffer abandoned (free rollback).
         self.arena.reset_sparse_reuse_counters();
+        self.total_rollback_events = self.total_rollback_events.saturating_add(1);
         self.consecutive_rollback_count += 1;
         if self.consecutive_rollback_count >= self.max_consecutive_rollbacks {
+            if !self.tick_disabled {
+                self.total_tick_disabled_transitions =
+                    self.total_tick_disabled_transitions.saturating_add(1);
+            }
             self.tick_disabled = true;
         }
+        self.refresh_counter_metrics();
 
         // Mark accepted command receipts as rolled back, but preserve
         // receipts that were already rejected (e.g. unsupported command
@@ -415,8 +448,19 @@ impl TickEngine {
         self.param_version = ParameterVersion(0);
         self.tick_disabled = false;
         self.consecutive_rollback_count = 0;
+        self.total_queue_full_rejections = 0;
+        self.total_tick_disabled_rejections = 0;
+        self.total_rollback_events = 0;
+        self.total_tick_disabled_transitions = 0;
         self.last_metrics = StepMetrics::default();
         Ok(())
+    }
+
+    fn refresh_counter_metrics(&mut self) {
+        self.last_metrics.queue_full_rejections = self.total_queue_full_rejections;
+        self.last_metrics.tick_disabled_rejections = self.total_tick_disabled_rejections;
+        self.last_metrics.rollback_events = self.total_rollback_events;
+        self.last_metrics.tick_disabled_transitions = self.total_tick_disabled_transitions;
     }
 
     /// Get a read-only snapshot of the current published generation.
@@ -467,8 +511,8 @@ mod tests {
     use murk_core::{BoundaryBehavior, FieldDef, FieldMutability, FieldType};
     use murk_propagator::propagator::WriteMode;
     use murk_space::{EdgeBehavior, Line1D};
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use murk_test_utils::{ConstPropagator, FailingPropagator, IdentityPropagator};
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn scalar_field(name: &str) -> FieldDef {
         FieldDef {
@@ -879,6 +923,8 @@ mod tests {
 
         assert!(engine.is_tick_disabled());
         assert_eq!(engine.consecutive_rollback_count(), 3);
+        assert_eq!(engine.last_metrics().rollback_events, 3);
+        assert_eq!(engine.last_metrics().tick_disabled_transitions, 1);
     }
 
     #[test]
@@ -912,6 +958,14 @@ mod tests {
             }) => {}
             other => panic!("expected TickDisabled, got {other:?}"),
         }
+
+        let receipts = engine.submit_commands(vec![make_cmd(100), make_cmd(100)]);
+        assert!(receipts
+            .iter()
+            .all(|r| r.reason_code == Some(IngressError::TickDisabled)));
+        assert_eq!(engine.last_metrics().tick_disabled_rejections, 2);
+        assert_eq!(engine.last_metrics().rollback_events, 3);
+        assert_eq!(engine.last_metrics().tick_disabled_transitions, 1);
     }
 
     #[test]
@@ -927,6 +981,10 @@ mod tests {
         assert!(!engine.is_tick_disabled());
         assert_eq!(engine.current_tick(), TickId(0));
         assert_eq!(engine.consecutive_rollback_count(), 0);
+        assert_eq!(engine.last_metrics().queue_full_rejections, 0);
+        assert_eq!(engine.last_metrics().tick_disabled_rejections, 0);
+        assert_eq!(engine.last_metrics().rollback_events, 0);
+        assert_eq!(engine.last_metrics().tick_disabled_transitions, 0);
     }
 
     // ── Integration tests ────────────────────────────────────
@@ -1047,6 +1105,10 @@ mod tests {
         let _ = result.metrics.total_us;
         assert_eq!(result.metrics.propagator_us.len(), 1);
         assert_eq!(result.metrics.propagator_us[0].0, "const");
+        assert_eq!(result.metrics.queue_full_rejections, 0);
+        assert_eq!(result.metrics.tick_disabled_rejections, 0);
+        assert_eq!(result.metrics.rollback_events, 0);
+        assert_eq!(result.metrics.tick_disabled_transitions, 0);
     }
 
     #[test]
@@ -1056,6 +1118,34 @@ mod tests {
 
         let metrics = engine.last_metrics();
         assert!(metrics.memory_bytes > 0);
+    }
+
+    #[test]
+    fn queue_full_rejections_are_counted_in_metrics() {
+        let config = WorldConfig {
+            space: Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()),
+            fields: vec![scalar_field("energy")],
+            propagators: vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))],
+            dt: 0.1,
+            seed: 42,
+            ring_buffer_size: 8,
+            max_ingress_queue: 1,
+            tick_rate_hz: None,
+            backoff: crate::config::BackoffConfig::default(),
+        };
+        let mut engine = TickEngine::new(config).unwrap();
+
+        let submit_receipts =
+            engine.submit_commands(vec![make_cmd(100), make_cmd(100), make_cmd(100)]);
+        let queue_full = submit_receipts
+            .iter()
+            .filter(|r| r.reason_code == Some(IngressError::QueueFull))
+            .count();
+        assert_eq!(queue_full, 2);
+
+        let result = engine.execute_tick().unwrap();
+        assert_eq!(result.metrics.queue_full_rejections, 2);
+        assert_eq!(result.metrics.tick_disabled_rejections, 0);
     }
 
     #[test]

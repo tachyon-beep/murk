@@ -616,6 +616,7 @@ mod tests {
             .filter(|r| r.reason_code == Some(murk_core::error::IngressError::QueueFull))
             .collect();
         assert_eq!(rejected.len(), 2, "QueueFull rejections must be surfaced");
+        assert_eq!(result.metrics.queue_full_rejections, 2);
 
         let applied: Vec<_> = result
             .receipts

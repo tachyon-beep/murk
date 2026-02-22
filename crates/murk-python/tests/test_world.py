@@ -100,6 +100,10 @@ def test_metrics_populated():
     assert metrics.total_us >= 0
     assert metrics.memory_bytes > 0
     assert len(metrics.propagator_us) == 1
+    assert metrics.queue_full_rejections >= 0
+    assert metrics.tick_disabled_rejections >= 0
+    assert metrics.rollback_events >= 0
+    assert metrics.tick_disabled_transitions >= 0
     name, us = metrics.propagator_us[0]
     assert name == "const"
     world.destroy()
@@ -113,4 +117,8 @@ def test_metrics_to_dict():
     assert "total_us" in d
     assert "memory_bytes" in d
     assert "propagator_us" in d
+    assert "queue_full_rejections" in d
+    assert "tick_disabled_rejections" in d
+    assert "rollback_events" in d
+    assert "tick_disabled_transitions" in d
     world.destroy()

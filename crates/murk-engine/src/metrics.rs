@@ -28,6 +28,14 @@ pub struct StepMetrics {
     pub sparse_reuse_hits: u32,
     /// Number of sparse alloc() calls that fell through to bump allocation this tick.
     pub sparse_reuse_misses: u32,
+    /// Cumulative number of ingress rejections due to full queue.
+    pub queue_full_rejections: u64,
+    /// Cumulative number of ingress rejections due to tick-disabled state.
+    pub tick_disabled_rejections: u64,
+    /// Cumulative number of rollback events.
+    pub rollback_events: u64,
+    /// Cumulative number of transitions into tick-disabled state.
+    pub tick_disabled_transitions: u64,
 }
 
 #[cfg(test)]
@@ -46,6 +54,10 @@ mod tests {
         assert_eq!(m.sparse_pending_retired, 0);
         assert_eq!(m.sparse_reuse_hits, 0);
         assert_eq!(m.sparse_reuse_misses, 0);
+        assert_eq!(m.queue_full_rejections, 0);
+        assert_eq!(m.tick_disabled_rejections, 0);
+        assert_eq!(m.rollback_events, 0);
+        assert_eq!(m.tick_disabled_transitions, 0);
     }
 
     #[test]
@@ -60,6 +72,10 @@ mod tests {
             sparse_pending_retired: 1,
             sparse_reuse_hits: 5,
             sparse_reuse_misses: 2,
+            queue_full_rejections: 11,
+            tick_disabled_rejections: 4,
+            rollback_events: 2,
+            tick_disabled_transitions: 1,
         };
         assert_eq!(m.total_us, 100);
         assert_eq!(m.command_processing_us, 20);
@@ -72,5 +88,9 @@ mod tests {
         assert_eq!(m.sparse_pending_retired, 1);
         assert_eq!(m.sparse_reuse_hits, 5);
         assert_eq!(m.sparse_reuse_misses, 2);
+        assert_eq!(m.queue_full_rejections, 11);
+        assert_eq!(m.tick_disabled_rejections, 4);
+        assert_eq!(m.rollback_events, 2);
+        assert_eq!(m.tick_disabled_transitions, 1);
     }
 }

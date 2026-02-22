@@ -49,11 +49,19 @@ pub struct MurkStepMetrics {
     pub sparse_reuse_hits: u32,
     /// Number of sparse alloc() calls that fell through to bump allocation this tick.
     pub sparse_reuse_misses: u32,
+    /// Cumulative number of ingress rejections due to full queue.
+    pub queue_full_rejections: u64,
+    /// Cumulative number of ingress rejections due to tick-disabled state.
+    pub tick_disabled_rejections: u64,
+    /// Cumulative number of rollback events.
+    pub rollback_events: u64,
+    /// Cumulative number of transitions into tick-disabled state.
+    pub tick_disabled_transitions: u64,
 }
 
 // Compile-time layout assertions for ABI stability.
-// 3×u64 + 1×u64 + 5×u32 + 4 bytes padding = 56 bytes, align 8.
-const _: () = assert!(std::mem::size_of::<MurkStepMetrics>() == 56);
+// 4×u64 + 5×u32 + 4 bytes padding + 4×u64 = 88 bytes, align 8.
+const _: () = assert!(std::mem::size_of::<MurkStepMetrics>() == 88);
 const _: () = assert!(std::mem::align_of::<MurkStepMetrics>() == 8);
 
 impl MurkStepMetrics {
@@ -68,6 +76,10 @@ impl MurkStepMetrics {
             sparse_pending_retired: m.sparse_pending_retired,
             sparse_reuse_hits: m.sparse_reuse_hits,
             sparse_reuse_misses: m.sparse_reuse_misses,
+            queue_full_rejections: m.queue_full_rejections,
+            tick_disabled_rejections: m.tick_disabled_rejections,
+            rollback_events: m.rollback_events,
+            tick_disabled_transitions: m.tick_disabled_transitions,
         }
     }
 }
@@ -167,12 +179,20 @@ mod tests {
             sparse_pending_retired: 2,
             sparse_reuse_hits: 5,
             sparse_reuse_misses: 3,
+            queue_full_rejections: 11,
+            tick_disabled_rejections: 4,
+            rollback_events: 2,
+            tick_disabled_transitions: 1,
         };
         let ffi = MurkStepMetrics::from_rust(&rust_metrics);
         assert_eq!(ffi.sparse_retired_ranges, 7);
         assert_eq!(ffi.sparse_pending_retired, 2);
         assert_eq!(ffi.sparse_reuse_hits, 5);
         assert_eq!(ffi.sparse_reuse_misses, 3);
+        assert_eq!(ffi.queue_full_rejections, 11);
+        assert_eq!(ffi.tick_disabled_rejections, 4);
+        assert_eq!(ffi.rollback_events, 2);
+        assert_eq!(ffi.tick_disabled_transitions, 1);
     }
 
     #[test]
@@ -182,5 +202,9 @@ mod tests {
         assert_eq!(m.sparse_pending_retired, 0);
         assert_eq!(m.sparse_reuse_hits, 0);
         assert_eq!(m.sparse_reuse_misses, 0);
+        assert_eq!(m.queue_full_rejections, 0);
+        assert_eq!(m.tick_disabled_rejections, 0);
+        assert_eq!(m.rollback_events, 0);
+        assert_eq!(m.tick_disabled_transitions, 0);
     }
 }

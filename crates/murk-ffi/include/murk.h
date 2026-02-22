@@ -419,6 +419,22 @@ typedef struct MurkStepMetrics {
    * Number of sparse alloc() calls that fell through to bump allocation this tick.
    */
   uint32_t sparse_reuse_misses;
+  /**
+   * Cumulative number of ingress rejections due to full queue.
+   */
+  uint64_t queue_full_rejections;
+  /**
+   * Cumulative number of ingress rejections due to tick-disabled state.
+   */
+  uint64_t tick_disabled_rejections;
+  /**
+   * Cumulative number of rollback events.
+   */
+  uint64_t rollback_events;
+  /**
+   * Cumulative number of transitions into tick-disabled state.
+   */
+  uint64_t tick_disabled_transitions;
 } MurkStepMetrics;
 
 /**
