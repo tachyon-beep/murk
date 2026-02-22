@@ -101,12 +101,27 @@ impl SnapshotRing {
     /// lapping the consumer), falls back to a full scan of all
     /// slots, guaranteeing `Some` whenever the ring is non-empty.
     pub fn latest(&self) -> Option<Arc<OwnedSnapshot>> {
+        self.latest_impl(true)
+    }
+
+    /// Peek the latest snapshot without mutating read-side telemetry counters.
+    ///
+    /// This is intended for non-failing readiness/health checks (for example
+    /// `RealtimeAsyncWorld::preflight`) that should not be counted as
+    /// observation read failures or skew retries.
+    pub fn peek_latest(&self) -> Option<Arc<OwnedSnapshot>> {
+        self.latest_impl(false)
+    }
+
+    fn latest_impl(&self, record_events: bool) -> Option<Arc<OwnedSnapshot>> {
         // Fast path: bounded retry targeting the most recent snapshot.
         // Succeeds immediately under normal contention.
         for _ in 0..self.capacity {
             let pos = self.write_pos.load(Ordering::Acquire);
             if pos == 0 {
-                self.not_available_events.fetch_add(1, Ordering::Relaxed);
+                if record_events {
+                    self.not_available_events.fetch_add(1, Ordering::Relaxed);
+                }
                 return None;
             }
             let target_pos = pos - 1;
@@ -118,7 +133,9 @@ impl SnapshotRing {
                 // read and lock acquisition. Re-read write_pos and
                 // try the new latest slot.
                 _ => {
-                    self.skew_retry_events.fetch_add(1, Ordering::Relaxed);
+                    if record_events {
+                        self.skew_retry_events.fetch_add(1, Ordering::Relaxed);
+                    }
                     continue;
                 }
             }
@@ -143,7 +160,9 @@ impl SnapshotRing {
         if let Some((_, arc)) = best {
             Some(arc)
         } else {
-            self.not_available_events.fetch_add(1, Ordering::Relaxed);
+            if record_events {
+                self.not_available_events.fetch_add(1, Ordering::Relaxed);
+            }
             None
         }
     }
@@ -298,6 +317,25 @@ mod tests {
         assert_eq!(latest.tick_id(), TickId(1));
         assert_eq!(ring.not_available_events(), 0);
         assert_eq!(ring.oldest_retained_pos(), Some(0));
+    }
+
+    #[test]
+    fn test_ring_peek_latest_does_not_increment_not_available_on_empty() {
+        let ring = SnapshotRing::new(4);
+        assert!(ring.peek_latest().is_none());
+        assert_eq!(ring.not_available_events(), 0);
+        assert_eq!(ring.skew_retry_events(), 0);
+    }
+
+    #[test]
+    fn test_ring_peek_latest_returns_snapshot_without_counter_mutation() {
+        let ring = SnapshotRing::new(4);
+        ring.push(make_test_snapshot(5));
+
+        let latest = ring.peek_latest().unwrap();
+        assert_eq!(latest.tick_id(), TickId(5));
+        assert_eq!(ring.not_available_events(), 0);
+        assert_eq!(ring.skew_retry_events(), 0);
     }
 
     #[test]

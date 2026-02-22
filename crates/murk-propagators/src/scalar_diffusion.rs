@@ -459,30 +459,12 @@ impl Propagator for ScalarDiffusion {
         if self.coefficient <= 0.0 {
             return None;
         }
-        let n = space.cell_count();
-        if n == 0 {
-            return None;
-        }
         let ordering = space.canonical_ordering();
-
-        // Sample several cells spread across the grid and take the
-        // *maximum* neighbour degree.  CFL safety requires the worst-case
-        // (highest-degree) cell, so under-sampling is conservative in the
-        // wrong direction.  Five evenly-spaced probes cover interior cells
-        // on all regular grids while staying O(1).
-        let probes: &[usize] = if n < 5 {
-            // Tiny grid: just check all cells.
-            &[0, 1, 2, 3, 4]
-        } else {
-            &[n / 4, n / 3, n / 2, 2 * n / 3, 3 * n / 4]
-        };
-        let mut space_degree: u32 = 0;
-        for &idx in probes {
-            if idx < n {
-                let deg = space.neighbours(&ordering[idx]).len() as u32;
-                space_degree = space_degree.max(deg);
-            }
-        }
+        let space_degree = ordering
+            .iter()
+            .map(|coord| space.neighbours(coord).len() as u32)
+            .max()
+            .unwrap_or(0);
 
         let effective_degree = space_degree.max(self.max_degree);
         if effective_degree == 0 {
@@ -506,10 +488,11 @@ impl Propagator for ScalarDiffusion {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use murk_core::TickId;
+    use murk_core::{Coord, SpaceInstanceId, TickId};
     use murk_propagator::scratch::ScratchRegion;
-    use murk_space::{EdgeBehavior, Space};
+    use murk_space::{EdgeBehavior, RegionPlan, RegionSpec, Space, SpaceError};
     use murk_test_utils::{MockFieldReader, MockFieldWriter};
+    use smallvec::{smallvec, SmallVec};
 
     // Test field IDs far from the hardcoded constants to avoid collision.
     const F_HEAT: FieldId = FieldId(100);
@@ -1186,8 +1169,6 @@ mod tests {
             .max_degree(0)
             .build()
             .unwrap();
-        // Use 8x8 so sampled cells include interior cells with full degree 6.
-        // (Hex2D uses Absorb boundaries, so small grids may only sample edge cells.)
         let space = murk_space::Hex2D::new(8, 8).unwrap();
         // Hex2D interior cell has degree 6 → max_dt = 1 / (6 * 1.0) ≈ 0.1667
         assert!((prop.max_dt(&space).unwrap() - 1.0 / 6.0).abs() < 1e-10);
@@ -1218,5 +1199,83 @@ mod tests {
             .unwrap();
         let space = murk_space::Square4::new(1, 1, murk_space::EdgeBehavior::Absorb).unwrap();
         assert_eq!(prop.max_dt(&space), None);
+    }
+
+    #[derive(Debug)]
+    struct SkewDegreeSpace {
+        instance_id: SpaceInstanceId,
+    }
+
+    impl SkewDegreeSpace {
+        fn new() -> Self {
+            Self {
+                instance_id: SpaceInstanceId::next(),
+            }
+        }
+    }
+
+    impl Space for SkewDegreeSpace {
+        fn ndim(&self) -> usize {
+            1
+        }
+
+        fn cell_count(&self) -> usize {
+            8
+        }
+
+        fn neighbours(&self, coord: &Coord) -> SmallVec<[Coord; 8]> {
+            let i = coord[0];
+            if i == 1 {
+                (0..8).filter(|&j| j != 1).map(|j| smallvec![j]).collect()
+            } else {
+                smallvec![smallvec![1]]
+            }
+        }
+
+        fn distance(&self, a: &Coord, b: &Coord) -> f64 {
+            (a[0] - b[0]).abs() as f64
+        }
+
+        fn compile_region(&self, spec: &RegionSpec) -> Result<RegionPlan, SpaceError> {
+            let _ = spec;
+            Err(SpaceError::InvalidRegion {
+                reason: "SkewDegreeSpace test backend does not support compile_region".into(),
+            })
+        }
+
+        fn canonical_ordering(&self) -> Vec<Coord> {
+            (0..8).map(|i| smallvec![i]).collect()
+        }
+
+        fn canonical_rank(&self, coord: &Coord) -> Option<usize> {
+            if coord.len() == 1 && (0..8).contains(&coord[0]) {
+                Some(coord[0] as usize)
+            } else {
+                None
+            }
+        }
+
+        fn instance_id(&self) -> SpaceInstanceId {
+            self.instance_id
+        }
+
+        fn topology_eq(&self, other: &dyn Space) -> bool {
+            other.downcast_ref::<Self>().is_some()
+        }
+    }
+
+    #[test]
+    fn max_dt_scans_full_topology_for_worst_case_degree() {
+        let prop = ScalarDiffusion::builder()
+            .input_field(F_HEAT)
+            .output_field(F_HEAT)
+            .coefficient(1.0)
+            .max_degree(0)
+            .build()
+            .unwrap();
+        let space = SkewDegreeSpace::new();
+
+        // Worst-case degree is 7 at coordinate [1]. max_dt must respect it.
+        assert_eq!(prop.max_dt(&space), Some(1.0 / 7.0));
     }
 }

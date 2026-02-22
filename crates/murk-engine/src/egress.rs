@@ -95,7 +95,7 @@ pub(crate) fn ring_preflight(ring: &SnapshotRing, epoch_counter: &EpochCounter) 
     let ring_stale_read_events = ring.stale_read_events();
     let ring_skew_retry_events = ring.skew_retry_events();
 
-    match ring.latest() {
+    match ring.peek_latest() {
         Some(snapshot) => {
             let tick = snapshot.tick_id().0;
             RingPreflight {
@@ -325,6 +325,8 @@ mod tests {
         assert_eq!(preflight.ring_len, 0);
         assert_eq!(preflight.ring_write_pos, 0);
         assert_eq!(preflight.ring_oldest_retained_pos, None);
+        assert_eq!(ring.not_available_events(), 0);
+        assert_eq!(ring.skew_retry_events(), 0);
     }
 
     #[test]
@@ -346,6 +348,8 @@ mod tests {
         assert_eq!(preflight.ring_write_pos, 1);
         assert_eq!(preflight.ring_oldest_retained_pos, Some(0));
         assert_eq!(preflight.ring_eviction_events, 0);
+        assert_eq!(ring.not_available_events(), 0);
+        assert_eq!(ring.skew_retry_events(), 0);
     }
 
     #[test]
