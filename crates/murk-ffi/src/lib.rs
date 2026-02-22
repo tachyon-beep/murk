@@ -162,7 +162,7 @@ pub use types::{
 pub use world::{
     murk_consecutive_rollbacks, murk_current_tick, murk_is_tick_disabled, murk_lockstep_create,
     murk_lockstep_destroy, murk_lockstep_reset, murk_lockstep_step, murk_lockstep_step_vec,
-    murk_seed, murk_snapshot_read_field,
+    murk_seed, murk_snapshot_read_field, murk_world_preflight_get, MurkWorldPreflight,
 };
 
 /// ABI version: major in upper 16 bits, minor in lower 16.

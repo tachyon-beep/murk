@@ -6,11 +6,12 @@
 
 use numpy::{PyArray1, PyArrayMethods, PyUntypedArrayMethods};
 use pyo3::prelude::*;
+use pyo3::types::PyDict;
 
 use murk_ffi::{
     murk_current_tick, murk_is_tick_disabled, murk_lockstep_create, murk_lockstep_destroy,
-    murk_lockstep_reset, murk_lockstep_step, murk_seed, murk_snapshot_read_field, MurkCommand,
-    MurkReceipt, MurkStepMetrics,
+    murk_lockstep_reset, murk_lockstep_step, murk_seed, murk_snapshot_read_field,
+    murk_world_preflight_get, MurkCommand, MurkReceipt, MurkStepMetrics, MurkWorldPreflight,
 };
 
 use crate::command::{Command, Receipt};
@@ -191,6 +192,24 @@ impl World {
         let h = self.require_handle()?;
         // Release GIL: murk_is_tick_disabled locks WORLDS.
         Ok(py.detach(|| murk_is_tick_disabled(h) != 0))
+    }
+
+    /// Non-blocking queue-depth/readiness snapshot.
+    fn preflight(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
+        let h = self.require_handle()?;
+        let mut preflight = MurkWorldPreflight::default();
+        let preflight_addr = &mut preflight as *mut MurkWorldPreflight as usize;
+
+        let status = py.detach(|| murk_world_preflight_get(h, preflight_addr as *mut _));
+        check_status(status)?;
+
+        let out = PyDict::new(py);
+        out.set_item("ingress_queue_depth", preflight.ingress_queue_depth)?;
+        out.set_item("ingress_queue_capacity", preflight.ingress_queue_capacity)?;
+        out.set_item("current_tick", preflight.current_tick)?;
+        out.set_item("tick_disabled", preflight.tick_disabled != 0)?;
+        out.set_item("consecutive_rollbacks", preflight.consecutive_rollbacks)?;
+        Ok(out.unbind())
     }
 
     /// Explicitly destroy the world handle.

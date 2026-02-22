@@ -520,6 +520,16 @@ impl TickEngine {
     pub fn space(&self) -> &dyn murk_space::Space {
         self.space.as_ref()
     }
+
+    /// Number of command batches currently buffered in ingress.
+    pub fn ingress_queue_depth(&self) -> usize {
+        self.ingress.len()
+    }
+
+    /// Maximum number of command batches ingress can buffer.
+    pub fn ingress_queue_capacity(&self) -> usize {
+        self.ingress.capacity()
+    }
 }
 
 #[cfg(test)]

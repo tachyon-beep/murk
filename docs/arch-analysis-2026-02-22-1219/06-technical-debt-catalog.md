@@ -4,21 +4,21 @@
 
 ## Critical Priority (Immediate Action Required)
 
-### FFI: unchecked agent-centers length arithmetic in `murk_obsplan_execute_agents`
+### [Resolved] FFI: unchecked agent-centers length arithmetic in `murk_obsplan_execute_agents`
 
 - **Evidence:** `crates/murk-ffi/src/obs.rs`
 - **Impact:** Client-controlled dimensions can trigger overflow/over-allocation pressure or panics at the FFI boundary, undermining “panic-safe boundary” guarantees and raising security/reliability risk for any C/Python consumer.
 - **Effort:** S
 - **Category:** Security / Correctness
 
-### Replay format spec drift vs implementation
+### [Resolved] Replay format spec drift vs implementation
 
 - **Evidence:** `docs/replay-format.md`, `crates/murk-replay/src/lib.rs`
 - **Impact:** External tooling can implement the wrong decoder/encoder, producing silent corruption or false determinism failures; breaks compatibility expectations.
 - **Effort:** M
 - **Category:** Correctness / Documentation
 
-### Repo hygiene: tracked platform-specific binary and pytest cache in the Python tree
+### [Resolved] Repo hygiene: tracked platform-specific binary and pytest cache in the Python tree
 
 - **Evidence:** `crates/murk-python/python/murk/_murk.abi3.so`, `crates/murk-python/.pytest_cache/README.md`
 - **Impact:** Weakens supply-chain trust (binary checked into source), creates platform coupling, and makes review/build behavior harder to reason about.
@@ -27,49 +27,49 @@
 
 ## High Priority (Next Body of Work)
 
-### Docs: Python version mismatch
+### [Resolved] Docs: Python version mismatch
 
 - **Evidence:** `README.md`, `book/src/getting-started.md`, `crates/murk-python/pyproject.toml`
 - **Impact:** Users follow docs and hit install/runtime failures; increases support burden.
 - **Effort:** S
 - **Category:** DX / Documentation
 
-### Docs: “published vs install-from-source” mismatch
+### [Resolved] Docs: “published vs install-from-source” mismatch
 
 - **Evidence:** `README.md`, `book/src/getting-started.md`, `.github/workflows/release.yml`
 - **Impact:** Confuses users and contributors; makes release posture ambiguous.
 - **Effort:** S
 - **Category:** DX / Documentation
 
-### Engine: fail-stop semantics need first-class telemetry
+### [Resolved] Engine: fail-stop semantics need first-class telemetry
 
 - **Evidence:** `crates/murk-engine/src/tick.rs`, `crates/murk-engine/src/ingress.rs`
 - **Impact:** In realtime workloads, `tick_disabled` and `QueueFull` behavior can look like “random drops / hangs” without counters and explicit signals; makes production diagnosis difficult.
 - **Effort:** M
 - **Category:** Reliability / Observability
 
-### Engine: `BatchedEngine` blocks agent-relative observation specs
+### [Open] Engine: `BatchedEngine` blocks agent-relative observation specs
 
 - **Evidence:** `crates/murk-engine/src/batched.rs`
 - **Impact:** Forces high-throughput training users back to per-world stepping when they need `AgentDisk`/`AgentRect` style observations, negating the “single GIL release” advantage for richer tasks.
 - **Effort:** M–L
 - **Category:** Performance / Product Capability
 
-### Observations: avoidable allocations and redundant batch work
+### [Open] Observations: avoidable allocations and redundant batch work
 
 - **Evidence:** `crates/murk-obs/src/plan.rs`, `crates/murk-obs/src/pool.rs`
 - **Impact:** Increased heap churn and linear scaling penalties for large multi-agent or batched training workloads.
 - **Effort:** M
 - **Category:** Performance
 
-### Space/regions: default O(n) lookups and expensive canonical materialization
+### [Open] Space/regions: default O(n) lookups and expensive canonical materialization
 
 - **Evidence:** `crates/murk-space/src/space.rs`, `crates/murk-space/src/product.rs`
 - **Impact:** Large spaces and high-dimensional product spaces become expensive in observation planning and coordinate→index mapping; constrains “scale-up” roadmap items (LOS sensors, heterogeneous observation plans).
 - **Effort:** L
 - **Category:** Performance / Scalability
 
-### Arena: snapshot ownership and sparse reuse hotspots
+### [Open] Arena: snapshot ownership and sparse reuse hotspots
 
 - **Evidence:** `crates/murk-arena/src/read.rs`, `crates/murk-arena/src/write.rs`, `crates/murk-arena/src/sparse.rs`
 - **Impact:** Realtime mode and sparse-heavy simulations can pay unnecessary copying/scanning costs; increases memory bandwidth and reduces headroom.
@@ -78,14 +78,14 @@
 
 ## Medium Priority (Important, Not Blocking)
 
-### Python typing surface can drift from PyO3 exports
+### [PartiallyResolved] Python typing surface can drift from PyO3 exports
 
 - **Evidence:** `crates/murk-python/python/murk/_murk.pyi`, `crates/murk-python/src/lib.rs`
 - **Impact:** Stale type hints and confusing editor/mypy behavior as the API evolves.
 - **Effort:** M
 - **Category:** DX
 
-### FFI mutex poisoning recovery strategy is undefined
+### [Resolved] FFI mutex poisoning recovery strategy is undefined
 
 - **Evidence:** `crates/murk-ffi/src/lib.rs`
 - **Impact:** One panic while holding a lock can effectively disable the API for the process lifetime; may be acceptable for “fail closed”, but should be an explicit design choice with a recovery path.

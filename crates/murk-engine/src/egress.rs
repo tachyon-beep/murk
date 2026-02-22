@@ -60,6 +60,36 @@ pub(crate) enum ObsResult {
     Error(murk_core::error::ObsError),
 }
 
+/// Non-blocking ring visibility used by preflight callers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RingPreflight {
+    /// Whether at least one snapshot is currently available.
+    pub has_snapshot: bool,
+    /// Tick ID of the latest snapshot (0 when unavailable).
+    pub latest_tick_id: u64,
+    /// Age of the latest snapshot in ticks against the current epoch.
+    pub age_ticks: u64,
+}
+
+/// Capture a lightweight snapshot/ring visibility view without blocking workers.
+pub(crate) fn ring_preflight(ring: &SnapshotRing, epoch_counter: &EpochCounter) -> RingPreflight {
+    match ring.latest() {
+        Some(snapshot) => {
+            let tick = snapshot.tick_id().0;
+            RingPreflight {
+                has_snapshot: true,
+                latest_tick_id: tick,
+                age_ticks: epoch_counter.current().saturating_sub(tick),
+            }
+        }
+        None => RingPreflight {
+            has_snapshot: false,
+            latest_tick_id: 0,
+            age_ticks: 0,
+        },
+    }
+}
+
 /// Main loop for an egress worker thread, using an index into a shared
 /// `Arc<[WorkerEpoch]>` array. This ensures the tick thread's stall
 /// detector and the worker see the same `WorkerEpoch` instance.
@@ -244,6 +274,33 @@ mod tests {
         }
         arena.publish(TickId(tick), ParameterVersion(0)).unwrap();
         arena.owned_snapshot()
+    }
+
+    #[test]
+    fn ring_preflight_reports_absent_snapshot() {
+        let ring = SnapshotRing::new(4);
+        let epoch = EpochCounter::new();
+
+        let preflight = super::ring_preflight(&ring, &epoch);
+        assert!(!preflight.has_snapshot);
+        assert_eq!(preflight.latest_tick_id, 0);
+        assert_eq!(preflight.age_ticks, 0);
+    }
+
+    #[test]
+    fn ring_preflight_reports_snapshot_age() {
+        let ring = SnapshotRing::new(4);
+        ring.push(make_test_snapshot(2, 1.0, 10));
+
+        let epoch = EpochCounter::new();
+        for _ in 0..7 {
+            epoch.advance();
+        }
+
+        let preflight = super::ring_preflight(&ring, &epoch);
+        assert!(preflight.has_snapshot);
+        assert_eq!(preflight.latest_tick_id, 2);
+        assert_eq!(preflight.age_ticks, 5);
     }
 
     #[test]

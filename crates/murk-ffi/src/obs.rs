@@ -791,4 +791,133 @@ mod tests {
         );
         assert_eq!(status, MurkStatus::InvalidArgument as i32);
     }
+
+    #[test]
+    fn execute_agents_rejects_legacy_overflow_shape_inputs() {
+        let mut output = [0.0f32; 1];
+        let mut mask = [0u8; 1];
+        let centers = [0i32; 1];
+
+        // These dimensions would overflow legacy unchecked arithmetic
+        // (`n_agents * ndim`) and must deterministically reject.
+        let status = murk_obsplan_execute_agents(
+            0,
+            0,
+            centers.as_ptr(),
+            i32::MAX,
+            i32::MAX,
+            output.as_mut_ptr(),
+            output.len(),
+            mask.as_mut_ptr(),
+            mask.len(),
+            std::ptr::null_mut(),
+        );
+        assert_eq!(status, MurkStatus::InvalidArgument as i32);
+    }
+
+    #[test]
+    fn execute_agents_rejects_too_small_output_for_multiple_agents() {
+        let world_h = create_test_world();
+        crate::world::murk_lockstep_step(
+            world_h,
+            std::ptr::null(),
+            0,
+            std::ptr::null_mut(),
+            0,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        );
+
+        let entry = MurkObsEntry {
+            field_id: 0,
+            region_type: 0,
+            transform_type: 0,
+            normalize_min: 0.0,
+            normalize_max: 0.0,
+            dtype: 0,
+            region_params: [0; 8],
+            n_region_params: 0,
+            pool_kernel: 0,
+            pool_kernel_size: 0,
+            pool_stride: 0,
+        };
+        let mut plan_h: u64 = 0;
+        assert_eq!(
+            murk_obsplan_compile(world_h, &entry, 1, &mut plan_h),
+            MurkStatus::Ok as i32
+        );
+
+        let centers = [0i32, 1i32];
+        let mut output = vec![0.0f32; 17];
+        let mut mask = vec![0u8; 18];
+        let status = murk_obsplan_execute_agents(
+            world_h,
+            plan_h,
+            centers.as_ptr(),
+            1,
+            2,
+            output.as_mut_ptr(),
+            output.len(),
+            mask.as_mut_ptr(),
+            mask.len(),
+            std::ptr::null_mut(),
+        );
+        assert_eq!(status, MurkStatus::BufferTooSmall as i32);
+
+        murk_obsplan_destroy(plan_h);
+        crate::world::murk_lockstep_destroy(world_h);
+    }
+
+    #[test]
+    fn execute_agents_rejects_too_small_mask_for_multiple_agents() {
+        let world_h = create_test_world();
+        crate::world::murk_lockstep_step(
+            world_h,
+            std::ptr::null(),
+            0,
+            std::ptr::null_mut(),
+            0,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        );
+
+        let entry = MurkObsEntry {
+            field_id: 0,
+            region_type: 0,
+            transform_type: 0,
+            normalize_min: 0.0,
+            normalize_max: 0.0,
+            dtype: 0,
+            region_params: [0; 8],
+            n_region_params: 0,
+            pool_kernel: 0,
+            pool_kernel_size: 0,
+            pool_stride: 0,
+        };
+        let mut plan_h: u64 = 0;
+        assert_eq!(
+            murk_obsplan_compile(world_h, &entry, 1, &mut plan_h),
+            MurkStatus::Ok as i32
+        );
+
+        let centers = [0i32, 1i32];
+        let mut output = vec![0.0f32; 18];
+        let mut mask = vec![0u8; 17];
+        let status = murk_obsplan_execute_agents(
+            world_h,
+            plan_h,
+            centers.as_ptr(),
+            1,
+            2,
+            output.as_mut_ptr(),
+            output.len(),
+            mask.as_mut_ptr(),
+            mask.len(),
+            std::ptr::null_mut(),
+        );
+        assert_eq!(status, MurkStatus::BufferTooSmall as i32);
+
+        murk_obsplan_destroy(plan_h);
+        crate::world::murk_lockstep_destroy(world_h);
+    }
 }

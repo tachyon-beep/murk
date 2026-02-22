@@ -187,6 +187,16 @@ impl LockstepWorld {
     pub fn space(&self) -> &dyn murk_space::Space {
         self.engine.space()
     }
+
+    /// Number of command batches currently queued for the next tick.
+    pub fn ingress_queue_depth(&self) -> usize {
+        self.engine.ingress_queue_depth()
+    }
+
+    /// Maximum number of command batches the ingress queue can hold.
+    pub fn ingress_queue_capacity(&self) -> usize {
+        self.engine.ingress_queue_capacity()
+    }
 }
 
 impl std::fmt::Debug for LockstepWorld {

@@ -22,6 +22,22 @@ type WorldArc = Arc<Mutex<LockstepWorld>>;
 
 static WORLDS: Mutex<HandleTable<WorldArc>> = Mutex::new(HandleTable::new());
 
+/// Lightweight world readiness snapshot for non-blocking preflight checks.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MurkWorldPreflight {
+    /// Number of command batches currently waiting in ingress.
+    pub ingress_queue_depth: u32,
+    /// Maximum number of command batches ingress can hold.
+    pub ingress_queue_capacity: u32,
+    /// Current world tick.
+    pub current_tick: u64,
+    /// Whether ticking is disabled due to consecutive rollbacks.
+    pub tick_disabled: u8,
+    /// Number of consecutive rollback ticks.
+    pub consecutive_rollbacks: u32,
+}
+
 /// Clone the Arc for a world handle, briefly locking the global table.
 ///
 /// Returns `None` if the handle is invalid or the mutex is poisoned.
@@ -342,6 +358,34 @@ pub extern "C" fn murk_consecutive_rollbacks_get(world_handle: u64, out: *mut u3
     })
 }
 
+/// Non-blocking world preflight with queue-depth/readiness counters.
+///
+/// Writes a snapshot into `*out` and returns `MURK_OK`. Returns
+/// `InvalidHandle` or `InternalError` without writing to `out`.
+#[no_mangle]
+#[allow(unsafe_code)]
+pub extern "C" fn murk_world_preflight_get(world_handle: u64, out: *mut MurkWorldPreflight) -> i32 {
+    ffi_guard!({
+        if out.is_null() {
+            return MurkStatus::InvalidArgument as i32;
+        }
+        let world_arc = match get_world(world_handle) {
+            Some(arc) => arc,
+            None => return MurkStatus::InvalidHandle as i32,
+        };
+        let world = ffi_lock!(world_arc);
+        let preflight = MurkWorldPreflight {
+            ingress_queue_depth: world.ingress_queue_depth().min(u32::MAX as usize) as u32,
+            ingress_queue_capacity: world.ingress_queue_capacity().min(u32::MAX as usize) as u32,
+            current_tick: world.current_tick().0,
+            tick_disabled: u8::from(world.is_tick_disabled()),
+            consecutive_rollbacks: world.consecutive_rollback_count(),
+        };
+        unsafe { *out = preflight };
+        MurkStatus::Ok as i32
+    })
+}
+
 /// The world's current seed.
 ///
 /// **Ambiguity warning:** returns 0 for both "seed 0" and "invalid handle."
@@ -482,6 +526,9 @@ mod tests {
         murk_config_set_space,
     };
     use crate::metrics::murk_step_metrics;
+    use crate::obs::{
+        murk_obsplan_compile, murk_obsplan_destroy, murk_obsplan_execute_agents, MurkObsEntry,
+    };
     use crate::propagator::{
         murk_propagator_create, MurkPropagatorDef, MurkStepContext, MurkWriteDecl,
     };
@@ -950,6 +997,77 @@ mod tests {
     }
 
     #[test]
+    fn obsplan_execute_agents_buffer_too_small_does_not_poison_world() {
+        let world_h = create_test_world();
+        // Populate one tick so observation paths have data.
+        assert_eq!(
+            murk_lockstep_step(
+                world_h,
+                std::ptr::null(),
+                0,
+                std::ptr::null_mut(),
+                0,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            ),
+            MurkStatus::Ok as i32
+        );
+
+        let entry = MurkObsEntry {
+            field_id: 0,
+            region_type: 0,
+            transform_type: 0,
+            normalize_min: 0.0,
+            normalize_max: 0.0,
+            dtype: 0,
+            region_params: [0; 8],
+            n_region_params: 0,
+            pool_kernel: 0,
+            pool_kernel_size: 0,
+            pool_stride: 0,
+        };
+        let mut plan_h = 0u64;
+        assert_eq!(
+            murk_obsplan_compile(world_h, &entry, 1, &mut plan_h),
+            MurkStatus::Ok as i32
+        );
+
+        let centers = [0i32, 1i32];
+        let mut output = vec![0.0f32; 19];
+        let mut mask = vec![0u8; 20];
+        let status = murk_obsplan_execute_agents(
+            world_h,
+            plan_h,
+            centers.as_ptr(),
+            1,
+            2,
+            output.as_mut_ptr(),
+            output.len(),
+            mask.as_mut_ptr(),
+            mask.len(),
+            std::ptr::null_mut(),
+        );
+        assert_eq!(status, MurkStatus::BufferTooSmall as i32);
+
+        // World remains usable after the rejected FFI call.
+        assert_eq!(
+            murk_lockstep_step(
+                world_h,
+                std::ptr::null(),
+                0,
+                std::ptr::null_mut(),
+                0,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            ),
+            MurkStatus::Ok as i32
+        );
+
+        assert_eq!(murk_obsplan_destroy(plan_h), MurkStatus::Ok as i32);
+        assert_eq!(murk_lockstep_destroy(world_h), MurkStatus::Ok as i32);
+    }
+
+    #[test]
     fn accessor_get_variants_return_values() {
         let world_h = create_test_world();
 
@@ -977,6 +1095,16 @@ mod tests {
         let mut seed: u64 = 0;
         assert_eq!(murk_seed_get(world_h, &mut seed), MurkStatus::Ok as i32);
         assert_eq!(seed, 42);
+
+        let mut preflight = MurkWorldPreflight::default();
+        assert_eq!(
+            murk_world_preflight_get(world_h, &mut preflight),
+            MurkStatus::Ok as i32
+        );
+        assert_eq!(preflight.current_tick, 0);
+        assert_eq!(preflight.tick_disabled, 0);
+        assert_eq!(preflight.consecutive_rollbacks, 0);
+        assert!(preflight.ingress_queue_capacity > 0);
 
         murk_lockstep_destroy(world_h);
     }
@@ -1174,6 +1302,10 @@ mod tests {
         );
         assert_eq!(
             murk_seed_get(world_h, std::ptr::null_mut()),
+            MurkStatus::InvalidArgument as i32
+        );
+        assert_eq!(
+            murk_world_preflight_get(world_h, std::ptr::null_mut()),
             MurkStatus::InvalidArgument as i32
         );
 

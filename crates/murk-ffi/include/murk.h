@@ -586,6 +586,32 @@ typedef struct MurkReceipt {
 } MurkReceipt;
 
 /**
+ * Lightweight world readiness snapshot for non-blocking preflight checks.
+ */
+typedef struct MurkWorldPreflight {
+  /**
+   * Number of command batches currently waiting in ingress.
+   */
+  uint32_t ingress_queue_depth;
+  /**
+   * Maximum number of command batches ingress can hold.
+   */
+  uint32_t ingress_queue_capacity;
+  /**
+   * Current world tick.
+   */
+  uint64_t current_tick;
+  /**
+   * Whether ticking is disabled due to consecutive rollbacks.
+   */
+  uint8_t tick_disabled;
+  /**
+   * Number of consecutive rollback ticks.
+   */
+  uint32_t consecutive_rollbacks;
+} MurkWorldPreflight;
+
+/**
  * Retrieve the panic message stored by the most recent [`ffi_guard!`] catch
  * on this thread.
  *
@@ -941,6 +967,14 @@ uint32_t murk_consecutive_rollbacks(uint64_t world_handle);
  * `InvalidHandle` or `InternalError` without writing to `out`.
  */
 int32_t murk_consecutive_rollbacks_get(uint64_t world_handle, uint32_t *out);
+
+/**
+ * Non-blocking world preflight with queue-depth/readiness counters.
+ *
+ * Writes a snapshot into `*out` and returns `MURK_OK`. Returns
+ * `InvalidHandle` or `InternalError` without writing to `out`.
+ */
+int32_t murk_world_preflight_get(uint64_t world_handle, struct MurkWorldPreflight *out);
 
 /**
  * The world's current seed.

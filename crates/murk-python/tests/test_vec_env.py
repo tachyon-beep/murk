@@ -89,3 +89,19 @@ def test_vec_env_reset_with_seeds():
     obs, _ = vec_env.reset(seed=[100, 200])
     assert obs.shape == (2, 5)
     vec_env.close()
+
+
+def test_vec_env_env_preflight_exposes_queue_visibility():
+    """Each env exposes non-blocking preflight queue/readiness counters."""
+    vec_env = MurkVecEnv([lambda: CountEnv(seed=42)])
+    vec_env.reset()
+
+    preflight = vec_env.envs[0].preflight()
+    assert isinstance(preflight, dict)
+    assert preflight["ingress_queue_capacity"] >= 1
+    assert preflight["ingress_queue_depth"] >= 0
+    assert isinstance(preflight["tick_disabled"], bool)
+    assert preflight["consecutive_rollbacks"] >= 0
+    assert preflight["current_tick"] >= 0
+
+    vec_env.close()
