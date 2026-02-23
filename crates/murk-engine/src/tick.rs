@@ -143,8 +143,15 @@ impl TickEngine {
         let static_fields: Vec<(FieldId, u32)> = arena_field_defs
             .iter()
             .filter(|(_, d)| d.mutability == FieldMutability::Static)
-            .map(|(id, d)| (*id, cell_count * d.field_type.components()))
-            .collect();
+            .map(|(id, d)| {
+                let len = cell_count
+                    .checked_mul(d.field_type.components())
+                    .ok_or(ConfigError::CellCountOverflow {
+                        value: cell_count as usize,
+                    })?;
+                Ok((*id, len))
+            })
+            .collect::<Result<_, ConfigError>>()?;
         let static_arena = StaticArena::new(&static_fields).into_shared();
 
         let arena = PingPongArena::new(arena_config, arena_field_defs, static_arena)?;
@@ -1549,5 +1556,35 @@ mod tests {
         let snap = engine.snapshot();
         assert_eq!(snap.read(FieldId(0)).unwrap()[0], 42.0);
         assert_eq!(snap.read(FieldId(0)).unwrap()[1], 99.0);
+    }
+
+    /// BUG-106: Unchecked u32 * u32 for static field length panics on overflow.
+    #[test]
+    fn static_field_overflow_returns_error() {
+        let config = WorldConfig {
+            space: Box::new(Line1D::new(3, EdgeBehavior::Absorb).unwrap()),
+            fields: vec![FieldDef {
+                name: "huge_vec".to_string(),
+                field_type: FieldType::Vector {
+                    dims: u32::MAX / 2, // 3 * (u32::MAX/2) overflows u32
+                },
+                mutability: FieldMutability::Static,
+                units: None,
+                bounds: None,
+                boundary_behavior: BoundaryBehavior::Clamp,
+            }],
+            propagators: vec![Box::new(ConstPropagator::new("c", FieldId(0), 1.0))],
+            dt: 0.1,
+            seed: 42,
+            ring_buffer_size: 8,
+            max_ingress_queue: 1024,
+            tick_rate_hz: None,
+            backoff: crate::config::BackoffConfig::default(),
+        };
+        match TickEngine::new(config) {
+            Err(crate::config::ConfigError::CellCountOverflow { .. }) => {}
+            Ok(_) => panic!("expected CellCountOverflow, got Ok"),
+            Err(e) => panic!("expected CellCountOverflow, got {e}"),
+        }
     }
 }

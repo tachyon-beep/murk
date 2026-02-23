@@ -4,8 +4,9 @@ Generated 2026-02-17 from static analysis triage of 110 source reports.
 Updated 2026-02-21 with wave-4 deep audit findings (#54-#94).
 Updated 2026-02-22: closed #53 (v0.1.7), #97 (v0.1.8).
 Updated 2026-02-24: wave-5 static analysis (#99-#119), 21 new open bugs.
+Updated 2026-02-24: wave B panic/crash hardening (#103-#107), 5 bugs fixed.
 
-**Status (updated 2026-02-24):** 98 fixed, 0 partially fixed, 21 open.
+**Status (updated 2026-02-24):** 103 fixed, 0 partially fixed, 16 open.
 
 ## Open Bugs
 
@@ -22,10 +23,10 @@ Updated 2026-02-24: wave-5 static analysis (#99-#119), 21 new open bugs.
 |---|--------|-------|---------|--------|------|
 | 101 | [propagators-diffusion-generic-gradient-periodic-sign](propagators-diffusion-generic-gradient-periodic-sign.md) | murk-propagators | `step_generic` gradient uses raw coordinate deltas; wrong sign at wrap boundaries | open | A |
 | 102 | [propagators-agent-movement-respawn-on-all-zero](propagators-agent-movement-respawn-on-all-zero.md) | murk-propagators | All-zero field heuristic instead of tick ID; agents respawn on any all-zero tick | open | A |
-| 103 | [engine-realtime-new-panics-on-thread-spawn-failure](engine-realtime-new-panics-on-thread-spawn-failure.md) | murk-engine | `.expect()` on thread spawn panics + leaks already-started threads | open | B |
-| 104 | [engine-tick-rate-hz-reciprocal-overflow](engine-tick-rate-hz-reciprocal-overflow.md) | murk-engine | Subnormal `tick_rate_hz` passes validation but `1/x = inf` panics `Duration::from_secs_f64` | open | B |
-| 105 | [engine-stall-threshold-arithmetic-overflow](engine-stall-threshold-arithmetic-overflow.md) | murk-engine | Unchecked `u64` arithmetic in stall threshold / hold / grace computation | open | B |
-| 106 | [engine-tick-static-field-length-overflow](engine-tick-static-field-length-overflow.md) | murk-engine | Unchecked `u32 * u32` for static field length in `TickEngine::new` bypasses arena's `checked_mul` | open | B |
+| 103 | [engine-realtime-new-panics-on-thread-spawn-failure](closed/engine-realtime-new-panics-on-thread-spawn-failure.md) | murk-engine | `.expect()` on thread spawn panics + leaks already-started threads | **fixed** | B |
+| 104 | [engine-tick-rate-hz-reciprocal-overflow](closed/engine-tick-rate-hz-reciprocal-overflow.md) | murk-engine | Subnormal `tick_rate_hz` passes validation but `1/x = inf` panics `Duration::from_secs_f64` | **fixed** | B |
+| 105 | [engine-stall-threshold-arithmetic-overflow](closed/engine-stall-threshold-arithmetic-overflow.md) | murk-engine | Unchecked `u64` arithmetic in stall threshold / hold / grace computation | **fixed** | B |
+| 106 | [engine-tick-static-field-length-overflow](closed/engine-tick-static-field-length-overflow.md) | murk-engine | Unchecked `u32 * u32` for static field length in `TickEngine::new` bypasses arena's `checked_mul` | **fixed** | B |
 | 108 | [engine-batched-obsspec-missing-field-atomicity](engine-batched-obsspec-missing-field-atomicity.md) | murk-engine | `BatchedEngine` steps worlds before observation fails on missing field | open | C |
 | 109 | [arena-descriptor-duplicate-field-ids](arena-descriptor-duplicate-field-ids.md) | murk-arena | `FieldDescriptor::from_field_defs` silently accepts duplicate FieldIds (#14 only fixed StaticArena) | open | C |
 | 110 | [obs-plan-agentrect-missing-halfextent-ndim-check](obs-plan-agentrect-missing-halfextent-ndim-check.md) | murk-obs | `AgentRect` half_extent not validated against `space.ndim()`; zip silently truncates | open | C |
@@ -36,7 +37,7 @@ Updated 2026-02-24: wave-5 static analysis (#99-#119), 21 new open bugs.
 
 | # | Ticket | Crate | Summary | Status | Wave |
 |---|--------|-------|---------|--------|------|
-| 107 | [bench-init-agent-positions-overflow](bench-init-agent-positions-overflow.md) | murk-bench | Plain `*` instead of `wrapping_mul` in hash; panics in debug for ≥14 agents | open | B |
+| 107 | [bench-init-agent-positions-overflow](closed/bench-init-agent-positions-overflow.md) | murk-bench | Plain `*` instead of `wrapping_mul` in hash; panics in debug for ≥14 agents | **fixed** | B |
 | 112 | [propagators-diffusion-unchecked-field-arity](propagators-diffusion-unchecked-field-arity.md) | murk-propagators | No field slice length validation before `[i*2+comp]` indexing | open | C |
 | 115 | [ffi-config-edge-behavior-unchecked-f64-cast](ffi-config-edge-behavior-unchecked-f64-cast.md) | murk-ffi | Raw `as i32` casts for enum params; NaN→0 maps to valid variant | open | D |
 | 116 | [ffi-write-receipts-null-buffer-count](ffi-write-receipts-null-buffer-count.md) | murk-ffi | Reports non-zero receipt count even when output buffer is null | open | D |
@@ -65,17 +66,17 @@ These produce **wrong results without any error signal**. Callers cannot detect 
 | 101 | propagators-diffusion-generic-gradient-periodic-sign | murk-propagators | `diffusion.rs` — signed displacement |
 | 102 | propagators-agent-movement-respawn-on-all-zero | murk-propagators | `agent_movement.rs` — tick ID check |
 
-### Wave B — Panic/Crash Hardening (fix second)
+### Wave B — Panic/Crash Hardening (**ALL FIXED**)
 
-These **crash the process** via `.expect()` or unchecked arithmetic instead of returning errors. Four of five are in murk-engine.
+These **crashed the process** via `.expect()` or unchecked arithmetic instead of returning errors. All five fixed in this session.
 
-| # | Ticket | Crate | Fix Locality |
-|---|--------|-------|--------------|
-| 103 | engine-realtime-new-panics-on-thread-spawn-failure | murk-engine | `realtime.rs` — Result propagation + rollback |
-| 104 | engine-tick-rate-hz-reciprocal-overflow | murk-engine | `tick_thread.rs` — subnormal rejection |
-| 105 | engine-stall-threshold-arithmetic-overflow | murk-engine | `tick_thread.rs` (same file as #104) |
-| 106 | engine-tick-static-field-length-overflow | murk-engine | `tick.rs` — checked_mul |
-| 107 | bench-init-agent-positions-overflow | murk-bench | `lib.rs` — wrapping_mul |
+| # | Ticket | Crate | Fix Summary |
+|---|--------|-------|-------------|
+| 103 | engine-realtime-new-panics-on-thread-spawn-failure | murk-engine | `.expect()` → `Result` + `ThreadSpawnFailed` variant; partial startup rollback |
+| 104 | engine-tick-rate-hz-reciprocal-overflow | murk-engine | Validation rejects `hz` where `1.0/hz` is infinite |
+| 105 | engine-stall-threshold-arithmetic-overflow | murk-engine | `saturating_mul`/`saturating_add` for all ms→ns and stall arithmetic |
+| 106 | engine-tick-static-field-length-overflow | murk-engine | `checked_mul` + `CellCountOverflow` error on static field length |
+| 107 | bench-init-agent-positions-overflow | murk-bench | `wrapping_mul` for hash computation |
 
 ### Wave C — Validation Gaps (fix third)
 
@@ -116,6 +117,11 @@ Tickets moved to [closed/](closed/).
 
 | # | Ticket | Crate | Summary | Fix Commit |
 |---|--------|-------|---------|------------|
+| 103 | [engine-realtime-new-panics-on-thread-spawn-failure](closed/engine-realtime-new-panics-on-thread-spawn-failure.md) | murk-engine | `.expect()` → `Result` + `ThreadSpawnFailed`; partial startup rollback | (this session) |
+| 104 | [engine-tick-rate-hz-reciprocal-overflow](closed/engine-tick-rate-hz-reciprocal-overflow.md) | murk-engine | Validation rejects `hz` where `1.0/hz` is infinite | (this session) |
+| 105 | [engine-stall-threshold-arithmetic-overflow](closed/engine-stall-threshold-arithmetic-overflow.md) | murk-engine | `saturating_mul`/`saturating_add` for all ms→ns and stall arithmetic | (this session) |
+| 106 | [engine-tick-static-field-length-overflow](closed/engine-tick-static-field-length-overflow.md) | murk-engine | `checked_mul` + `CellCountOverflow` on static field length | (this session) |
+| 107 | [bench-init-agent-positions-overflow](closed/bench-init-agent-positions-overflow.md) | murk-bench | `wrapping_mul` for hash computation | (this session) |
 | 53 | [ffi-cbindgen-missing-c-header](closed/ffi-cbindgen-missing-c-header.md) | murk-ffi | cbindgen auto-generates C header with 42+ functions, 8 structs, 8 enums | v0.1.7 |
 | 97 | [arena-sparse-fragmentation-metric](closed/arena-sparse-fragmentation-metric.md) | murk-arena | Sparse reuse_hits/reuse_misses wired through engine, FFI, and Python | v0.1.8 |
 | 29 | [arena-sparse-segment-memory-leak](closed/arena-sparse-segment-memory-leak.md) | murk-arena | Two-phase retired range reclamation in SparseSlab; pending→retired→reuse | (this session) |
@@ -219,7 +225,7 @@ Tickets moved to [closed/](closed/).
 
 | Crate | Critical | High | Medium | Low | Total Open |
 |-------|----------|------|--------|-----|------------|
-| murk-engine | 1 | 5 | 0 | 1 | 7 |
+| murk-engine | 1 | 1 | 0 | 1 | 3 |
 | murk-arena | 1 | 1 | 0 | 0 | 2 |
 | murk-ffi | 0 | 1 | 2 | 0 | 3 |
 | murk-python | 0 | 0 | 0 | 0 | 0 |
@@ -229,12 +235,12 @@ Tickets moved to [closed/](closed/).
 | murk-replay | 0 | 0 | 0 | 0 | 0 |
 | murk-space | 0 | 0 | 0 | 0 | 0 |
 | murk-core | 0 | 0 | 0 | 0 | 0 |
-| murk-bench | 0 | 0 | 1 | 0 | 1 |
+| murk-bench | 0 | 0 | 0 | 0 | 0 |
 | murk (umbrella) | 0 | 0 | 0 | 0 | 0 |
 | examples | 0 | 0 | 0 | 0 | 0 |
 | scripts | 0 | 0 | 0 | 0 | 0 |
 | workspace (cross-crate) | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **2** | **11** | **6** | **2** | **21** |
+| **Total** | **2** | **7** | **5** | **2** | **16** |
 
 Note: Workspace-wide tickets (#90-#92) affect multiple crates and are counted once under "workspace".
 

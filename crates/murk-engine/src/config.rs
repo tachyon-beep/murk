@@ -135,6 +135,11 @@ pub enum ConfigError {
     },
     /// Engine could not be recovered from tick thread (e.g. thread panicked).
     EngineRecoveryFailed,
+    /// A background thread could not be spawned.
+    ThreadSpawnFailed {
+        /// Description of which thread failed.
+        reason: String,
+    },
 }
 
 impl fmt::Display for ConfigError {
@@ -162,6 +167,9 @@ impl fmt::Display for ConfigError {
             }
             Self::EngineRecoveryFailed => {
                 write!(f, "engine could not be recovered from tick thread")
+            }
+            Self::ThreadSpawnFailed { reason } => {
+                write!(f, "thread spawn failed: {reason}")
             }
         }
     }
@@ -258,9 +266,11 @@ impl WorldConfig {
         if self.max_ingress_queue == 0 {
             return Err(ConfigError::IngressQueueZero);
         }
-        // 5. tick_rate_hz, if present, must be finite and positive.
+        // 5. tick_rate_hz, if present, must be finite and positive, and
+        //    its reciprocal must also be finite (rejects subnormals where
+        //    1.0/hz = inf, which would panic in Duration::from_secs_f64).
         if let Some(hz) = self.tick_rate_hz {
-            if !hz.is_finite() || hz <= 0.0 {
+            if !hz.is_finite() || hz <= 0.0 || !(1.0 / hz).is_finite() {
                 return Err(ConfigError::InvalidTickRate { value: hz });
             }
         }
@@ -577,6 +587,29 @@ mod tests {
         match cfg.validate() {
             Err(ConfigError::InvalidBackoff { .. }) => {}
             other => panic!("expected InvalidBackoff, got {other:?}"),
+        }
+    }
+
+    /// BUG-103: ThreadSpawnFailed error variant exists and formats correctly.
+    #[test]
+    fn thread_spawn_failed_error_display() {
+        let err = ConfigError::ThreadSpawnFailed {
+            reason: "tick thread: resource limit".to_string(),
+        };
+        let msg = format!("{err}");
+        assert!(msg.contains("thread spawn failed"));
+        assert!(msg.contains("tick thread"));
+    }
+
+    /// BUG-104: Subnormal tick_rate_hz passes validation but 1/hz = inf
+    /// panics in Duration::from_secs_f64.
+    #[test]
+    fn validate_subnormal_tick_rate_hz_rejected() {
+        let mut cfg = valid_config();
+        cfg.tick_rate_hz = Some(f64::from_bits(1)); // smallest positive subnormal
+        match cfg.validate() {
+            Err(ConfigError::InvalidTickRate { .. }) => {}
+            other => panic!("expected InvalidTickRate, got {other:?}"),
         }
     }
 
