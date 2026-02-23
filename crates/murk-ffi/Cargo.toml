@@ -25,7 +25,7 @@ murk-propagator = { path = "../murk-propagator", version = "0.1.8" }
 smallvec = { workspace = true }
 
 [build-dependencies]
-cbindgen = "0.28"
+cbindgen = "0.29"
 
 [dev-dependencies]
 murk-test-utils = { path = "../murk-test-utils" }
