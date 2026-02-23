@@ -26,8 +26,8 @@ FFI panic safety hardening and observability improvements.
 
 ### Changed
 
-- ABI version bumped from v2.0 to v2.1
-- `MurkStepMetrics` layout: 48 → 56 bytes (added reuse counters)
+- ABI version bumped from v2.1 to v3.0
+- `MurkStepMetrics` layout: 56 → 128 bytes (ring retention/skew counters expansion)
 - `ScalarDiffusion` CFL bound derived from space topology (no longer defaults to 12-neighbour worst-case)
 - Deprecated `DiffusionPropagator` now derives CFL bound from actual space topology
 - `validate_pipeline()` signature extended with `space: &dyn Space` parameter

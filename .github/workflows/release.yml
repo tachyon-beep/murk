@@ -218,5 +218,24 @@ jobs:
         with:
           name: sdist
           path: dist
+      - name: Describe PyPI publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDIST_PATH="$(ls dist/*.tar.gz | head -n1)"
+          SDIST_FILE="$(basename "${SDIST_PATH}")"
+          VERSION="$(echo "${SDIST_FILE}" | sed -E 's/^murk-([0-9][0-9A-Za-z.+-]*)\.tar\.gz$/\1/')"
+          WHEEL_COUNT="$(ls -1 dist/*.whl | wc -l | tr -d ' ')"
+
+          {
+            echo "### PyPI Publish"
+            echo ""
+            echo "- Package: \`murk\`"
+            echo "- Version: \`${VERSION}\`"
+            echo "- Source ref: \`${{ inputs.tag || github.ref_name }}\`"
+            echo "- Artifacts: \`${WHEEL_COUNT}\` wheel(s) + \`1\` sdist"
+            echo "- Target: https://pypi.org/project/murk/${VERSION}/"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
