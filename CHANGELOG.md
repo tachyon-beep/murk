@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **murk-engine:** `RealtimeAsyncWorld::new()`/`reset()` thread spawn `.expect()` replaced with `Result` propagation + `ThreadSpawnFailed` error variant; partial startup rollback on egress worker failure (#103)
+- **murk-engine:** Subnormal `tick_rate_hz` validation now rejects values where `1/hz = inf` (#104)
+- **murk-engine:** Unchecked `u64` arithmetic in stall threshold/hold/grace computation replaced with `saturating_mul`/`saturating_add` (#105)
+- **murk-engine:** Unchecked `u32 * u32` for static field length in `TickEngine::new` replaced with `checked_mul` (#106)
+- **murk-bench:** `init_agent_positions` hash uses `wrapping_mul` instead of plain `*` (panicked in debug for ≥14 agents) (#107)
+
 ## [0.1.8] - 2026-02-22
 
 FFI panic safety hardening and observability improvements.

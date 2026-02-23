@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `ConfigError::ThreadSpawnFailed` variant for graceful thread spawn failure handling
+
+### Fixed
+
+- `RealtimeAsyncWorld::new()`/`reset()` thread spawn panics replaced with `Result` propagation and partial startup rollback (#103)
+- Subnormal `tick_rate_hz` validation rejects values where `1/hz` overflows to infinity (#104)
+- Unchecked `u64` arithmetic in stall threshold computation replaced with saturating ops (#105)
+- Unchecked `u32 * u32` for static field length uses `checked_mul` with `CellCountOverflow` error (#106)
+
 ## [0.1.7](https://github.com/tachyon-beep/murk/compare/murk-engine-v0.1.5...murk-engine-v0.1.7) - 2026-02-21
 
 ### Added
