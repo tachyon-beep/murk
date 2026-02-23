@@ -267,12 +267,23 @@ impl TickEngine {
                     field_id,
                     value,
                 } => {
-                    if let Some(rank) = self.space.canonical_rank(coord) {
+                    let applied = if let Some(rank) = self.space.canonical_rank(coord) {
                         if let Some(buf) = guard.writer.write(*field_id) {
                             if rank < buf.len() {
                                 buf[rank] = *value;
+                                true
+                            } else {
+                                false
                             }
+                        } else {
+                            false
                         }
+                    } else {
+                        false
+                    };
+                    if !applied {
+                        receipt.accepted = false;
+                        receipt.reason_code = Some(IngressError::NotApplied);
                     }
                 }
                 CommandPayload::SetParameter { .. }
@@ -424,6 +435,8 @@ impl TickEngine {
         accepted_start: usize,
     ) -> Result<TickResult, TickError> {
         // Guard was dropped → staging buffer abandoned (free rollback).
+        // Cancel the in-progress tick so begin_tick() can be called again.
+        self.arena.cancel_tick();
         self.arena.reset_sparse_reuse_counters();
         self.total_rollback_events = self.total_rollback_events.saturating_add(1);
         self.consecutive_rollback_count += 1;
@@ -1381,6 +1394,76 @@ mod tests {
         assert_eq!(result.receipts.len(), 2);
         assert_eq!(result.receipts[0].command_index, 1); // was batch[1]
         assert_eq!(result.receipts[1].command_index, 0); // was batch[0]
+    }
+
+    #[test]
+    fn setfield_oob_receipt_not_applied() {
+        // BUG-099: SetField with OOB coord was silently skipped but receipt
+        // stayed accepted=true with applied_tick_id set. After fix, OOB
+        // SetField must produce accepted=false with NotApplied reason.
+        let mut engine = simple_engine();
+
+        // Coord [999] is out of bounds for a Line1D(10).
+        let oob_coord: Coord = vec![999i32].into();
+        let cmd = Command {
+            payload: CommandPayload::SetField {
+                coord: oob_coord,
+                field_id: FieldId(0),
+                value: 1.0,
+            },
+            expires_after_tick: TickId(100),
+            source_id: None,
+            source_seq: None,
+            priority_class: 1,
+            arrival_seq: 0,
+        };
+        engine.submit_commands(vec![cmd]);
+
+        let result = engine.execute_tick().unwrap();
+        assert_eq!(result.receipts.len(), 1);
+        let receipt = &result.receipts[0];
+        assert!(
+            !receipt.accepted,
+            "OOB SetField must be marked not accepted"
+        );
+        assert_eq!(
+            receipt.applied_tick_id, None,
+            "OOB SetField must not have applied_tick_id"
+        );
+        assert_eq!(
+            receipt.reason_code,
+            Some(IngressError::NotApplied),
+            "OOB SetField must carry NotApplied reason"
+        );
+    }
+
+    #[test]
+    fn setfield_unknown_field_receipt_not_applied() {
+        // SetField targeting a non-existent field should also report NotApplied.
+        let mut engine = simple_engine();
+
+        let coord: Coord = vec![0i32].into();
+        let cmd = Command {
+            payload: CommandPayload::SetField {
+                coord,
+                field_id: FieldId(99), // no such field
+                value: 1.0,
+            },
+            expires_after_tick: TickId(100),
+            source_id: None,
+            source_seq: None,
+            priority_class: 1,
+            arrival_seq: 0,
+        };
+        engine.submit_commands(vec![cmd]);
+
+        let result = engine.execute_tick().unwrap();
+        assert_eq!(result.receipts.len(), 1);
+        assert!(!result.receipts[0].accepted);
+        assert_eq!(
+            result.receipts[0].reason_code,
+            Some(IngressError::NotApplied)
+        );
     }
 
     #[test]

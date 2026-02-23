@@ -220,6 +220,14 @@ impl PingPongArena {
     /// Returns a [`TickGuard`] providing write access to the staging buffer
     /// and scratch space. The guard must be dropped before calling `publish()`.
     pub fn begin_tick(&mut self) -> Result<TickGuard<'_>, ArenaError> {
+        if self.tick_in_progress {
+            return Err(ArenaError::InvalidConfig {
+                reason: "begin_tick() called while a tick is already in progress \
+                         (missing publish() call)"
+                    .into(),
+            });
+        }
+
         let next_gen = self
             .generation
             .checked_add(1)
@@ -399,6 +407,15 @@ impl PingPongArena {
             WorldGenerationId(self.generation as u64),
             self.last_param_version,
         )
+    }
+
+    /// Cancel the current tick without publishing.
+    ///
+    /// Resets `tick_in_progress` so a subsequent `begin_tick()` succeeds.
+    /// Used by the tick engine on the rollback path when `publish()` will
+    /// not be called.
+    pub fn cancel_tick(&mut self) {
+        self.tick_in_progress = false;
     }
 
     /// Access the scratch region (for use outside of tick processing).
@@ -1005,6 +1022,30 @@ mod tests {
         let max_allowed = 6 * 1024 * std::mem::size_of::<f32>();
         // memory_bytes includes static + scratch; just verify it's bounded.
         assert!(total_bytes <= max_allowed + arena.static_arena().memory_bytes() + 1024 * 4);
+    }
+
+    #[test]
+    fn begin_tick_reentry_returns_error() {
+        // BUG-100: begin_tick() had no re-entry guard; calling twice
+        // corrupted sparse snapshots. After fix, second call returns
+        // Err(ArenaError::InvalidConfig).
+        let mut arena = make_arena();
+        let _guard = arena.begin_tick().unwrap();
+        // Drop the guard but do NOT call publish.
+        drop(_guard);
+        // Second begin_tick without publish should fail.
+        let result = arena.begin_tick();
+        assert!(
+            matches!(&result, Err(ArenaError::InvalidConfig { .. })),
+            "begin_tick() re-entry should be rejected"
+        );
+        // Ensure the error message mentions the re-entry condition.
+        if let Err(ArenaError::InvalidConfig { reason }) = &result {
+            assert!(
+                reason.contains("already in progress"),
+                "error reason should mention re-entry: {reason}"
+            );
+        }
     }
 
     // ── segment_size validation ──────────────────────────────

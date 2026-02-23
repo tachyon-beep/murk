@@ -5,7 +5,7 @@
 
 #[allow(deprecated)]
 use crate::fields::AGENT_PRESENCE;
-use murk_core::{FieldId, FieldSet, PropagatorError};
+use murk_core::{FieldId, FieldSet, PropagatorError, TickId};
 use murk_propagator::context::StepContext;
 use murk_propagator::propagator::{Propagator, WriteMode};
 use murk_space::Square4;
@@ -102,6 +102,9 @@ impl Propagator for AgentMovementPropagator {
     fn step(&self, ctx: &mut StepContext<'_>) -> Result<(), PropagatorError> {
         let cell_count = ctx.space().cell_count();
 
+        // Capture tick_id before taking the mutable writer borrow (borrow checker).
+        let tick_id = ctx.tick_id();
+
         // Precompute grid dimensions before taking the mutable writer borrow
         let grid_dims = ctx
             .space()
@@ -152,11 +155,10 @@ impl Propagator for AgentMovementPropagator {
                     reason: "agent_presence field not writable".into(),
                 })?;
 
-        // Tick 0 init: if all zeros, place agents at initial positions.
+        // Tick 0 init: place agents at initial positions.
         // Early return prevents actions queued before tick 0 from being
         // processed on the initialization tick.
-        let all_zero = presence.iter().all(|&v| v == 0.0);
-        if all_zero && !self.initial_positions.is_empty() {
+        if tick_id == TickId(1) && !self.initial_positions.is_empty() {
             for &(agent_id, flat_idx) in &self.initial_positions {
                 if flat_idx < cell_count {
                     presence[flat_idx] = (agent_id as f32) + 1.0;
@@ -245,7 +247,17 @@ mod tests {
         scratch: &'a mut ScratchRegion,
         space: &'a Square4,
     ) -> StepContext<'a> {
-        StepContext::new(reader, reader, writer, scratch, space, TickId(1), 0.01)
+        make_ctx_at_tick(reader, writer, scratch, space, TickId(1))
+    }
+
+    fn make_ctx_at_tick<'a>(
+        reader: &'a MockFieldReader,
+        writer: &'a mut MockFieldWriter,
+        scratch: &'a mut ScratchRegion,
+        space: &'a Square4,
+        tick_id: TickId,
+    ) -> StepContext<'a> {
+        StepContext::new(reader, reader, writer, scratch, space, tick_id, 0.01)
     }
 
     fn setup_presence(
@@ -480,6 +492,31 @@ mod tests {
         assert!(
             ab.lock().unwrap().is_empty(),
             "action buffer should be drained even on tick 0"
+        );
+    }
+
+    #[test]
+    fn no_respawn_when_all_zero_after_tick0() {
+        // BUG-102: all-zero presence on ticks > 1 must NOT trigger init.
+        // This simulates all agents dying — they should stay dead.
+        let grid = Square4::new(3, 3, EdgeBehavior::Absorb).unwrap();
+        let ab = new_action_buffer();
+        let prop = AgentMovementPropagator::new(ab, vec![(0, 4), (1, 0)]);
+
+        // All-zero presence at TickId(2) — should NOT place agents.
+        let reader = MockFieldReader::new();
+        let mut writer = MockFieldWriter::new();
+        writer.add_field(AGENT_PRESENCE, 9);
+
+        let mut scratch = ScratchRegion::new(0);
+        let mut ctx = make_ctx_at_tick(&reader, &mut writer, &mut scratch, &grid, TickId(2));
+
+        prop.step(&mut ctx).unwrap();
+
+        let presence = writer.get_field(AGENT_PRESENCE).unwrap();
+        assert!(
+            presence.iter().all(|&v| v == 0.0),
+            "all-zero presence at tick > 0 must NOT trigger agent init"
         );
     }
 

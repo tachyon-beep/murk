@@ -130,6 +130,9 @@ pub enum IngressError {
     /// The command type is not supported by the current tick executor
     /// (`MURK_ERROR_UNSUPPORTED_COMMAND`).
     UnsupportedCommand,
+    /// The command was accepted but could not be applied (e.g. invalid
+    /// coordinate or unknown field) (`MURK_ERROR_NOT_APPLIED`).
+    NotApplied,
 }
 
 impl fmt::Display for IngressError {
@@ -141,6 +144,10 @@ impl fmt::Display for IngressError {
             Self::TickDisabled => write!(f, "ticking disabled"),
             Self::ShuttingDown => write!(f, "world is shutting down"),
             Self::UnsupportedCommand => write!(f, "command type not supported"),
+            Self::NotApplied => write!(
+                f,
+                "command accepted but not applied (invalid coordinate or unknown field)"
+            ),
         }
     }
 }
