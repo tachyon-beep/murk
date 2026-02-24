@@ -123,8 +123,13 @@ pub enum ConfigError {
         /// Description of which invariant was violated.
         reason: String,
     },
-    /// Cell count or field count exceeds `u32::MAX`.
+    /// Cell count exceeds `u32::MAX`.
     CellCountOverflow {
+        /// The value that overflowed.
+        value: usize,
+    },
+    /// Field count exceeds `u32::MAX`.
+    FieldCountOverflow {
         /// The value that overflowed.
         value: usize,
     },
@@ -161,6 +166,9 @@ impl fmt::Display for ConfigError {
             }
             Self::CellCountOverflow { value } => {
                 write!(f, "cell count {value} exceeds u32::MAX")
+            }
+            Self::FieldCountOverflow { value } => {
+                write!(f, "field count {value} exceeds u32::MAX")
             }
             Self::InvalidField { reason } => {
                 write!(f, "invalid field: {reason}")
@@ -252,7 +260,7 @@ impl WorldConfig {
         }
         // 2c. Field count must fit in u32 (FieldId is u32).
         if u32::try_from(self.fields.len()).is_err() {
-            return Err(ConfigError::CellCountOverflow {
+            return Err(ConfigError::FieldCountOverflow {
                 value: self.fields.len(),
             });
         }
@@ -507,6 +515,30 @@ mod tests {
             Err(ConfigError::NoFields) => {}
             other => panic!("expected NoFields, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn cell_count_overflow_display_says_cell_count() {
+        let err = ConfigError::CellCountOverflow {
+            value: u32::MAX as usize + 1,
+        };
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("cell count"),
+            "CellCountOverflow Display should say 'cell count', got: {msg}"
+        );
+    }
+
+    #[test]
+    fn field_count_overflow_display_says_field_count() {
+        let err = ConfigError::FieldCountOverflow {
+            value: u32::MAX as usize + 1,
+        };
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("field count"),
+            "FieldCountOverflow Display should say 'field count', got: {msg}"
+        );
     }
 
     #[test]
