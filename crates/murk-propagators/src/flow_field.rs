@@ -341,7 +341,7 @@ mod tests {
         assert_eq!(w.len(), 1);
         assert_eq!(w[0], (F_FLOW, WriteMode::Full));
 
-        let space = murk_space::Square4::new(4, 4, murk_space::EdgeBehavior::Wrap).unwrap();
+        let space = crate::test_helpers::test_space();
         assert!(prop.max_dt(&space).is_none());
     }
 

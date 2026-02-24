@@ -498,7 +498,7 @@ impl ObsPlan {
             half_extent.iter().map(|&he| 2 * he as usize + 1).collect();
         let pre_pool_element_count: usize = pre_pool_shape.iter().product();
 
-        let template_ops = generate_template_ops(half_extent, geometry, disk_radius);
+        let template_ops = generate_template_ops(half_extent, geometry, disk_radius)?;
         let active_ops = template_ops
             .iter()
             .filter(|op| op.in_disk)
@@ -674,6 +674,10 @@ impl ObsPlan {
     /// Each snapshot in the batch fills `output_len()` elements in the
     /// output buffer, starting at `batch_idx * output_len()`. Same for
     /// masks. This is the primary interface for vectorized RL training.
+    ///
+    /// **Partial writes on error:** If generation validation fails on
+    /// snapshot `N > 0`, output slots `0..N-1` are already written.
+    /// Callers should treat the entire batch as invalid on error.
     ///
     /// Returns one [`ObsMetadata`] per snapshot.
     pub fn execute_batch(
@@ -981,7 +985,7 @@ impl ObsPlan {
                     &mut pool_scratch_mask,
                     &mut pooled_scratch,
                     &mut pooled_scratch_mask,
-                );
+                )?;
 
                 total_valid += valid;
                 total_elements += entry.element_count;
@@ -1078,7 +1082,7 @@ fn execute_agent_entry(
     pool_scratch_mask: &mut [u8],
     pooled_scratch: &mut [f32],
     pooled_scratch_mask: &mut [u8],
-) -> usize {
+) -> Result<usize, ObsError> {
     if entry.pool.is_some() {
         execute_agent_entry_pooled(
             entry,
@@ -1095,7 +1099,7 @@ fn execute_agent_entry(
             &mut pooled_scratch_mask[..entry.element_count],
         )
     } else {
-        execute_agent_entry_direct(
+        Ok(execute_agent_entry_direct(
             entry,
             center,
             field_data,
@@ -1104,7 +1108,7 @@ fn execute_agent_entry(
             use_fast_path,
             agent_output,
             agent_mask,
-        )
+        ))
     }
 }
 
@@ -1175,7 +1179,7 @@ fn execute_agent_entry_pooled(
     scratch_mask: &mut [u8],
     pooled: &mut [f32],
     pooled_mask: &mut [u8],
-) -> usize {
+) -> Result<usize, ObsError> {
     if use_fast_path {
         let geo = geometry.as_ref().unwrap();
         let base_rank = geo.canonical_rank(center) as isize;
@@ -1206,7 +1210,7 @@ fn execute_agent_entry_pooled(
         pool_config,
         pooled,
         pooled_mask,
-    );
+    )?;
 
     let out_slice =
         &mut agent_output[entry.output_offset..entry.output_offset + entry.element_count];
@@ -1218,7 +1222,7 @@ fn execute_agent_entry_pooled(
     }
     mask_slice[..n].copy_from_slice(&pooled_mask[..n]);
 
-    pooled_mask[..n].iter().filter(|&&v| v == 1).count()
+    Ok(pooled_mask[..n].iter().filter(|&&v| v == 1).count())
 }
 
 /// Generate template operations for a rectangular bounding box.
@@ -1236,7 +1240,7 @@ fn generate_template_ops(
     half_extent: &[u32],
     geometry: &Option<GridGeometry>,
     disk_radius: Option<u32>,
-) -> Vec<TemplateOp> {
+) -> Result<Vec<TemplateOp>, ObsError> {
     let ndim = half_extent.len();
     let shape: Vec<usize> = half_extent.iter().map(|&he| 2 * he as usize + 1).collect();
     let total: usize = shape.iter().product();
@@ -1269,7 +1273,7 @@ fn generate_template_ops(
 
         let in_disk = match disk_radius {
             Some(r) => match geometry {
-                Some(geo) => geo.graph_distance(&relative) <= r,
+                Some(geo) => geo.graph_distance(&relative)? <= r,
                 None => true, // no geometry → conservative (include all)
             },
             None => true, // AgentRect → all cells valid
@@ -1283,7 +1287,7 @@ fn generate_template_ops(
         });
     }
 
-    ops
+    Ok(ops)
 }
 
 /// Resolve the field data index for an absolute coordinate.
@@ -1997,6 +2001,33 @@ mod tests {
             .execute_batch(&snaps, None, &mut output, &mut mask)
             .unwrap_err();
         assert!(matches!(err, ObsError::ExecutionFailed { .. }));
+    }
+
+    #[test]
+    fn execute_batch_rejects_mismatched_generation() {
+        let space = square4_space();
+        let spec = ObsSpec {
+            entries: vec![ObsEntry {
+                field_id: FieldId(0),
+                region: ObsRegion::Fixed(RegionSpec::All),
+                pool: None,
+                transform: ObsTransform::Identity,
+                dtype: ObsDtype::F32,
+            }],
+        };
+        // Compile bound to generation 5.
+        let result = ObsPlan::compile_bound(&spec, &space, WorldGenerationId(5)).unwrap();
+
+        // Snapshot has generation 1 (default from snapshot_with_field).
+        let snap = snapshot_with_field(FieldId(0), vec![1.0; 9]);
+        let snaps: Vec<&dyn SnapshotAccess> = vec![&snap];
+        let mut output = vec![0.0f32; result.output_len];
+        let mut mask = vec![0u8; result.mask_len];
+        let err = result
+            .plan
+            .execute_batch(&snaps, None, &mut output, &mut mask)
+            .unwrap_err();
+        assert!(matches!(err, ObsError::PlanInvalidated { .. }));
     }
 
     // ── Field length mismatch tests ──────────────────────────

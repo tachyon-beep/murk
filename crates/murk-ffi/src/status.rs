@@ -110,7 +110,7 @@ impl From<&IngressError> for MurkStatus {
             IngressError::TickDisabled => MurkStatus::TickDisabled,
             IngressError::ShuttingDown => MurkStatus::ShuttingDown,
             IngressError::UnsupportedCommand => MurkStatus::UnsupportedCommand,
-            IngressError::NotApplied => MurkStatus::InvalidArgument,
+            IngressError::NotApplied => MurkStatus::UnsupportedCommand,
         }
     }
 }
@@ -236,7 +236,7 @@ mod tests {
         );
         assert_eq!(
             MurkStatus::from(&IngressError::NotApplied),
-            MurkStatus::InvalidArgument
+            MurkStatus::UnsupportedCommand
         );
     }
 

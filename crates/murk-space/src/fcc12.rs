@@ -577,6 +577,14 @@ mod tests {
         assert_eq!(s.distance(&c(0, 0, 0), &c(0, 0, 0)), 0.0);
     }
 
+    #[test]
+    fn max_neighbour_degree_is_12_even_for_tiny_grid() {
+        // 1×1×1 Absorb has 0 actual neighbours, but max_neighbour_degree
+        // returns the conservative upper bound (12) used for CFL stability.
+        let s = Fcc12::new(1, 1, 1, EdgeBehavior::Absorb).unwrap();
+        assert_eq!(s.max_neighbour_degree(), 12);
+    }
+
     // ── Canonical ordering & rank ─────────────────────────────────
 
     #[test]

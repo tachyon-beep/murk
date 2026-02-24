@@ -38,6 +38,10 @@ pub struct MurkWorldPreflight {
     pub consecutive_rollbacks: u32,
 }
 
+// Compile-time layout assertions for ABI stability.
+const _: () = assert!(std::mem::size_of::<MurkWorldPreflight>() == 24);
+const _: () = assert!(std::mem::align_of::<MurkWorldPreflight>() == 8);
+
 /// Clone the Arc for a world handle, briefly locking the global table.
 ///
 /// Returns `None` if the handle is invalid or the mutex is poisoned.

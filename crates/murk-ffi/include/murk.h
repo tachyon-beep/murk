@@ -702,21 +702,24 @@ int32_t murk_batched_destroy(uint64_t handle);
 /**
  * Number of worlds in the batch.
  *
- * Returns 0 for invalid handles.
+ * **Ambiguity warning:** returns 0 for both "zero worlds" and "invalid handle /
+ * poisoned mutex / caught panic." Callers cannot distinguish success from error.
  */
 uintptr_t murk_batched_num_worlds(uint64_t handle);
 
 /**
  * Per-world observation output length (f32 elements).
  *
- * Returns 0 for invalid handles or if no obs plan.
+ * **Ambiguity warning:** returns 0 for both "no obs plan" and "invalid handle /
+ * poisoned mutex / caught panic." Callers cannot distinguish success from error.
  */
 uintptr_t murk_batched_obs_output_len(uint64_t handle);
 
 /**
  * Per-world observation mask length (bytes).
  *
- * Returns 0 for invalid handles or if no obs plan.
+ * **Ambiguity warning:** returns 0 for both "no obs plan" and "invalid handle /
+ * poisoned mutex / caught panic." Callers cannot distinguish success from error.
  */
 uintptr_t murk_batched_obs_mask_len(uint64_t handle);
 

@@ -5,6 +5,7 @@
 //! This enables O(1) interior detection and branchless gather for
 //! agent-centered foveation.
 
+use murk_core::error::ObsError;
 use murk_space::Space;
 
 /// Grid connectivity type, determines graph-distance metric.
@@ -150,28 +151,30 @@ impl GridGeometry {
     /// - `FourWay`: Manhattan distance `|d0| + |d1| + ...`
     /// - `EightWay`: Chebyshev distance `max(|d0|, |d1|, ...)`
     /// - `Hex`: Cube distance `max(|dq|, |dr|, |dq + dr|)` (axial coords)
-    pub fn graph_distance(&self, relative: &[i32]) -> u32 {
+    pub fn graph_distance(&self, relative: &[i32]) -> Result<u32, ObsError> {
         match self.connectivity {
-            GridConnectivity::FourWay => relative.iter().map(|&d| d.unsigned_abs()).sum(),
-            GridConnectivity::EightWay => relative
+            GridConnectivity::FourWay => Ok(relative.iter().map(|&d| d.unsigned_abs()).sum()),
+            GridConnectivity::EightWay => Ok(relative
                 .iter()
                 .map(|&d| d.unsigned_abs())
                 .max()
-                .unwrap_or(0),
+                .unwrap_or(0)),
             GridConnectivity::Hex => {
                 // Axial coordinates [dq, dr]. Cube distance = max(|dq|, |dr|, |dq+dr|).
-                assert_eq!(
-                    relative.len(),
-                    2,
-                    "Hex graph_distance requires 2D relative coords, got {}",
-                    relative.len()
-                );
+                if relative.len() != 2 {
+                    return Err(ObsError::InvalidObsSpec {
+                        reason: format!(
+                            "Hex graph_distance requires 2D relative coords, got {}",
+                            relative.len()
+                        ),
+                    });
+                }
                 let dq = relative[0];
                 let dr = relative[1];
                 let ds = dq + dr; // implicit third axis s = -(q+r)
-                dq.unsigned_abs()
+                Ok(dq.unsigned_abs()
                     .max(dr.unsigned_abs())
-                    .max(ds.unsigned_abs())
+                    .max(ds.unsigned_abs()))
             }
         }
     }
@@ -306,21 +309,21 @@ mod tests {
     fn graph_distance_four_way_manhattan() {
         let s = Square4::new(10, 10, EdgeBehavior::Absorb).unwrap();
         let geo = GridGeometry::from_space(&s).unwrap();
-        assert_eq!(geo.graph_distance(&[0, 0]), 0);
-        assert_eq!(geo.graph_distance(&[1, 0]), 1);
-        assert_eq!(geo.graph_distance(&[0, 1]), 1);
-        assert_eq!(geo.graph_distance(&[1, 1]), 2); // Manhattan: |1|+|1|=2
-        assert_eq!(geo.graph_distance(&[-2, 3]), 5);
+        assert_eq!(geo.graph_distance(&[0, 0]).unwrap(), 0);
+        assert_eq!(geo.graph_distance(&[1, 0]).unwrap(), 1);
+        assert_eq!(geo.graph_distance(&[0, 1]).unwrap(), 1);
+        assert_eq!(geo.graph_distance(&[1, 1]).unwrap(), 2); // Manhattan: |1|+|1|=2
+        assert_eq!(geo.graph_distance(&[-2, 3]).unwrap(), 5);
     }
 
     #[test]
     fn graph_distance_eight_way_chebyshev() {
         let s = Square8::new(10, 10, EdgeBehavior::Absorb).unwrap();
         let geo = GridGeometry::from_space(&s).unwrap();
-        assert_eq!(geo.graph_distance(&[0, 0]), 0);
-        assert_eq!(geo.graph_distance(&[1, 1]), 1); // Chebyshev: max(1,1)=1
-        assert_eq!(geo.graph_distance(&[-2, 3]), 3);
-        assert_eq!(geo.graph_distance(&[5, -3]), 5);
+        assert_eq!(geo.graph_distance(&[0, 0]).unwrap(), 0);
+        assert_eq!(geo.graph_distance(&[1, 1]).unwrap(), 1); // Chebyshev: max(1,1)=1
+        assert_eq!(geo.graph_distance(&[-2, 3]).unwrap(), 3);
+        assert_eq!(geo.graph_distance(&[5, -3]).unwrap(), 5);
     }
 
     #[test]
@@ -328,13 +331,13 @@ mod tests {
         let s = Hex2D::new(10, 10).unwrap();
         let geo = GridGeometry::from_space(&s).unwrap();
         // Hex distance = max(|dq|, |dr|, |dq+dr|) in axial coords.
-        assert_eq!(geo.graph_distance(&[0, 0]), 0);
-        assert_eq!(geo.graph_distance(&[1, 0]), 1);
-        assert_eq!(geo.graph_distance(&[0, 1]), 1);
-        assert_eq!(geo.graph_distance(&[1, -1]), 1); // Adjacent hex
-        assert_eq!(geo.graph_distance(&[1, 1]), 2); // max(1,1,2)=2
-        assert_eq!(geo.graph_distance(&[-2, -2]), 4); // max(2,2,4)=4
-        assert_eq!(geo.graph_distance(&[2, -1]), 2); // max(2,1,1)=2
+        assert_eq!(geo.graph_distance(&[0, 0]).unwrap(), 0);
+        assert_eq!(geo.graph_distance(&[1, 0]).unwrap(), 1);
+        assert_eq!(geo.graph_distance(&[0, 1]).unwrap(), 1);
+        assert_eq!(geo.graph_distance(&[1, -1]).unwrap(), 1); // Adjacent hex
+        assert_eq!(geo.graph_distance(&[1, 1]).unwrap(), 2); // max(1,1,2)=2
+        assert_eq!(geo.graph_distance(&[-2, -2]).unwrap(), 4); // max(2,2,4)=4
+        assert_eq!(geo.graph_distance(&[2, -1]).unwrap(), 2); // max(2,1,1)=2
     }
 
     #[test]
@@ -388,18 +391,18 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Hex graph_distance requires 2D")]
-    fn graph_distance_hex_short_input_panics() {
+    fn graph_distance_hex_short_input_returns_error() {
         let s = Hex2D::new(10, 10).unwrap();
         let geo = GridGeometry::from_space(&s).unwrap();
-        let _ = geo.graph_distance(&[0]); // 1D on Hex requires 2D
+        let err = geo.graph_distance(&[0]).unwrap_err();
+        assert!(matches!(err, murk_core::error::ObsError::InvalidObsSpec { .. }));
     }
 
     #[test]
-    #[should_panic(expected = "Hex graph_distance requires 2D")]
-    fn graph_distance_hex_empty_input_panics() {
+    fn graph_distance_hex_empty_input_returns_error() {
         let s = Hex2D::new(10, 10).unwrap();
         let geo = GridGeometry::from_space(&s).unwrap();
-        let _ = geo.graph_distance(&[]);
+        let err = geo.graph_distance(&[]).unwrap_err();
+        assert!(matches!(err, murk_core::error::ObsError::InvalidObsSpec { .. }));
     }
 }

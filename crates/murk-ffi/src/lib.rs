@@ -23,13 +23,20 @@
 /// Lock a mutex, returning `MurkStatus::InternalError` if poisoned.
 ///
 /// For use in `extern "C"` functions that return `i32`. On a poisoned
-/// mutex (caused by a prior panic), this early-returns an error status
-/// instead of panicking — preventing undefined behavior at the FFI boundary.
+/// mutex (caused by a prior panic), this stores a diagnostic in
+/// [`LAST_PANIC`] and early-returns an error status instead of
+/// panicking — preventing undefined behavior at the FFI boundary.
 macro_rules! ffi_lock {
     ($mutex:expr) => {
         match ($mutex).lock() {
             Ok(guard) => guard,
-            Err(_) => return $crate::status::MurkStatus::InternalError as i32,
+            Err(_) => {
+                $crate::LAST_PANIC.with(|cell| {
+                    *cell.borrow_mut() =
+                        "mutex poisoned: a prior panic corrupted shared state".into();
+                });
+                return $crate::status::MurkStatus::InternalError as i32;
+            }
         }
     };
 }
@@ -111,8 +118,9 @@ pub extern "C" fn murk_last_panic_message(buf: *mut std::ffi::c_char, cap: usize
             return 0i32;
         }
         let len = msg.len();
+        let clamped_len = len.min(i32::MAX as usize) as i32;
         if buf.is_null() {
-            return len as i32;
+            return clamped_len;
         }
         let copy_len = if cap > 0 { len.min(cap - 1) } else { 0 };
         // SAFETY: caller guarantees buf points to at least cap writable bytes.
@@ -122,7 +130,7 @@ pub extern "C" fn murk_last_panic_message(buf: *mut std::ffi::c_char, cap: usize
                 *buf.add(copy_len) = 0; // null terminator
             }
         }
-        len as i32
+        clamped_len
     })
 }
 

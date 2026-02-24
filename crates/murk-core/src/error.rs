@@ -209,3 +209,17 @@ impl fmt::Display for ObsError {
 }
 
 impl Error for ObsError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ingress_error_not_applied_display() {
+        let msg = IngressError::NotApplied.to_string();
+        assert!(
+            msg.contains("not applied"),
+            "NotApplied Display must mention 'not applied': {msg}"
+        );
+    }
+}

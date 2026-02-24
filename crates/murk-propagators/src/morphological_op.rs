@@ -272,7 +272,7 @@ mod tests {
 
         assert_eq!(prop.name(), "MorphologicalOp");
         assert!(prop.reads().is_empty(), "reads() should be empty");
-        let space = murk_space::Square4::new(4, 4, murk_space::EdgeBehavior::Wrap).unwrap();
+        let space = crate::test_helpers::test_space();
         assert!(prop.max_dt(&space).is_none());
 
         let rp = prop.reads_previous();

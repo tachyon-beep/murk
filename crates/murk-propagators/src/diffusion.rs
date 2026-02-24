@@ -498,7 +498,7 @@ mod tests {
 
     #[test]
     fn max_dt_constraint() {
-        let space = Square4::new(4, 4, EdgeBehavior::Wrap).unwrap();
+        let space = crate::test_helpers::test_space();
         let prop = DiffusionPropagator::new(0.25);
         // Square4 has degree 4, so 1 / (4 * 0.25) = 1.0.
         let dt = prop.max_dt(&space).unwrap();

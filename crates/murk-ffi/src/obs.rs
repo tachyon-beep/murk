@@ -259,9 +259,15 @@ pub extern "C" fn murk_obsplan_execute(
         };
         let mut plan_state = ffi_lock!(plan_arc);
 
-        // Check buffer sizes.
-        let expected_out = plan_state.cache.output_len().unwrap_or(0);
-        let expected_mask = plan_state.cache.mask_len().unwrap_or(0);
+        // Check buffer sizes. None means plan not compiled.
+        let expected_out = match plan_state.cache.output_len() {
+            Some(v) => v,
+            None => return MurkStatus::InvalidObsSpec as i32,
+        };
+        let expected_mask = match plan_state.cache.mask_len() {
+            Some(v) => v,
+            None => return MurkStatus::InvalidObsSpec as i32,
+        };
         if output_len < expected_out {
             return MurkStatus::BufferTooSmall as i32;
         }

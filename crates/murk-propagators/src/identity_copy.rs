@@ -162,7 +162,7 @@ mod tests {
         assert_eq!(w[0], (F_FIELD, WriteMode::Full));
 
         // max_dt() is None — no stability constraint
-        let space = murk_space::Square4::new(4, 4, murk_space::EdgeBehavior::Wrap).unwrap();
+        let space = crate::test_helpers::test_space();
         assert!(prop.max_dt(&space).is_none());
     }
 

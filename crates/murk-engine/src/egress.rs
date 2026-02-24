@@ -87,43 +87,27 @@ pub(crate) struct RingPreflight {
 
 /// Capture a lightweight snapshot/ring visibility view without blocking workers.
 pub(crate) fn ring_preflight(ring: &SnapshotRing, epoch_counter: &EpochCounter) -> RingPreflight {
-    let ring_capacity = ring.capacity();
-    let ring_len = ring.len();
-    let ring_write_pos = ring.write_pos();
-    let ring_oldest_retained_pos = ring.oldest_retained_pos();
-    let ring_eviction_events = ring.eviction_events();
-    let ring_stale_read_events = ring.stale_read_events();
-    let ring_skew_retry_events = ring.skew_retry_events();
+    let mut pf = RingPreflight {
+        has_snapshot: false,
+        latest_tick_id: 0,
+        age_ticks: 0,
+        ring_capacity: ring.capacity(),
+        ring_len: ring.len(),
+        ring_write_pos: ring.write_pos(),
+        ring_oldest_retained_pos: ring.oldest_retained_pos(),
+        ring_eviction_events: ring.eviction_events(),
+        ring_stale_read_events: ring.stale_read_events(),
+        ring_skew_retry_events: ring.skew_retry_events(),
+    };
 
-    match ring.peek_latest() {
-        Some(snapshot) => {
-            let tick = snapshot.tick_id().0;
-            RingPreflight {
-                has_snapshot: true,
-                latest_tick_id: tick,
-                age_ticks: epoch_counter.current().saturating_sub(tick),
-                ring_capacity,
-                ring_len,
-                ring_write_pos,
-                ring_oldest_retained_pos,
-                ring_eviction_events,
-                ring_stale_read_events,
-                ring_skew_retry_events,
-            }
-        }
-        None => RingPreflight {
-            has_snapshot: false,
-            latest_tick_id: 0,
-            age_ticks: 0,
-            ring_capacity,
-            ring_len,
-            ring_write_pos,
-            ring_oldest_retained_pos,
-            ring_eviction_events,
-            ring_stale_read_events,
-            ring_skew_retry_events,
-        },
+    if let Some(snapshot) = ring.peek_latest() {
+        let tick = snapshot.tick_id().0;
+        pf.has_snapshot = true;
+        pf.latest_tick_id = tick;
+        pf.age_ticks = epoch_counter.current().saturating_sub(tick);
     }
+
+    pf
 }
 
 /// Main loop for an egress worker thread, using an index into a shared

@@ -1048,6 +1048,17 @@ mod tests {
         }
     }
 
+    #[test]
+    fn cancel_tick_allows_subsequent_begin_tick() {
+        let mut arena = make_arena();
+        // Start a tick, then cancel it (rollback path).
+        let _guard = arena.begin_tick().unwrap();
+        drop(_guard);
+        arena.cancel_tick();
+        // A new begin_tick should now succeed.
+        let _guard2 = arena.begin_tick().unwrap();
+    }
+
     // ── segment_size validation ──────────────────────────────
 
     #[test]

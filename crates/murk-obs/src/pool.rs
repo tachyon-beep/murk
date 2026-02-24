@@ -5,6 +5,7 @@
 //! min, or sum) over valid cells within each window.
 
 use crate::spec::{PoolConfig, PoolKernel};
+use murk_core::error::ObsError;
 
 /// Apply 2D spatial pooling to a gathered observation buffer.
 ///
@@ -31,7 +32,8 @@ pub fn pool_2d(
         config,
         &mut output,
         &mut output_mask,
-    );
+    )
+    .expect("pool_2d: invalid arguments");
     (output, output_mask, vec![out_h, out_w])
 }
 
@@ -53,7 +55,8 @@ pub fn pool_2d_output_shape(input_shape: &[usize], config: &PoolConfig) -> (usiz
 
 /// Apply 2D pooling into caller-provided output buffers (no allocation).
 ///
-/// Returns `(out_h, out_w)`.
+/// Returns `(out_h, out_w)` on success. Returns `Err` if shapes or
+/// buffer sizes are invalid (avoids panicking on FFI execution paths).
 pub fn pool_2d_into(
     input: &[f32],
     input_mask: &[u8],
@@ -61,29 +64,39 @@ pub fn pool_2d_into(
     config: &PoolConfig,
     output: &mut [f32],
     output_mask: &mut [u8],
-) -> (usize, usize) {
-    assert_eq!(input_shape.len(), 2, "pool_2d_into requires 2D input shape");
+) -> Result<(usize, usize), ObsError> {
+    if input_shape.len() != 2 {
+        return Err(ObsError::InvalidObsSpec {
+            reason: format!("pool_2d_into requires 2D input shape, got {}", input_shape.len()),
+        });
+    }
     let h = input_shape[0];
     let w = input_shape[1];
-    assert_eq!(input.len(), h * w);
-    assert_eq!(input_mask.len(), h * w);
+    if input.len() != h * w {
+        return Err(ObsError::ExecutionFailed {
+            reason: format!("input length {} != {}×{}", input.len(), h, w),
+        });
+    }
+    if input_mask.len() != h * w {
+        return Err(ObsError::ExecutionFailed {
+            reason: format!("input_mask length {} != {}×{}", input_mask.len(), h, w),
+        });
+    }
 
     let (out_h, out_w) = pool_2d_output_shape(input_shape, config);
     let ks = config.kernel_size;
     let stride = config.stride;
     let out_len = out_h * out_w;
-    assert!(
-        output.len() >= out_len,
-        "output buffer too small: {} < {}",
-        output.len(),
-        out_len
-    );
-    assert!(
-        output_mask.len() >= out_len,
-        "output_mask buffer too small: {} < {}",
-        output_mask.len(),
-        out_len
-    );
+    if output.len() < out_len {
+        return Err(ObsError::ExecutionFailed {
+            reason: format!("output buffer too small: {} < {}", output.len(), out_len),
+        });
+    }
+    if output_mask.len() < out_len {
+        return Err(ObsError::ExecutionFailed {
+            reason: format!("output_mask buffer too small: {} < {}", output_mask.len(), out_len),
+        });
+    }
 
     for oh in 0..out_h {
         for ow in 0..out_w {
@@ -143,7 +156,7 @@ pub fn pool_2d_into(
         }
     }
 
-    (out_h, out_w)
+    Ok((out_h, out_w))
 }
 
 #[cfg(test)]
@@ -274,10 +287,25 @@ mod tests {
         let mut output = vec![123.0f32; out_h * out_w];
         let mut output_mask = vec![9u8; out_h * out_w];
         let actual_shape =
-            pool_2d_into(&input, &mask, &[4, 4], &cfg, &mut output, &mut output_mask);
+            pool_2d_into(&input, &mask, &[4, 4], &cfg, &mut output, &mut output_mask).unwrap();
 
         assert_eq!(actual_shape, (expected_shape[0], expected_shape[1]));
         assert_eq!(output, expected_output);
         assert_eq!(output_mask, expected_mask);
+    }
+
+    #[test]
+    fn pool_2d_into_rejects_undersized_output() {
+        let input: Vec<f32> = (1..=16).map(|x| x as f32).collect();
+        let mask = vec![1u8; 16];
+        let cfg = pool_cfg(PoolKernel::Mean, 2, 2);
+        // 4x4 with kernel 2 stride 2 → 2x2 = 4 cells, but we give only 2
+        let mut output = vec![0.0f32; 2];
+        let mut output_mask = vec![0u8; 2];
+        let result =
+            pool_2d_into(&input, &mask, &[4, 4], &cfg, &mut output, &mut output_mask);
+        assert!(result.is_err());
+        let msg = format!("{}", result.unwrap_err());
+        assert!(msg.contains("output buffer too small"), "got: {msg}");
     }
 }
