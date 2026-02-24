@@ -109,30 +109,65 @@ advanced features for competitive self-play:
 - **Rayon parallelism for `step_and_observe()`** — currently sequential;
   the design supports a 3-line upgrade to `par_iter_mut`
 
-### Render Adapter Interface
+### Three-Port Integration Architecture
 
-**Priority**: High — blocks the "cool tech demo" visualisation layer.
+**Priority**: High — formalises the three-consumer model that Echelon
+requires.
 
-The observation pipeline answers "what does the agent see?" The render
-pipeline answers "what does the human see?" These are structurally
-similar (both read from snapshots, both extract spatial data) but differ
-in fidelity, format, and frequency.
+Murk serves three distinct consumer ports:
 
-**Scope**:
-- `RenderSpec` → `RenderPlan` compilation (mirroring ObsSpec → ObsPlan)
-- Output: structured scene description (positions, field values, events)
-  rather than flat tensors
-- Adapter trait for pluggable renderers (Bevy, terminal, web, etc.)
-- Stateless per-tick scene output initially (renderer maintains its own
-  interpolation/state)
+| Port | Consumer | Interface | Status |
+|------|----------|-----------|--------|
+| 1 | Python / PyTorch (RL training) | murk-python + murk-ffi | **Shipped** |
+| 2 | Graphics engine (visualisation) | murk-render + murk-scene | v0.2 |
+| 3 | Game / simulation control logic | murk-handle | v0.2 |
 
-**Design decision**: full scene description per tick (stateless) vs
-delta stream (stateful). Stateless is simpler, swaps renderers freely,
-and is "free" for replay visualisation since snapshots already contain
-full state. Delta optimisation can come later.
+**Three new crates:**
 
-**Impact**: Makes Echelon visible. Enables replay visualisation for
-debugging and presentation.
+1. **`murk-scene`** (leaf crate) — FlatBuffer schema defining the scene
+   interchange format (`Scene`, `Entity`, `FieldLayer`, `Event`). No
+   dependencies on other murk crates. Renderer adapters depend only on
+   this.
+
+2. **`murk-render`** — `RenderSpec` → `RenderPlan` compilation and
+   execution pipeline. Mirrors the ObsSpec → ObsPlan pattern but produces
+   a FlatBuffer `Scene` (positions, field values, events) rather than
+   flat f32 tensors. Supports viewport culling via `RegionSpec` and LOD
+   via spatial downsampling.
+
+3. **`murk-handle`** — `WorldHandle` adapter that wraps either
+   `LockstepWorld` or `RealtimeAsyncWorld` behind a common API. Forces
+   `OwnedSnapshot` at the boundary (~2μs clone cost in lockstep mode).
+   Includes escape hatches (`as_lockstep()`, `as_realtime()`) for
+   mode-specific features.
+
+**Design decisions:**
+- Scene format: FlatBuffers (consistent with murk-obs, zero-copy,
+  cross-language)
+- WorldHandle pattern: adapter/facade with internal enum (not a trait —
+  avoids vtable overhead and lifetime complications)
+- Scene output: stateless full description per tick (delta optimisation
+  can come later)
+
+**Consumer topology:**
+```text
+  PyTorch RL        Bevy / wgpu       Game Logic
+  (training)        (rendering)       (Echelon)
+      │                  │                │
+ murk-python        murk-scene       murk-handle
+ + murk-ffi        (FlatBuffers)    (WorldHandle)
+      │                  │                │
+      └──────────────────┴────────────────┘
+                         │
+                   murk-engine
+```
+
+**Impact**: Completes the engine's consumer story. Makes Echelon visible
+(Port 2), enables mode-agnostic game logic (Port 3), and enables replay
+visualisation for debugging.
+
+See `docs/plans/2026-02-24-three-port-architecture-design.md` for the
+full design document.
 
 ### Agent-Type Observation Composition
 
@@ -236,7 +271,9 @@ The following APIs must be frozen at 1.0:
 - `ObsSpec` / `ObsPlan` format
 - Replay binary format (wire compatibility)
 - C FFI ABI version
-- `RenderSpec` / `RenderPlan` format (if stabilised by then)
+- `Scene` FlatBuffer schema version (`murk-scene`)
+- `RenderSpec` / `RenderPlan` format (`murk-render`)
+- `WorldHandle` common API surface (`murk-handle`)
 
 ### What Stays Unstable
 
@@ -312,7 +349,8 @@ Expand beyond Gymnasium to first-class adapters for:
 - **TorchRL** (`EnvBase`) — where serious PyTorch RL practitioners live
 - **RLlib** — distributed training at scale
 - **CleanRL** — lightweight single-file RL implementations
-- **Godot/Bevy** — game engine integrations for the render adapter
+- **Godot/Bevy** — game engine integrations (depend on `murk-scene`
+  for FlatBuffer scene data and `murk-handle` for world control)
 
 ### Benchmark Suite and Research Positioning
 
