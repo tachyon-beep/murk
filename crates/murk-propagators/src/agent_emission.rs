@@ -197,10 +197,16 @@ impl Propagator for AgentEmission {
                     }
                 })?;
 
-                // Seed from previous emission.
-                out.copy_from_slice(&prev_emission);
-
-                // Verify length match to prevent out-of-bounds panic.
+                // Validate lengths before any writes.
+                if prev_emission.len() != out.len() {
+                    return Err(PropagatorError::ExecutionFailed {
+                        reason: format!(
+                            "previous emission length ({}) != output length ({})",
+                            prev_emission.len(),
+                            out.len()
+                        ),
+                    });
+                }
                 if presence.len() != out.len() {
                     return Err(PropagatorError::ExecutionFailed {
                         reason: format!(
@@ -210,6 +216,9 @@ impl Propagator for AgentEmission {
                         ),
                     });
                 }
+
+                // Seed from previous emission.
+                out.copy_from_slice(&prev_emission);
 
                 // Add intensity where agents are present.
                 for (i, &p) in presence.iter().enumerate() {
@@ -481,6 +490,41 @@ mod tests {
                 "cell {i}: additive with no agents should preserve previous emission"
             );
         }
+    }
+
+    #[test]
+    fn additive_mismatched_prev_emission_length_returns_error() {
+        // prev_emission has 9 elements but writer's output buffer has 4.
+        // Should return PropagatorError, not panic from copy_from_slice.
+        let grid = Square4::new(3, 3, EdgeBehavior::Absorb).unwrap();
+        let n = grid.cell_count(); // 9
+
+        let prop = AgentEmission::builder()
+            .presence_field(F_PRES)
+            .emission_field(F_EMIT)
+            .intensity(1.0)
+            .mode(EmissionMode::Additive)
+            .build()
+            .unwrap();
+
+        let mut presence = vec![0.0f32; n];
+        presence[4] = 1.0;
+
+        let mut reader = MockFieldReader::new();
+        reader.set_field(F_PRES, presence);
+        reader.set_field(F_EMIT, vec![0.0f32; n]); // prev_emission: 9 elements
+
+        let mut writer = MockFieldWriter::new();
+        writer.add_field(F_EMIT, 4); // output buffer: only 4 elements — mismatch
+
+        let mut scratch = ScratchRegion::new(0);
+        let mut ctx = make_ctx(&reader, &mut writer, &mut scratch, &grid);
+
+        let result = prop.step(&mut ctx);
+        assert!(
+            result.is_err(),
+            "expected PropagatorError for prev_emission/output length mismatch, got Ok"
+        );
     }
 
     #[test]
