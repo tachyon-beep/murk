@@ -504,8 +504,8 @@ fn write_receipts(
     cap: usize,
     n_out: *mut usize,
 ) {
-    let write_count = receipts.len().min(cap);
-    if !out.is_null() && write_count > 0 {
+    let write_count = if out.is_null() { 0 } else { receipts.len().min(cap) };
+    if write_count > 0 {
         for (i, receipt) in receipts.iter().enumerate().take(write_count) {
             // SAFETY: out points to cap valid MurkReceipt structs.
             unsafe {
@@ -1004,6 +1004,29 @@ mod tests {
         );
         // The one written receipt should be the first one.
         assert_eq!(buf[0].command_index, 0);
+    }
+
+    #[test]
+    fn write_receipts_null_buffer_reports_zero_count() {
+        use murk_core::command::Receipt;
+        use murk_core::id::TickId;
+
+        let receipts = vec![Receipt {
+            accepted: true,
+            applied_tick_id: Some(TickId(1)),
+            reason_code: None,
+            command_index: 0,
+        }];
+
+        let mut n_out: usize = 999;
+
+        // Null output buffer — n_out must be 0, not 1.
+        write_receipts(&receipts, std::ptr::null_mut(), 10, &mut n_out);
+
+        assert_eq!(
+            n_out, 0,
+            "write_receipts with null buffer must report 0 receipts written, got {n_out}"
+        );
     }
 
     #[test]
