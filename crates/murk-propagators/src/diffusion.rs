@@ -64,6 +64,9 @@ impl DiffusionPropagator {
             })?
             .to_vec();
 
+        let cell_count = (rows * cols) as usize;
+        check_field_arity(&heat_prev, &vel_prev, cell_count)?;
+
         let heat_out =
             ctx.writes()
                 .write(HEAT)
@@ -240,6 +243,8 @@ impl DiffusionPropagator {
             })?
             .to_vec();
 
+        check_field_arity(&heat_prev, &vel_prev, cell_count)?;
+
         // Compute outputs into local buffers, then write all at once
         let mut heat_new = vec![0.0f32; cell_count];
         let mut vel_new = vec![0.0f32; cell_count * 2];
@@ -316,6 +321,32 @@ impl DiffusionPropagator {
 
         Ok(())
     }
+}
+
+/// Validate that field slices have the expected lengths for this propagator.
+fn check_field_arity(
+    heat: &[f32],
+    velocity: &[f32],
+    cell_count: usize,
+) -> Result<(), PropagatorError> {
+    if heat.len() != cell_count {
+        return Err(PropagatorError::ExecutionFailed {
+            reason: format!(
+                "heat field length mismatch: expected {cell_count}, got {}",
+                heat.len()
+            ),
+        });
+    }
+    if velocity.len() != cell_count * 2 {
+        return Err(PropagatorError::ExecutionFailed {
+            reason: format!(
+                "velocity field length mismatch: expected {} (vec2), got {}",
+                cell_count * 2,
+                velocity.len()
+            ),
+        });
+    }
+    Ok(())
 }
 
 impl Propagator for DiffusionPropagator {
@@ -971,6 +1002,29 @@ mod tests {
                 grad[i * 2]
             );
         }
+    }
+
+    #[test]
+    fn wrong_velocity_arity_returns_error() {
+        // Velocity should be vec2 (2 * cell_count) but we provide scalar (1 * cell_count).
+        let grid = Square4::new(3, 3, EdgeBehavior::Absorb).unwrap();
+        let n = grid.cell_count();
+        let prop = DiffusionPropagator::new(0.1);
+
+        let mut reader = MockFieldReader::new();
+        reader.set_field(HEAT, vec![0.0; n]);
+        reader.set_field(VELOCITY, vec![0.0; n]); // Wrong: should be n*2
+
+        let mut writer = MockFieldWriter::new();
+        writer.add_field(HEAT, n);
+        writer.add_field(VELOCITY, n); // Wrong arity
+        writer.add_field(HEAT_GRADIENT, n * 2);
+
+        let mut scratch = ScratchRegion::new(0);
+        let mut ctx = make_ctx(&reader, &mut writer, &mut scratch, &grid, 0.01);
+
+        let result = prop.step(&mut ctx);
+        assert!(result.is_err(), "expected PropagatorError for wrong velocity arity, got Ok");
     }
 
     #[test]
