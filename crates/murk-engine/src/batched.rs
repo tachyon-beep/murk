@@ -186,6 +186,18 @@ impl BatchedEngine {
                             });
                         }
                     }
+                    // Absolute check: the observed field must actually exist
+                    // in the reference world. Without this, None == None passes
+                    // the cross-world comparison when the field is missing from
+                    // all worlds, deferring the error to observe time.
+                    if ref_len.is_none() {
+                        return Err(BatchError::InvalidArgument {
+                            reason: format!(
+                                "obs spec references {fid:?} which is missing from world 0; \
+                                 every observed field must exist in all worlds",
+                            ),
+                        });
+                    }
                 }
 
                 (Some(result.plan), result.output_len, result.mask_len)
@@ -746,6 +758,67 @@ mod tests {
     }
 
     // ── Field schema validation ─────────────────────────────
+
+    #[test]
+    fn obs_spec_referencing_missing_field_rejected() {
+        // Both worlds lack FieldId(1), but obs spec references it.
+        // Construction must fail — not silently pass and blow up at observe time.
+        let spec = ObsSpec {
+            entries: vec![
+                ObsEntry {
+                    field_id: FieldId(0),
+                    region: ObsRegion::Fixed(RegionSpec::All),
+                    pool: None,
+                    transform: ObsTransform::Identity,
+                    dtype: ObsDtype::F32,
+                },
+                ObsEntry {
+                    field_id: FieldId(1), // missing in both worlds
+                    region: ObsRegion::Fixed(RegionSpec::All),
+                    pool: None,
+                    transform: ObsTransform::Identity,
+                    dtype: ObsDtype::F32,
+                },
+            ],
+        };
+
+        // Both worlds only have FieldId(0)
+        let configs = vec![make_config(1, 1.0), make_config(2, 1.0)];
+        let result = BatchedEngine::new(configs, Some(&spec));
+        match result {
+            Err(e) => {
+                let msg = format!("{e}");
+                assert!(
+                    msg.contains("missing"),
+                    "error should mention missing field, got: {msg}"
+                );
+            }
+            Ok(_) => panic!("expected error for obs spec referencing field missing from all worlds"),
+        }
+    }
+
+    #[test]
+    fn obs_spec_referencing_missing_field_single_world_rejected() {
+        // Single world lacks FieldId(1), obs spec references it.
+        // The cross-world loop is skipped (only 1 world), so the
+        // ref_len check must still catch this.
+        let spec = ObsSpec {
+            entries: vec![ObsEntry {
+                field_id: FieldId(1), // missing
+                region: ObsRegion::Fixed(RegionSpec::All),
+                pool: None,
+                transform: ObsTransform::Identity,
+                dtype: ObsDtype::F32,
+            }],
+        };
+
+        let configs = vec![make_config(1, 1.0)]; // only has FieldId(0)
+        let result = BatchedEngine::new(configs, Some(&spec));
+        assert!(
+            result.is_err(),
+            "expected error for obs spec referencing field missing from single world"
+        );
+    }
 
     #[test]
     fn mismatched_field_schemas_rejected() {

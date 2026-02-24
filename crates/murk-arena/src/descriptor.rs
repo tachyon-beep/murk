@@ -82,7 +82,14 @@ impl FieldDescriptor {
             };
             let handle =
                 FieldHandle::new(0, 0, total_len, FieldLocation::PerTick { segment_index: 0 });
-            entries.insert(*id, FieldEntry { handle, meta });
+            if entries.insert(*id, FieldEntry { handle, meta }).is_some() {
+                return Err(ArenaError::InvalidConfig {
+                    reason: format!(
+                        "duplicate FieldId({}) in field_defs (field '{}')",
+                        id.0, def.name,
+                    ),
+                });
+            }
         }
         Ok(Self { entries })
     }
@@ -243,6 +250,83 @@ mod tests {
         let defs = make_field_defs();
         let desc = FieldDescriptor::from_field_defs(&defs, 100).unwrap();
         assert!(desc.get(FieldId(99)).is_none());
+    }
+
+    #[test]
+    fn duplicate_field_ids_returns_error() {
+        let defs = vec![
+            (
+                FieldId(0),
+                FieldDef {
+                    name: "temperature".to_string(),
+                    field_type: FieldType::Scalar,
+                    mutability: FieldMutability::PerTick,
+                    units: None,
+                    bounds: None,
+                    boundary_behavior: BoundaryBehavior::Clamp,
+                },
+            ),
+            (
+                FieldId(0), // duplicate
+                FieldDef {
+                    name: "pressure".to_string(),
+                    field_type: FieldType::Scalar,
+                    mutability: FieldMutability::PerTick,
+                    units: None,
+                    bounds: None,
+                    boundary_behavior: BoundaryBehavior::Clamp,
+                },
+            ),
+        ];
+        let result = FieldDescriptor::from_field_defs(&defs, 100);
+        assert!(
+            matches!(result, Err(ArenaError::InvalidConfig { .. })),
+            "expected InvalidConfig for duplicate FieldId, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn non_adjacent_duplicate_field_ids_returns_error() {
+        let defs = vec![
+            (
+                FieldId(0),
+                FieldDef {
+                    name: "a".to_string(),
+                    field_type: FieldType::Scalar,
+                    mutability: FieldMutability::PerTick,
+                    units: None,
+                    bounds: None,
+                    boundary_behavior: BoundaryBehavior::Clamp,
+                },
+            ),
+            (
+                FieldId(1),
+                FieldDef {
+                    name: "b".to_string(),
+                    field_type: FieldType::Scalar,
+                    mutability: FieldMutability::PerTick,
+                    units: None,
+                    bounds: None,
+                    boundary_behavior: BoundaryBehavior::Clamp,
+                },
+            ),
+            (
+                FieldId(0), // duplicate, non-adjacent
+                FieldDef {
+                    name: "c".to_string(),
+                    field_type: FieldType::Scalar,
+                    mutability: FieldMutability::PerTick,
+                    units: None,
+                    bounds: None,
+                    boundary_behavior: BoundaryBehavior::Clamp,
+                },
+            ),
+        ];
+        let result = FieldDescriptor::from_field_defs(&defs, 100);
+        assert!(
+            matches!(result, Err(ArenaError::InvalidConfig { .. })),
+            "expected InvalidConfig for non-adjacent duplicate FieldId, got: {result:?}"
+        );
     }
 
     #[test]

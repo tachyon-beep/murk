@@ -24,19 +24,19 @@ enum MurkBoundaryBehavior {
   /**
    * Clamp to nearest bound.
    */
-  Clamp = 0,
+  MurkBoundaryBehavior_Clamp = 0,
   /**
    * Reflect off the bound.
    */
-  Reflect = 1,
+  MurkBoundaryBehavior_Reflect = 1,
   /**
    * Absorb at the boundary.
    */
-  Absorb = 2,
+  MurkBoundaryBehavior_Absorb = 2,
   /**
    * Wrap around to opposite bound.
    */
-  Wrap = 3,
+  MurkBoundaryBehavior_Wrap = 3,
 };
 typedef int32_t MurkBoundaryBehavior;
 
@@ -47,11 +47,11 @@ enum MurkCommandType {
   /**
    * Set a global scalar parameter.
    */
-  SetParameter = 0,
+  MurkCommandType_SetParameter = 0,
   /**
    * Set a single field value at a coordinate.
    */
-  SetField = 1,
+  MurkCommandType_SetField = 1,
 };
 typedef int32_t MurkCommandType;
 
@@ -62,15 +62,15 @@ enum MurkEdgeBehavior {
   /**
    * Absorb: cells at edge have no neighbor beyond.
    */
-  Absorb = 0,
+  MurkEdgeBehavior_Absorb = 0,
   /**
    * Clamp: beyond-edge neighbors map to edge cell.
    */
-  Clamp = 1,
+  MurkEdgeBehavior_Clamp = 1,
   /**
    * Wrap: periodic boundary.
    */
-  Wrap = 2,
+  MurkEdgeBehavior_Wrap = 2,
 };
 typedef int32_t MurkEdgeBehavior;
 
@@ -81,15 +81,15 @@ enum MurkFieldMutability {
   /**
    * Generation 0 forever.
    */
-  Static = 0,
+  MurkFieldMutability_Static = 0,
   /**
    * New allocation each tick if modified.
    */
-  PerTick = 1,
+  MurkFieldMutability_PerTick = 1,
   /**
    * New allocation only when modified.
    */
-  Sparse = 2,
+  MurkFieldMutability_Sparse = 2,
 };
 typedef int32_t MurkFieldMutability;
 
@@ -100,15 +100,15 @@ enum MurkFieldType {
   /**
    * Single f32 per cell.
    */
-  Scalar = 0,
+  MurkFieldType_Scalar = 0,
   /**
    * Fixed-size f32 vector per cell.
    */
-  Vector = 1,
+  MurkFieldType_Vector = 1,
   /**
    * Categorical (discrete) value per cell.
    */
-  Categorical = 2,
+  MurkFieldType_Categorical = 2,
 };
 typedef int32_t MurkFieldType;
 
@@ -119,31 +119,31 @@ enum MurkSpaceType {
   /**
    * 1D line with configurable edge behavior.
    */
-  Line1D = 0,
+  MurkSpaceType_Line1D = 0,
   /**
    * 1D ring (always-wrap periodic boundary).
    */
-  Ring1D = 1,
+  MurkSpaceType_Ring1D = 1,
   /**
    * 2D grid, 4-connected (N/S/E/W).
    */
-  Square4 = 2,
+  MurkSpaceType_Square4 = 2,
   /**
    * 2D grid, 8-connected (+ diagonals).
    */
-  Square8 = 3,
+  MurkSpaceType_Square8 = 3,
   /**
    * 2D hexagonal lattice, 6-connected (pointy-top).
    */
-  Hex2D = 4,
+  MurkSpaceType_Hex2D = 4,
   /**
    * Cartesian product of arbitrary spaces.
    */
-  ProductSpace = 5,
+  MurkSpaceType_ProductSpace = 5,
   /**
    * 3D FCC lattice, 12-connected (isotropic).
    */
-  Fcc12 = 6,
+  MurkSpaceType_Fcc12 = 6,
 };
 typedef int32_t MurkSpaceType;
 
@@ -156,95 +156,95 @@ enum MurkStatus {
   /**
    * Success.
    */
-  Ok = 0,
+  MurkStatus_Ok = 0,
   /**
    * Handle is invalid or was already destroyed.
    */
-  InvalidHandle = -1,
+  MurkStatus_InvalidHandle = -1,
   /**
    * Observation plan was compiled for a different generation.
    */
-  PlanInvalidated = -2,
+  MurkStatus_PlanInvalidated = -2,
   /**
    * Exact-tick egress request timed out (RealtimeAsync only).
    */
-  TimeoutWaitingForTick = -3,
+  MurkStatus_TimeoutWaitingForTick = -3,
   /**
    * Requested tick evicted from ring buffer.
    */
-  NotAvailable = -4,
+  MurkStatus_NotAvailable = -4,
   /**
    * ObsPlan valid_ratio below threshold.
    */
-  InvalidComposition = -5,
+  MurkStatus_InvalidComposition = -5,
   /**
    * Command queue at capacity.
    */
-  QueueFull = -6,
+  MurkStatus_QueueFull = -6,
   /**
    * Command basis_tick_id is too old.
    */
-  Stale = -7,
+  MurkStatus_Stale = -7,
   /**
    * Tick was rolled back.
    */
-  TickRollback = -8,
+  MurkStatus_TickRollback = -8,
   /**
    * Arena allocation failed (OOM).
    */
-  AllocationFailed = -9,
+  MurkStatus_AllocationFailed = -9,
   /**
    * A propagator's step function failed.
    */
-  PropagatorFailed = -10,
+  MurkStatus_PropagatorFailed = -10,
   /**
    * Observation plan execution failed mid-fill.
    */
-  ExecutionFailed = -11,
+  MurkStatus_ExecutionFailed = -11,
   /**
    * Malformed ObsSpec at compilation time.
    */
-  InvalidObsSpec = -12,
+  MurkStatus_InvalidObsSpec = -12,
   /**
    * dt exceeds a propagator's max_dt constraint.
    */
-  DtOutOfRange = -13,
+  MurkStatus_DtOutOfRange = -13,
   /**
    * Egress worker exceeded max_epoch_hold.
    */
-  WorkerStalled = -14,
+  MurkStatus_WorkerStalled = -14,
   /**
    * World is shutting down.
    */
-  ShuttingDown = -15,
+  MurkStatus_ShuttingDown = -15,
   /**
    * Ticking disabled after consecutive rollbacks.
    */
-  TickDisabled = -16,
+  MurkStatus_TickDisabled = -16,
   /**
    * Configuration validation error.
    */
-  ConfigError = -17,
+  MurkStatus_ConfigError = -17,
   /**
    * An argument is null, out of range, or otherwise invalid.
    */
-  InvalidArgument = -18,
+  MurkStatus_InvalidArgument = -18,
   /**
    * Caller-provided buffer is too small.
    */
-  BufferTooSmall = -19,
+  MurkStatus_BufferTooSmall = -19,
   /**
    * Internal error (e.g. poisoned mutex after a prior panic).
    */
-  InternalError = -20,
+  MurkStatus_InternalError = -20,
   /**
    * Command type not supported by the tick executor.
    */
-  UnsupportedCommand = -21,
+  MurkStatus_UnsupportedCommand = -21,
   /**
    * A Rust panic was caught at the FFI boundary.
    */
-  Panicked = -128,
+  MurkStatus_Panicked = -128,
 };
 typedef int32_t MurkStatus;
 
@@ -255,11 +255,11 @@ enum MurkWriteMode {
   /**
    * Fresh buffer — propagator must fill every cell.
    */
-  Full = 0,
+  MurkWriteMode_Full = 0,
   /**
    * Seeded from previous generation; propagator updates selectively.
    */
-  Incremental = 1,
+  MurkWriteMode_Incremental = 1,
 };
 typedef int32_t MurkWriteMode;
 
