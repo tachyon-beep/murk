@@ -160,7 +160,12 @@ impl GridGeometry {
                 .unwrap_or(0),
             GridConnectivity::Hex => {
                 // Axial coordinates [dq, dr]. Cube distance = max(|dq|, |dr|, |dq+dr|).
-                debug_assert_eq!(relative.len(), 2);
+                assert_eq!(
+                    relative.len(),
+                    2,
+                    "Hex graph_distance requires 2D relative coords, got {}",
+                    relative.len()
+                );
                 let dq = relative[0];
                 let dr = relative[1];
                 let ds = dq + dr; // implicit third axis s = -(q+r)
@@ -380,5 +385,21 @@ mod tests {
             GridGeometry::from_space(&hex).unwrap().connectivity,
             GridConnectivity::Hex
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "Hex graph_distance requires 2D")]
+    fn graph_distance_hex_short_input_panics() {
+        let s = Hex2D::new(10, 10).unwrap();
+        let geo = GridGeometry::from_space(&s).unwrap();
+        let _ = geo.graph_distance(&[0]); // 1D on Hex requires 2D
+    }
+
+    #[test]
+    #[should_panic(expected = "Hex graph_distance requires 2D")]
+    fn graph_distance_hex_empty_input_panics() {
+        let s = Hex2D::new(10, 10).unwrap();
+        let geo = GridGeometry::from_space(&s).unwrap();
+        let _ = geo.graph_distance(&[]);
     }
 }

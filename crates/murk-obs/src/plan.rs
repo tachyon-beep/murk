@@ -433,6 +433,14 @@ impl ObsPlan {
                 }
 
                 ObsRegion::AgentRect { half_extent } => {
+                    if half_extent.len() != ndim {
+                        return Err(ObsError::InvalidObsSpec {
+                            reason: format!(
+                                "entry {i}: AgentRect half_extent has {} dims, but space requires {ndim}",
+                                half_extent.len()
+                            ),
+                        });
+                    }
                     let radius = *half_extent.iter().max().unwrap_or(&0);
                     let (ae, shape) = Self::compile_agent_entry(
                         i,
@@ -1451,6 +1459,41 @@ mod tests {
         };
         let err = ObsPlan::compile(&spec, &space).unwrap_err();
         assert!(matches!(err, ObsError::InvalidObsSpec { .. }));
+    }
+
+    #[test]
+    fn compile_agent_rect_wrong_ndim_errors() {
+        let space = Square4::new(5, 5, EdgeBehavior::Absorb).unwrap(); // 2D
+        let spec = ObsSpec {
+            entries: vec![ObsEntry {
+                field_id: FieldId(0),
+                region: ObsRegion::AgentRect {
+                    half_extent: smallvec::smallvec![1], // 1D on 2D space
+                },
+                pool: None,
+                transform: ObsTransform::Identity,
+                dtype: ObsDtype::F32,
+            }],
+        };
+        let err = ObsPlan::compile(&spec, &space).unwrap_err();
+        assert!(matches!(err, ObsError::InvalidObsSpec { .. }));
+    }
+
+    #[test]
+    fn compile_agent_rect_correct_ndim_ok() {
+        let space = Square4::new(5, 5, EdgeBehavior::Absorb).unwrap(); // 2D
+        let spec = ObsSpec {
+            entries: vec![ObsEntry {
+                field_id: FieldId(0),
+                region: ObsRegion::AgentRect {
+                    half_extent: smallvec::smallvec![1, 2], // 2D on 2D space
+                },
+                pool: None,
+                transform: ObsTransform::Identity,
+                dtype: ObsDtype::F32,
+            }],
+        };
+        assert!(ObsPlan::compile(&spec, &space).is_ok());
     }
 
     // ── Execution tests ──────────────────────────────────────

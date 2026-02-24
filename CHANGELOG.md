@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **murk-engine:** Unchecked `u64` arithmetic in stall threshold/hold/grace computation replaced with `saturating_mul`/`saturating_add` (#105)
 - **murk-engine:** Unchecked `u32 * u32` for static field length in `TickEngine::new` replaced with `checked_mul` (#106)
 - **murk-bench:** `init_agent_positions` hash uses `wrapping_mul` instead of plain `*` (panicked in debug for ≥14 agents) (#107)
+- **murk-obs:** `ObsPlan::compile` rejects `AgentRect` when `half_extent` dimensionality mismatches space (#110)
+- **murk-obs:** FlatBuffer empty-coords round-trip restored (decoder no longer rejects `ndim==0` for `n_coords==0`) (#111)
+- **murk-obs:** `GridGeometry::graph_distance` Hex branch upgraded from `debug_assert_eq!` to `assert_eq!` (#118)
 
 ## [0.1.8] - 2026-02-22
 

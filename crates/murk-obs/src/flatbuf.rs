@@ -364,6 +364,10 @@ fn decode_region(tag: u8, params: &[i32], idx: usize) -> Result<ObsRegion, ObsEr
             let ndim = params[0] as usize;
             let n_coords = params[1] as usize;
             let data = &params[2..];
+            if n_coords == 0 {
+                // Empty coordinate list: no data to parse regardless of ndim.
+                return Ok(ObsRegion::Fixed(RegionSpec::Coords(vec![])));
+            }
             if ndim == 0 || data.len() != ndim * n_coords {
                 return Err(ObsError::InvalidObsSpec {
                     reason: format!(
@@ -831,5 +835,19 @@ mod tests {
             }],
         };
         assert!(serialize(&spec).is_err());
+    }
+
+    #[test]
+    fn round_trip_empty_coords() {
+        let spec = ObsSpec {
+            entries: vec![ObsEntry {
+                field_id: FieldId(0),
+                region: ObsRegion::Fixed(RegionSpec::Coords(vec![])),
+                pool: None,
+                transform: ObsTransform::Identity,
+                dtype: ObsDtype::F32,
+            }],
+        };
+        assert_eq!(round_trip(&spec), spec);
     }
 }
