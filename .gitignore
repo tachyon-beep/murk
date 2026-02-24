@@ -35,3 +35,4 @@ book/build/
 .claude/
 docs/bugs/generated/
 .mcp.json
+.filigree/
