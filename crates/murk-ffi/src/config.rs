@@ -88,6 +88,15 @@ fn f64_to_u32(v: f64) -> Option<u32> {
     Some(v as u32)
 }
 
+/// Safely convert an f64 FFI parameter to i32.
+/// Rejects non-finite, non-integer, and out-of-range values.
+fn f64_to_i32(v: f64) -> Option<i32> {
+    if !v.is_finite() || v > i32::MAX as f64 || v < i32::MIN as f64 || v != v.trunc() {
+        return None;
+    }
+    Some(v as i32)
+}
+
 /// Safely convert an f64 FFI parameter to usize.
 /// Rejects non-finite, negative, non-integer, and overly large values.
 fn f64_to_usize(v: f64) -> Option<usize> {
@@ -107,7 +116,7 @@ fn parse_space(space_type: i32, p: &[f64]) -> Option<Box<dyn Space>> {
                 return None;
             }
             let len = f64_to_u32(p[0])?;
-            let edge = parse_edge_behavior(p[1] as i32)?;
+            let edge = parse_edge_behavior(f64_to_i32(p[1])?)?;
             Line1D::new(len, edge)
                 .ok()
                 .map(|s| Box::new(s) as Box<dyn Space>)
@@ -125,7 +134,7 @@ fn parse_space(space_type: i32, p: &[f64]) -> Option<Box<dyn Space>> {
             }
             let w = f64_to_u32(p[0])?;
             let h = f64_to_u32(p[1])?;
-            let edge = parse_edge_behavior(p[2] as i32)?;
+            let edge = parse_edge_behavior(f64_to_i32(p[2])?)?;
             Square4::new(w, h, edge)
                 .ok()
                 .map(|s| Box::new(s) as Box<dyn Space>)
@@ -136,7 +145,7 @@ fn parse_space(space_type: i32, p: &[f64]) -> Option<Box<dyn Space>> {
             }
             let w = f64_to_u32(p[0])?;
             let h = f64_to_u32(p[1])?;
-            let edge = parse_edge_behavior(p[2] as i32)?;
+            let edge = parse_edge_behavior(f64_to_i32(p[2])?)?;
             Square8::new(w, h, edge)
                 .ok()
                 .map(|s| Box::new(s) as Box<dyn Space>)
@@ -160,7 +169,7 @@ fn parse_space(space_type: i32, p: &[f64]) -> Option<Box<dyn Space>> {
             let w = f64_to_u32(p[0])?;
             let h = f64_to_u32(p[1])?;
             let d = f64_to_u32(p[2])?;
-            let edge = parse_edge_behavior(p[3] as i32)?;
+            let edge = parse_edge_behavior(f64_to_i32(p[3])?)?;
             Fcc12::new(w, h, d, edge)
                 .ok()
                 .map(|s| Box::new(s) as Box<dyn Space>)
@@ -180,7 +189,7 @@ fn parse_space(space_type: i32, p: &[f64]) -> Option<Box<dyn Space>> {
                 if offset + 2 > p.len() {
                     return None;
                 }
-                let comp_type = p[offset] as i32;
+                let comp_type = f64_to_i32(p[offset])?;
                 let n_comp_params = f64_to_usize(p[offset + 1])?;
                 offset += 2;
                 if offset
@@ -601,6 +610,30 @@ mod tests {
         assert_eq!(
             murk_config_set_space(h, MurkSpaceType::Fcc12 as i32, params.as_ptr(), 4),
             MurkStatus::Ok as i32
+        );
+        murk_config_destroy(h);
+    }
+
+    #[test]
+    fn nan_edge_behavior_returns_invalid_argument() {
+        let mut h: u64 = 0;
+        murk_config_create(&mut h);
+        let params = [10.0f64, f64::NAN]; // Line1D, edge=NaN
+        assert_eq!(
+            murk_config_set_space(h, MurkSpaceType::Line1D as i32, params.as_ptr(), 2),
+            MurkStatus::InvalidArgument as i32
+        );
+        murk_config_destroy(h);
+    }
+
+    #[test]
+    fn fractional_edge_behavior_returns_invalid_argument() {
+        let mut h: u64 = 0;
+        murk_config_create(&mut h);
+        let params = [5.0f64, 5.0, 1.9]; // Square4, edge=1.9 (should not truncate to 1)
+        assert_eq!(
+            murk_config_set_space(h, MurkSpaceType::Square4 as i32, params.as_ptr(), 3),
+            MurkStatus::InvalidArgument as i32
         );
         murk_config_destroy(h);
     }
