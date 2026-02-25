@@ -58,6 +58,9 @@ pub enum MurkStatus {
     InternalError = -20,
     /// Command type not supported by the tick executor.
     UnsupportedCommand = -21,
+    /// Command was accepted but could not be applied (e.g. invalid coordinate
+    /// or unknown field).
+    NotApplied = -22,
     /// A Rust panic was caught at the FFI boundary.
     Panicked = -128,
 }
@@ -110,7 +113,7 @@ impl From<&IngressError> for MurkStatus {
             IngressError::TickDisabled => MurkStatus::TickDisabled,
             IngressError::ShuttingDown => MurkStatus::ShuttingDown,
             IngressError::UnsupportedCommand => MurkStatus::UnsupportedCommand,
-            IngressError::NotApplied => MurkStatus::UnsupportedCommand,
+            IngressError::NotApplied => MurkStatus::NotApplied,
         }
     }
 }
@@ -144,6 +147,7 @@ mod tests {
         assert_eq!(MurkStatus::BufferTooSmall as i32, -19);
         assert_eq!(MurkStatus::InternalError as i32, -20);
         assert_eq!(MurkStatus::UnsupportedCommand as i32, -21);
+        assert_eq!(MurkStatus::NotApplied as i32, -22);
     }
 
     #[test]
@@ -236,7 +240,7 @@ mod tests {
         );
         assert_eq!(
             MurkStatus::from(&IngressError::NotApplied),
-            MurkStatus::UnsupportedCommand
+            MurkStatus::NotApplied
         );
     }
 

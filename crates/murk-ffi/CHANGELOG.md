@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `MurkStatus::NotApplied` (-22) — distinct status code for commands accepted but not applied (OOB coordinate, unknown field)
+- `murk_batched_num_worlds_get`, `murk_batched_obs_output_len_get`, `murk_batched_obs_mask_len_get` — `_get` variants with unambiguous error reporting
+- ABI version bumped from v3.0 to v3.1
+
+### Fixed
+
+- `IngressError::NotApplied` mapped to `NotApplied` (-22) instead of `UnsupportedCommand` (-21)
+- `get_world()`/`get_batched()`/`get_obs_plan()` store `LAST_PANIC` diagnostic on mutex poisoning instead of silently discarding
+- Legacy query functions store `LAST_PANIC` on inner mutex poisoning
+- Batched query functions store `LAST_PANIC` on inner mutex poisoning
+
 ## [0.1.7](https://github.com/tachyon-beep/murk/compare/murk-ffi-v0.1.3...murk-ffi-v0.1.7) - 2026-02-21
 
 ### Added

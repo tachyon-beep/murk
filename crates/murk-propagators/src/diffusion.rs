@@ -978,7 +978,8 @@ mod tests {
         // dh/dr from cell 1: (10 - 0) / 1 = 10
         // dh/dr from cell 3: (30 - 0) / -1 = -30
         // Average: (10 + (-30)) / 2 = -10
-        let grad_y_cell0 = grad[0 * 2 + 1];
+        // Gradient is a flat array: [grad_x_cell0, grad_y_cell0, grad_x_cell1, grad_y_cell1, ...]
+        let grad_y_cell0 = grad[1]; // cell 0, y-component
         assert!(
             (grad_y_cell0 - (-10.0)).abs() < 1e-4,
             "gradient at cell 0 should be -10 (wrap boundary), got {grad_y_cell0}"
@@ -988,18 +989,19 @@ mod tests {
         // dh/dr from cell 0: (0 - 10) / -1 = 10
         // dh/dr from cell 2: (20 - 10) / 1 = 10
         // Average: 10
-        let grad_y_cell1 = grad[1 * 2 + 1];
+        let grad_y_cell1 = grad[3]; // cell 1, y-component
         assert!(
             (grad_y_cell1 - 10.0).abs() < 1e-4,
             "gradient at cell 1 should be 10, got {grad_y_cell1}"
         );
 
         // All grad_x components should be zero (1D space, no column axis).
+        let arity = 2;
         for i in 0..n {
             assert!(
-                grad[i * 2].abs() < 1e-6,
+                grad[i * arity].abs() < 1e-6,
                 "grad_x at cell {i} should be 0, got {}",
-                grad[i * 2]
+                grad[i * arity]
             );
         }
     }

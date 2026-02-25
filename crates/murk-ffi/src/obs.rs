@@ -36,8 +36,19 @@ const MAX_EXECUTE_AGENT_DIMS: usize = 16;
 /// Clone the Arc for a plan handle, briefly locking the global table.
 ///
 /// Returns `None` if the handle is invalid or the mutex is poisoned.
+/// On poisoning, stores a diagnostic in [`LAST_PANIC`] so the caller
+/// can retrieve context via `murk_last_panic_message`.
 fn get_obs_plan(handle: u64) -> Option<ObsPlanArc> {
-    OBS_PLANS.lock().ok()?.get(handle).cloned()
+    match OBS_PLANS.lock() {
+        Ok(table) => table.get(handle).cloned(),
+        Err(_) => {
+            crate::LAST_PANIC.with(|cell| {
+                *cell.borrow_mut() =
+                    "OBS_PLANS mutex poisoned: a prior panic corrupted shared state".into();
+            });
+            None
+        }
+    }
 }
 
 /// Convert a C `MurkObsEntry` to a Rust `ObsEntry`.

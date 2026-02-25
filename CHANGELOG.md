@@ -7,8 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **murk-ffi:** `MurkStatus::NotApplied` (-22) — distinct status code for commands accepted but not applied (e.g. OOB coordinate, unknown field); previously aliased to `UnsupportedCommand`
+- **murk-ffi:** `murk_batched_num_worlds_get`, `murk_batched_obs_output_len_get`, `murk_batched_obs_mask_len_get` — unambiguous `_get` variants returning `i32` status with output pointer
+- **murk-ffi:** ABI version bumped from v3.0 to v3.1
+
 ### Fixed
 
+- **murk-ffi:** `IngressError::NotApplied` now maps to `MurkStatus::NotApplied` (-22) instead of `MurkStatus::UnsupportedCommand` (-21); receipt `reason_code` now distinguishes "command type unsupported" from "command target invalid"
+- **murk-ffi:** Mutex poisoning in `get_world()`/`get_batched()`/`get_obs_plan()` now stores diagnostic in `LAST_PANIC` before returning `None` (previously silently discarded via `.ok()?`)
+- **murk-ffi:** Legacy query functions (`murk_current_tick`, `murk_is_tick_disabled`, `murk_consecutive_rollbacks`, `murk_seed`) now store `LAST_PANIC` diagnostic on inner mutex poisoning
+- **murk-ffi:** Batched query functions (`murk_batched_num_worlds`, `murk_batched_obs_output_len`, `murk_batched_obs_mask_len`) now store `LAST_PANIC` diagnostic on inner mutex poisoning
+- **murk-propagators:** Clippy `erasing_op` in diffusion gradient test (`0 * 2 + 1` → direct indexing)
 - **murk-engine:** `RealtimeAsyncWorld::new()`/`reset()` thread spawn `.expect()` replaced with `Result` propagation + `ThreadSpawnFailed` error variant; partial startup rollback on egress worker failure (#103)
 - **murk-engine:** Subnormal `tick_rate_hz` validation now rejects values where `1/hz = inf` (#104)
 - **murk-engine:** Unchecked `u64` arithmetic in stall threshold/hold/grace computation replaced with `saturating_mul`/`saturating_add` (#105)

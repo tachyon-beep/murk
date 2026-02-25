@@ -24,8 +24,19 @@ static BATCHED: Mutex<HandleTable<BatchedArc>> = Mutex::new(HandleTable::new());
 /// Clone the Arc for a batched handle, briefly locking the global table.
 ///
 /// Returns `None` if the handle is invalid or the mutex is poisoned.
+/// On poisoning, stores a diagnostic in [`LAST_PANIC`] so the caller
+/// can retrieve context via `murk_last_panic_message`.
 fn get_batched(handle: u64) -> Option<BatchedArc> {
-    BATCHED.lock().ok()?.get(handle).cloned()
+    match BATCHED.lock() {
+        Ok(table) => table.get(handle).cloned(),
+        Err(_) => {
+            crate::LAST_PANIC.with(|cell| {
+                *cell.borrow_mut() =
+                    "BATCHED mutex poisoned: a prior panic corrupted shared state".into();
+            });
+            None
+        }
+    }
 }
 
 // ── FFI functions ───────────────────────────────────────────────
@@ -288,7 +299,8 @@ pub extern "C" fn murk_batched_destroy(handle: u64) -> i32 {
 /// Number of worlds in the batch.
 ///
 /// **Ambiguity warning:** returns 0 for both "zero worlds" and "invalid handle /
-/// poisoned mutex / caught panic." Callers cannot distinguish success from error.
+/// poisoned mutex / caught panic." Prefer [`murk_batched_num_worlds_get`] for
+/// unambiguous error detection.
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_batched_num_worlds(handle: u64) -> usize {
@@ -299,16 +311,45 @@ pub extern "C" fn murk_batched_num_worlds(handle: u64) -> usize {
         };
         let v = match engine_arc.lock() {
             Ok(e) => e.num_worlds(),
-            Err(_) => 0,
+            Err(_) => {
+                crate::LAST_PANIC.with(|cell| {
+                    *cell.borrow_mut() =
+                        "batched engine mutex poisoned: a prior panic corrupted shared state"
+                            .into();
+                });
+                0
+            }
         };
         v
+    })
+}
+
+/// Number of worlds with explicit error reporting.
+///
+/// Writes the count to `*out` and returns `MURK_OK`. Returns
+/// `InvalidHandle` or `InternalError` without writing to `out`.
+#[no_mangle]
+#[allow(unsafe_code)]
+pub extern "C" fn murk_batched_num_worlds_get(handle: u64, out: *mut usize) -> i32 {
+    ffi_guard!({
+        if out.is_null() {
+            return MurkStatus::InvalidArgument as i32;
+        }
+        let engine_arc = match get_batched(handle) {
+            Some(arc) => arc,
+            None => return MurkStatus::InvalidHandle as i32,
+        };
+        let engine = ffi_lock!(engine_arc);
+        unsafe { *out = engine.num_worlds() };
+        MurkStatus::Ok as i32
     })
 }
 
 /// Per-world observation output length (f32 elements).
 ///
 /// **Ambiguity warning:** returns 0 for both "no obs plan" and "invalid handle /
-/// poisoned mutex / caught panic." Callers cannot distinguish success from error.
+/// poisoned mutex / caught panic." Prefer [`murk_batched_obs_output_len_get`] for
+/// unambiguous error detection.
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_batched_obs_output_len(handle: u64) -> usize {
@@ -319,16 +360,45 @@ pub extern "C" fn murk_batched_obs_output_len(handle: u64) -> usize {
         };
         let v = match engine_arc.lock() {
             Ok(e) => e.obs_output_len(),
-            Err(_) => 0,
+            Err(_) => {
+                crate::LAST_PANIC.with(|cell| {
+                    *cell.borrow_mut() =
+                        "batched engine mutex poisoned: a prior panic corrupted shared state"
+                            .into();
+                });
+                0
+            }
         };
         v
+    })
+}
+
+/// Per-world observation output length with explicit error reporting.
+///
+/// Writes the length to `*out` and returns `MURK_OK`. Returns
+/// `InvalidHandle` or `InternalError` without writing to `out`.
+#[no_mangle]
+#[allow(unsafe_code)]
+pub extern "C" fn murk_batched_obs_output_len_get(handle: u64, out: *mut usize) -> i32 {
+    ffi_guard!({
+        if out.is_null() {
+            return MurkStatus::InvalidArgument as i32;
+        }
+        let engine_arc = match get_batched(handle) {
+            Some(arc) => arc,
+            None => return MurkStatus::InvalidHandle as i32,
+        };
+        let engine = ffi_lock!(engine_arc);
+        unsafe { *out = engine.obs_output_len() };
+        MurkStatus::Ok as i32
     })
 }
 
 /// Per-world observation mask length (bytes).
 ///
 /// **Ambiguity warning:** returns 0 for both "no obs plan" and "invalid handle /
-/// poisoned mutex / caught panic." Callers cannot distinguish success from error.
+/// poisoned mutex / caught panic." Prefer [`murk_batched_obs_mask_len_get`] for
+/// unambiguous error detection.
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_batched_obs_mask_len(handle: u64) -> usize {
@@ -339,9 +409,37 @@ pub extern "C" fn murk_batched_obs_mask_len(handle: u64) -> usize {
         };
         let v = match engine_arc.lock() {
             Ok(e) => e.obs_mask_len(),
-            Err(_) => 0,
+            Err(_) => {
+                crate::LAST_PANIC.with(|cell| {
+                    *cell.borrow_mut() =
+                        "batched engine mutex poisoned: a prior panic corrupted shared state"
+                            .into();
+                });
+                0
+            }
         };
         v
+    })
+}
+
+/// Per-world observation mask length with explicit error reporting.
+///
+/// Writes the length to `*out` and returns `MURK_OK`. Returns
+/// `InvalidHandle` or `InternalError` without writing to `out`.
+#[no_mangle]
+#[allow(unsafe_code)]
+pub extern "C" fn murk_batched_obs_mask_len_get(handle: u64, out: *mut usize) -> i32 {
+    ffi_guard!({
+        if out.is_null() {
+            return MurkStatus::InvalidArgument as i32;
+        }
+        let engine_arc = match get_batched(handle) {
+            Some(arc) => arc,
+            None => return MurkStatus::InvalidHandle as i32,
+        };
+        let engine = ffi_lock!(engine_arc);
+        unsafe { *out = engine.obs_mask_len() };
+        MurkStatus::Ok as i32
     })
 }
 
@@ -852,6 +950,90 @@ mod tests {
         assert_eq!(murk_batched_num_worlds(9999), 0);
         assert_eq!(murk_batched_obs_output_len(9999), 0);
         assert_eq!(murk_batched_obs_mask_len(9999), 0);
+    }
+
+    #[test]
+    fn get_variants_return_invalid_handle_for_bad_handle() {
+        let mut val: usize = 42;
+        assert_eq!(
+            murk_batched_num_worlds_get(9999, &mut val),
+            MurkStatus::InvalidHandle as i32
+        );
+        assert_eq!(val, 42, "output must not be written on error");
+        assert_eq!(
+            murk_batched_obs_output_len_get(9999, &mut val),
+            MurkStatus::InvalidHandle as i32
+        );
+        assert_eq!(
+            murk_batched_obs_mask_len_get(9999, &mut val),
+            MurkStatus::InvalidHandle as i32
+        );
+    }
+
+    #[test]
+    fn get_variants_null_out_returns_invalid_argument() {
+        assert_eq!(
+            murk_batched_num_worlds_get(0, std::ptr::null_mut()),
+            MurkStatus::InvalidArgument as i32
+        );
+        assert_eq!(
+            murk_batched_obs_output_len_get(0, std::ptr::null_mut()),
+            MurkStatus::InvalidArgument as i32
+        );
+        assert_eq!(
+            murk_batched_obs_mask_len_get(0, std::ptr::null_mut()),
+            MurkStatus::InvalidArgument as i32
+        );
+    }
+
+    #[test]
+    fn get_variants_return_correct_values() {
+        let cfg1 = create_config_handle();
+        let cfg2 = create_config_handle();
+        let handles = [cfg1, cfg2];
+
+        let obs = [MurkObsEntry {
+            field_id: 0,
+            region_type: 0,
+            transform_type: 0,
+            normalize_min: 0.0,
+            normalize_max: 0.0,
+            dtype: 0,
+            region_params: [0; 8],
+            n_region_params: 0,
+            pool_kernel: 0,
+            pool_kernel_size: 0,
+            pool_stride: 0,
+        }];
+
+        let mut batch_h: u64 = 0;
+        assert_eq!(
+            murk_batched_create(handles.as_ptr(), 2, obs.as_ptr(), 1, &mut batch_h),
+            MurkStatus::Ok as i32
+        );
+
+        let mut n: usize = 0;
+        assert_eq!(
+            murk_batched_num_worlds_get(batch_h, &mut n),
+            MurkStatus::Ok as i32
+        );
+        assert_eq!(n, 2);
+
+        let mut out_len: usize = 0;
+        assert_eq!(
+            murk_batched_obs_output_len_get(batch_h, &mut out_len),
+            MurkStatus::Ok as i32
+        );
+        assert_eq!(out_len, 10); // Line1D(10)
+
+        let mut mask_len: usize = 0;
+        assert_eq!(
+            murk_batched_obs_mask_len_get(batch_h, &mut mask_len),
+            MurkStatus::Ok as i32
+        );
+        assert_eq!(mask_len, 10);
+
+        murk_batched_destroy(batch_h);
     }
 
     #[test]

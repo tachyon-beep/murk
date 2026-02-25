@@ -45,8 +45,19 @@ const _: () = assert!(std::mem::align_of::<MurkWorldPreflight>() == 8);
 /// Clone the Arc for a world handle, briefly locking the global table.
 ///
 /// Returns `None` if the handle is invalid or the mutex is poisoned.
+/// On poisoning, stores a diagnostic in [`LAST_PANIC`] so the caller
+/// can retrieve context via `murk_last_panic_message`.
 fn get_world(handle: u64) -> Option<WorldArc> {
-    WORLDS.lock().ok()?.get(handle).cloned()
+    match WORLDS.lock() {
+        Ok(table) => table.get(handle).cloned(),
+        Err(_) => {
+            crate::LAST_PANIC.with(|cell| {
+                *cell.borrow_mut() =
+                    "WORLDS mutex poisoned: a prior panic corrupted shared state".into();
+            });
+            None
+        }
+    }
 }
 
 pub(crate) fn worlds() -> &'static Mutex<HandleTable<WorldArc>> {
@@ -265,9 +276,21 @@ pub extern "C" fn murk_snapshot_read_field(
 #[allow(unsafe_code)]
 pub extern "C" fn murk_current_tick(world_handle: u64) -> u64 {
     ffi_guard_or!(0, {
-        get_world(world_handle)
-            .and_then(|arc| arc.lock().ok().map(|w| w.current_tick().0))
-            .unwrap_or(0)
+        let arc = match get_world(world_handle) {
+            Some(a) => a,
+            None => return 0,
+        };
+        let v = match arc.lock() {
+            Ok(w) => w.current_tick().0,
+            Err(_) => {
+                crate::LAST_PANIC.with(|cell| {
+                    *cell.borrow_mut() =
+                        "world mutex poisoned: a prior panic corrupted shared state".into();
+                });
+                0
+            }
+        };
+        v
     })
 }
 
@@ -300,9 +323,21 @@ pub extern "C" fn murk_current_tick_get(world_handle: u64, out: *mut u64) -> i32
 #[allow(unsafe_code)]
 pub extern "C" fn murk_is_tick_disabled(world_handle: u64) -> u8 {
     ffi_guard_or!(0, {
-        get_world(world_handle)
-            .and_then(|arc| arc.lock().ok().map(|w| u8::from(w.is_tick_disabled())))
-            .unwrap_or(0)
+        let arc = match get_world(world_handle) {
+            Some(a) => a,
+            None => return 0,
+        };
+        let v = match arc.lock() {
+            Ok(w) => u8::from(w.is_tick_disabled()),
+            Err(_) => {
+                crate::LAST_PANIC.with(|cell| {
+                    *cell.borrow_mut() =
+                        "world mutex poisoned: a prior panic corrupted shared state".into();
+                });
+                0
+            }
+        };
+        v
     })
 }
 
@@ -335,9 +370,21 @@ pub extern "C" fn murk_is_tick_disabled_get(world_handle: u64, out: *mut u8) -> 
 #[allow(unsafe_code)]
 pub extern "C" fn murk_consecutive_rollbacks(world_handle: u64) -> u32 {
     ffi_guard_or!(0, {
-        get_world(world_handle)
-            .and_then(|arc| arc.lock().ok().map(|w| w.consecutive_rollback_count()))
-            .unwrap_or(0)
+        let arc = match get_world(world_handle) {
+            Some(a) => a,
+            None => return 0,
+        };
+        let v = match arc.lock() {
+            Ok(w) => w.consecutive_rollback_count(),
+            Err(_) => {
+                crate::LAST_PANIC.with(|cell| {
+                    *cell.borrow_mut() =
+                        "world mutex poisoned: a prior panic corrupted shared state".into();
+                });
+                0
+            }
+        };
+        v
     })
 }
 
@@ -398,9 +445,21 @@ pub extern "C" fn murk_world_preflight_get(world_handle: u64, out: *mut MurkWorl
 #[allow(unsafe_code)]
 pub extern "C" fn murk_seed(world_handle: u64) -> u64 {
     ffi_guard_or!(0, {
-        get_world(world_handle)
-            .and_then(|arc| arc.lock().ok().map(|w| w.seed()))
-            .unwrap_or(0)
+        let arc = match get_world(world_handle) {
+            Some(a) => a,
+            None => return 0,
+        };
+        let v = match arc.lock() {
+            Ok(w) => w.seed(),
+            Err(_) => {
+                crate::LAST_PANIC.with(|cell| {
+                    *cell.borrow_mut() =
+                        "world mutex poisoned: a prior panic corrupted shared state".into();
+                });
+                0
+            }
+        };
+        v
     })
 }
 

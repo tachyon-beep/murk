@@ -146,9 +146,10 @@ pub mod types;
 pub mod world;
 
 pub use batched::{
-    murk_batched_create, murk_batched_destroy, murk_batched_num_worlds, murk_batched_obs_mask_len,
-    murk_batched_obs_output_len, murk_batched_observe_all, murk_batched_reset_all,
-    murk_batched_reset_world, murk_batched_step_and_observe,
+    murk_batched_create, murk_batched_destroy, murk_batched_num_worlds,
+    murk_batched_num_worlds_get, murk_batched_obs_mask_len, murk_batched_obs_mask_len_get,
+    murk_batched_obs_output_len, murk_batched_obs_output_len_get, murk_batched_observe_all,
+    murk_batched_reset_all, murk_batched_reset_world, murk_batched_step_and_observe,
 };
 pub use command::{MurkCommand, MurkCommandType, MurkReceipt};
 pub use config::{
@@ -176,11 +177,11 @@ pub use world::{
 /// ABI version: major in upper 16 bits, minor in lower 16.
 ///
 /// Bump major on breaking changes, minor on additions.
-/// Current: v3.0 (v2.1→v3.0: MurkStepMetrics layout expansion for ring retention/skew counters)
+/// Current: v3.1 (v3.0→v3.1: MurkStatus::NotApplied variant, batched _get functions)
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_abi_version() -> u32 {
-    3 << 16
+    (3 << 16) | 1
 }
 
 #[cfg(test)]
@@ -188,12 +189,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn abi_version_returns_v3_0() {
+    fn abi_version_returns_v3_1() {
         let v = murk_abi_version();
         let major = v >> 16;
         let minor = v & 0xFFFF;
         assert_eq!(major, 3);
-        assert_eq!(minor, 0);
+        assert_eq!(minor, 1);
     }
 
     #[test]

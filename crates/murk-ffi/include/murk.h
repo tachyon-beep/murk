@@ -242,6 +242,11 @@ enum MurkStatus {
    */
   MurkStatus_UnsupportedCommand = -21,
   /**
+   * Command was accepted but could not be applied (e.g. invalid coordinate
+   * or unknown field).
+   */
+  MurkStatus_NotApplied = -22,
+  /**
    * A Rust panic was caught at the FFI boundary.
    */
   MurkStatus_Panicked = -128,
@@ -640,7 +645,7 @@ int32_t murk_last_panic_message(char *buf, uintptr_t cap);
  * ABI version: major in upper 16 bits, minor in lower 16.
  *
  * Bump major on breaking changes, minor on additions.
- * Current: v3.0 (v2.1→v3.0: MurkStepMetrics layout expansion for ring retention/skew counters)
+ * Current: v3.1 (v3.0→v3.1: MurkStatus::NotApplied variant, batched _get functions)
  */
 uint32_t murk_abi_version(void);
 
@@ -703,25 +708,52 @@ int32_t murk_batched_destroy(uint64_t handle);
  * Number of worlds in the batch.
  *
  * **Ambiguity warning:** returns 0 for both "zero worlds" and "invalid handle /
- * poisoned mutex / caught panic." Callers cannot distinguish success from error.
+ * poisoned mutex / caught panic." Prefer [`murk_batched_num_worlds_get`] for
+ * unambiguous error detection.
  */
 uintptr_t murk_batched_num_worlds(uint64_t handle);
+
+/**
+ * Number of worlds with explicit error reporting.
+ *
+ * Writes the count to `*out` and returns `MURK_OK`. Returns
+ * `InvalidHandle` or `InternalError` without writing to `out`.
+ */
+int32_t murk_batched_num_worlds_get(uint64_t handle, uintptr_t *out);
 
 /**
  * Per-world observation output length (f32 elements).
  *
  * **Ambiguity warning:** returns 0 for both "no obs plan" and "invalid handle /
- * poisoned mutex / caught panic." Callers cannot distinguish success from error.
+ * poisoned mutex / caught panic." Prefer [`murk_batched_obs_output_len_get`] for
+ * unambiguous error detection.
  */
 uintptr_t murk_batched_obs_output_len(uint64_t handle);
+
+/**
+ * Per-world observation output length with explicit error reporting.
+ *
+ * Writes the length to `*out` and returns `MURK_OK`. Returns
+ * `InvalidHandle` or `InternalError` without writing to `out`.
+ */
+int32_t murk_batched_obs_output_len_get(uint64_t handle, uintptr_t *out);
 
 /**
  * Per-world observation mask length (bytes).
  *
  * **Ambiguity warning:** returns 0 for both "no obs plan" and "invalid handle /
- * poisoned mutex / caught panic." Callers cannot distinguish success from error.
+ * poisoned mutex / caught panic." Prefer [`murk_batched_obs_mask_len_get`] for
+ * unambiguous error detection.
  */
 uintptr_t murk_batched_obs_mask_len(uint64_t handle);
+
+/**
+ * Per-world observation mask length with explicit error reporting.
+ *
+ * Writes the length to `*out` and returns `MURK_OK`. Returns
+ * `InvalidHandle` or `InternalError` without writing to `out`.
+ */
+int32_t murk_batched_obs_mask_len_get(uint64_t handle, uintptr_t *out);
 
 /**
  * Create a new config builder. Returns handle via `out`.
