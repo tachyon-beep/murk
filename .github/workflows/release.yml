@@ -115,7 +115,7 @@ jobs:
           manylinux: auto
           working-directory: crates/murk-python
       - name: Upload wheel artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: wheel-${{ matrix.target }}
           path: crates/murk-python/dist/*.whl
@@ -137,7 +137,7 @@ jobs:
           args: --out dist
           working-directory: crates/murk-python
       - name: Upload sdist artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: sdist
           path: crates/murk-python/dist/*.tar.gz
