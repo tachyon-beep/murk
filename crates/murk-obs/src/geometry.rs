@@ -94,8 +94,8 @@ impl GridGeometry {
     /// For a 2D grid with dims `[R, C]`, coord `[a, b]`:
     /// `rank = a * strides[0] + b * strides[1]`.
     pub fn canonical_rank(&self, coord: &[i32]) -> usize {
-        debug_assert_eq!(coord.len(), self.ndim);
-        debug_assert!(
+        assert_eq!(coord.len(), self.ndim);
+        assert!(
             coord.iter().all(|c| *c >= 0),
             "canonical_rank called with negative coord: {coord:?}"
         );

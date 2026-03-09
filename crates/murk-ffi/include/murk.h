@@ -707,9 +707,10 @@ int32_t murk_batched_destroy(uint64_t handle);
 /**
  * Number of worlds in the batch.
  *
- * **Ambiguity warning:** returns 0 for both "zero worlds" and "invalid handle /
- * poisoned mutex / caught panic." Prefer [`murk_batched_num_worlds_get`] for
- * unambiguous error detection.
+ * # Deprecation
+ *
+ * Returns 0 for both "zero worlds" and "invalid handle / poisoned mutex /
+ * caught panic" — use [`murk_batched_num_worlds_get`] instead.
  */
 uintptr_t murk_batched_num_worlds(uint64_t handle);
 
@@ -724,9 +725,10 @@ int32_t murk_batched_num_worlds_get(uint64_t handle, uintptr_t *out);
 /**
  * Per-world observation output length (f32 elements).
  *
- * **Ambiguity warning:** returns 0 for both "no obs plan" and "invalid handle /
- * poisoned mutex / caught panic." Prefer [`murk_batched_obs_output_len_get`] for
- * unambiguous error detection.
+ * # Deprecation
+ *
+ * Returns 0 for both "no obs plan" and "invalid handle / poisoned mutex /
+ * caught panic" — use [`murk_batched_obs_output_len_get`] instead.
  */
 uintptr_t murk_batched_obs_output_len(uint64_t handle);
 
@@ -741,9 +743,10 @@ int32_t murk_batched_obs_output_len_get(uint64_t handle, uintptr_t *out);
 /**
  * Per-world observation mask length (bytes).
  *
- * **Ambiguity warning:** returns 0 for both "no obs plan" and "invalid handle /
- * poisoned mutex / caught panic." Prefer [`murk_batched_obs_mask_len_get`] for
- * unambiguous error detection.
+ * # Deprecation
+ *
+ * Returns 0 for both "no obs plan" and "invalid handle / poisoned mutex /
+ * caught panic" — use [`murk_batched_obs_mask_len_get`] instead.
  */
 uintptr_t murk_batched_obs_mask_len(uint64_t handle);
 
@@ -970,8 +973,8 @@ int32_t murk_snapshot_read_field(uint64_t world_handle,
 /**
  * Current tick ID for a world (0 after construction or reset).
  *
- * **Ambiguity warning:** returns 0 for both "tick 0" and "invalid handle."
- * Prefer [`murk_current_tick_get`] for unambiguous error detection.
+ * Returns 0 for both "tick 0" and "invalid handle" — use
+ * [`murk_current_tick_get`] instead.
  */
 uint64_t murk_current_tick(uint64_t world_handle);
 
@@ -986,8 +989,8 @@ int32_t murk_current_tick_get(uint64_t world_handle, uint64_t *out);
 /**
  * Whether ticking is disabled due to consecutive rollbacks.
  *
- * **Ambiguity warning:** returns 0 for both "not disabled" and "invalid handle."
- * Prefer [`murk_is_tick_disabled_get`] for unambiguous error detection.
+ * Returns 0 for both "not disabled" and "invalid handle" — use
+ * [`murk_is_tick_disabled_get`] instead.
  */
 uint8_t murk_is_tick_disabled(uint64_t world_handle);
 
@@ -1002,8 +1005,8 @@ int32_t murk_is_tick_disabled_get(uint64_t world_handle, uint8_t *out);
 /**
  * Number of consecutive rollbacks since the last successful tick.
  *
- * **Ambiguity warning:** returns 0 for both "zero rollbacks" and "invalid handle."
- * Prefer [`murk_consecutive_rollbacks_get`] for unambiguous error detection.
+ * Returns 0 for both "zero rollbacks" and "invalid handle" — use
+ * [`murk_consecutive_rollbacks_get`] instead.
  */
 uint32_t murk_consecutive_rollbacks(uint64_t world_handle);
 
@@ -1026,8 +1029,8 @@ int32_t murk_world_preflight_get(uint64_t world_handle, struct MurkWorldPrefligh
 /**
  * The world's current seed.
  *
- * **Ambiguity warning:** returns 0 for both "seed 0" and "invalid handle."
- * Prefer [`murk_seed_get`] for unambiguous error detection.
+ * Returns 0 for both "seed 0" and "invalid handle" — use
+ * [`murk_seed_get`] instead.
  */
 uint64_t murk_seed(uint64_t world_handle);
 

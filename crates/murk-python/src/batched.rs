@@ -6,9 +6,9 @@ use numpy::{PyArray1, PyArrayMethods, PyUntypedArrayMethods};
 use pyo3::prelude::*;
 
 use murk_ffi::batched::{
-    murk_batched_create, murk_batched_destroy, murk_batched_num_worlds, murk_batched_obs_mask_len,
-    murk_batched_obs_output_len, murk_batched_observe_all, murk_batched_reset_all,
-    murk_batched_reset_world, murk_batched_step_and_observe,
+    murk_batched_create, murk_batched_destroy, murk_batched_num_worlds_get,
+    murk_batched_obs_mask_len_get, murk_batched_obs_output_len_get, murk_batched_observe_all,
+    murk_batched_reset_all, murk_batched_reset_world, murk_batched_step_and_observe,
 };
 use murk_ffi::{MurkCommand, MurkObsEntry};
 
@@ -108,10 +108,19 @@ impl BatchedWorld {
             return Err(e);
         }
 
-        // Cache dimensions (brief lock, no GIL contention).
-        let cached_num_worlds = murk_batched_num_worlds(batch_handle);
-        let cached_obs_output_len = murk_batched_obs_output_len(batch_handle);
-        let cached_obs_mask_len = murk_batched_obs_mask_len(batch_handle);
+        // Cache dimensions via _get variants (unambiguous error reporting).
+        let mut cached_num_worlds: usize = 0;
+        let mut cached_obs_output_len: usize = 0;
+        let mut cached_obs_mask_len: usize = 0;
+        check_status(murk_batched_num_worlds_get(batch_handle, &mut cached_num_worlds))?;
+        check_status(murk_batched_obs_output_len_get(
+            batch_handle,
+            &mut cached_obs_output_len,
+        ))?;
+        check_status(murk_batched_obs_mask_len_get(
+            batch_handle,
+            &mut cached_obs_mask_len,
+        ))?;
 
         Ok(BatchedWorld {
             handle: Some(batch_handle),

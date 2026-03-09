@@ -249,14 +249,15 @@ impl RealtimeAsyncWorld {
 
         // Spawn egress worker threads. On partial failure, shut down
         // the tick thread before propagating the error.
-        let worker_threads = match Self::spawn_egress_workers(
+        let (obs_tx, worker_threads) = match Self::spawn_egress_workers(
             worker_count,
+            obs_tx,
             &obs_rx,
             &ring,
             &epoch_counter,
             &worker_epochs,
         ) {
-            Ok(threads) => threads,
+            Ok(result) => result,
             Err(e) => {
                 shutdown_flag.store(true, Ordering::Release);
                 tick_thread.thread().unpark();
@@ -446,17 +447,19 @@ impl RealtimeAsyncWorld {
 
     /// Spawn egress worker threads (shared between `new` and `reset`).
     ///
-    /// On partial failure (some workers spawned, one fails), the
-    /// already-spawned workers are shut down by dropping the channel
-    /// receiver (they exit when `obs_rx.recv()` returns `Err`), then
-    /// joined before propagating the error.
+    /// Takes ownership of `obs_tx` so that on partial failure (some
+    /// workers spawned, one fails), the sender can be dropped to
+    /// disconnect the channel — workers' `recv()` then returns `Err`
+    /// and they exit cleanly. Returns the sender alongside the handles
+    /// on success.
     fn spawn_egress_workers(
         worker_count: usize,
+        obs_tx: crossbeam_channel::Sender<ObsTask>,
         obs_rx: &crossbeam_channel::Receiver<ObsTask>,
         ring: &Arc<SnapshotRing>,
         epoch_counter: &Arc<EpochCounter>,
         worker_epochs: &Arc<[WorkerEpoch]>,
-    ) -> Result<Vec<JoinHandle<()>>, ConfigError> {
+    ) -> Result<(crossbeam_channel::Sender<ObsTask>, Vec<JoinHandle<()>>), ConfigError> {
         let mut worker_threads = Vec::with_capacity(worker_count);
         for i in 0..worker_count {
             let obs_rx = obs_rx.clone();
@@ -470,11 +473,9 @@ impl RealtimeAsyncWorld {
                 }) {
                 Ok(handle) => worker_threads.push(handle),
                 Err(e) => {
-                    // Partial failure: drop our clone of obs_rx so
-                    // already-spawned workers see a disconnected channel
-                    // and exit. Then join them before returning the error.
-                    // (The original obs_rx is dropped when this scope ends,
-                    // causing the workers to unblock from recv.)
+                    // Drop the sender so workers' recv() returns Err
+                    // and they exit cleanly, then join them.
+                    drop(obs_tx);
                     for handle in worker_threads {
                         let _ = handle.join();
                     }
@@ -484,7 +485,7 @@ impl RealtimeAsyncWorld {
                 }
             }
         }
-        Ok(worker_threads)
+        Ok((obs_tx, worker_threads))
     }
 
     /// Get the latest snapshot directly from the ring.
@@ -671,9 +672,12 @@ impl RealtimeAsyncWorld {
         let (cmd_tx, cmd_rx) = crossbeam_channel::bounded(64);
         let (obs_tx, obs_rx) = crossbeam_channel::bounded(worker_count * 4);
         self.cmd_tx = Some(cmd_tx);
-        self.obs_tx = Some(obs_tx);
 
-        // Respawn tick thread.
+        // Respawn tick thread. The engine is sent via a rendezvous
+        // channel *after* spawn succeeds so that a spawn failure doesn't
+        // consume it (the closure would be dropped, losing the engine
+        // permanently and bricking subsequent reset() calls).
+        let (engine_tx, engine_rx) = crossbeam_channel::bounded(0);
         let tick_ring = Arc::clone(&self.ring);
         let tick_epoch = Arc::clone(&self.epoch_counter);
         let tick_workers = Arc::clone(&self.worker_epochs);
@@ -683,9 +687,12 @@ impl RealtimeAsyncWorld {
         let max_epoch_hold_ms = self.config.max_epoch_hold_ms;
         let cancel_grace_ms = self.config.cancel_grace_ms;
         let backoff_config = self.backoff_config.clone();
-        let tick_thread = thread::Builder::new()
+        let tick_thread = match thread::Builder::new()
             .name("murk-tick".into())
             .spawn(move || {
+                let engine = engine_rx
+                    .recv()
+                    .expect("engine channel closed before send");
                 let state = TickThreadState::new(
                     engine,
                     tick_ring,
@@ -700,28 +707,44 @@ impl RealtimeAsyncWorld {
                     &backoff_config,
                 );
                 state.run()
-            })
-            .map_err(|e| ConfigError::ThreadSpawnFailed {
-                reason: format!("tick thread: {e}"),
-            })?;
+            }) {
+            Ok(handle) => handle,
+            Err(e) => {
+                // Spawn failed — engine was never sent, restore for retry.
+                *self.recovered_engine.lock().unwrap() = Some(engine);
+                return Err(ConfigError::ThreadSpawnFailed {
+                    reason: format!("tick thread: {e}"),
+                });
+            }
+        };
 
-        // Respawn egress workers. On failure, shut down the tick thread.
-        let worker_threads = match Self::spawn_egress_workers(
+        // Spawn succeeded — send engine to tick thread.
+        engine_tx
+            .send(engine)
+            .expect("tick thread died before receiving engine");
+
+        // Respawn egress workers. On failure, shut down the tick thread
+        // and recover the engine so the world remains usable for retry.
+        let (obs_tx, worker_threads) = match Self::spawn_egress_workers(
             worker_count,
+            obs_tx,
             &obs_rx,
             &self.ring,
             &self.epoch_counter,
             &self.worker_epochs,
         ) {
-            Ok(threads) => threads,
+            Ok(result) => result,
             Err(e) => {
                 self.shutdown_flag.store(true, Ordering::Release);
                 tick_thread.thread().unpark();
-                let _ = tick_thread.join();
+                if let Ok(engine) = tick_thread.join() {
+                    *self.recovered_engine.lock().unwrap() = Some(engine);
+                }
                 return Err(e);
             }
         };
 
+        self.obs_tx = Some(obs_tx);
         self.tick_thread = Some(tick_thread);
         self.worker_threads = worker_threads;
 

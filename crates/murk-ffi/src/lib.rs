@@ -145,6 +145,7 @@ pub mod status;
 pub mod types;
 pub mod world;
 
+#[allow(deprecated)]
 pub use batched::{
     murk_batched_create, murk_batched_destroy, murk_batched_num_worlds,
     murk_batched_num_worlds_get, murk_batched_obs_mask_len, murk_batched_obs_mask_len_get,
@@ -168,10 +169,13 @@ pub use types::{
     MurkBoundaryBehavior, MurkEdgeBehavior, MurkFieldMutability, MurkFieldType, MurkSpaceType,
     MurkWriteMode,
 };
+#[allow(deprecated)]
 pub use world::{
-    murk_consecutive_rollbacks, murk_current_tick, murk_is_tick_disabled, murk_lockstep_create,
+    murk_consecutive_rollbacks, murk_consecutive_rollbacks_get, murk_current_tick,
+    murk_current_tick_get, murk_is_tick_disabled, murk_is_tick_disabled_get, murk_lockstep_create,
     murk_lockstep_destroy, murk_lockstep_reset, murk_lockstep_step, murk_lockstep_step_vec,
-    murk_seed, murk_snapshot_read_field, murk_world_preflight_get, MurkWorldPreflight,
+    murk_seed, murk_seed_get, murk_snapshot_read_field, murk_world_preflight_get,
+    MurkWorldPreflight,
 };
 
 /// ABI version: major in upper 16 bits, minor in lower 16.

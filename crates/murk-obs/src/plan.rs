@@ -2677,4 +2677,43 @@ mod tests {
         };
         assert!(ObsPlan::compile(&spec, &space).is_err());
     }
+
+    #[test]
+    fn execute_batch_partial_write_on_generation_mismatch() {
+        let space = square4_space();
+        let spec = ObsSpec {
+            entries: vec![ObsEntry {
+                field_id: FieldId(0),
+                region: ObsRegion::Fixed(RegionSpec::All),
+                pool: None,
+                transform: ObsTransform::Identity,
+                dtype: ObsDtype::F32,
+            }],
+        };
+        // Compile bound to generation 1.
+        let result = ObsPlan::compile_bound(&spec, &space, WorldGenerationId(1)).unwrap();
+
+        // First snapshot: generation 1 (matches), data = 7.0
+        let snap_ok = snapshot_with_field(FieldId(0), vec![7.0; 9]);
+        // Second snapshot: generation 99 (mismatch)
+        let mut snap_bad = MockSnapshot::new(TickId(5), WorldGenerationId(99), ParameterVersion(0));
+        snap_bad.set_field(FieldId(0), vec![0.0; 9]);
+
+        let snaps: Vec<&dyn SnapshotAccess> = vec![&snap_ok, &snap_bad];
+        let mut output = vec![0.0f32; result.output_len * 2];
+        let mut mask = vec![0u8; result.mask_len * 2];
+
+        // Should fail on second snapshot.
+        let err = result
+            .plan
+            .execute_batch(&snaps, None, &mut output, &mut mask)
+            .unwrap_err();
+        assert!(matches!(err, ObsError::PlanInvalidated { .. }));
+
+        // First snapshot's data was already written (partial write).
+        assert!(
+            output[..9].iter().all(|&v| v == 7.0),
+            "first snapshot should be written despite batch error"
+        );
+    }
 }

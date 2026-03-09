@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `SparseSlab` reuse hit/miss counters use `saturating_add` to prevent overflow on long-running simulations
+
 ## [0.1.7](https://github.com/tachyon-beep/murk/compare/murk-arena-v0.1.3...murk-arena-v0.1.7) - 2026-02-21
 
 ### Added

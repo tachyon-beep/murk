@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `murk_batched_num_worlds_get`, `murk_batched_obs_output_len_get`, `murk_batched_obs_mask_len_get` — `_get` variants with unambiguous error reporting
 - ABI version bumped from v3.0 to v3.1
 
+### Changed
+
+- `get_world()`/`get_batched()` return `Result<Option<Arc>, ()>` distinguishing poisoned mutex (`InternalError`) from invalid handle
+- Legacy query functions (`murk_current_tick`, `murk_is_tick_disabled`, `murk_consecutive_rollbacks`, `murk_seed`) marked `#[deprecated]`
+- Batched query functions (`murk_batched_num_worlds`, `murk_batched_obs_output_len`, `murk_batched_obs_mask_len`) marked `#[deprecated]`
+
 ### Fixed
 
 - `IngressError::NotApplied` mapped to `NotApplied` (-22) instead of `UnsupportedCommand` (-21)

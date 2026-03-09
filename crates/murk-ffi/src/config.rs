@@ -637,4 +637,42 @@ mod tests {
         );
         murk_config_destroy(h);
     }
+
+    #[test]
+    fn f64_to_i32_valid_values() {
+        assert_eq!(f64_to_i32(0.0), Some(0));
+        assert_eq!(f64_to_i32(1.0), Some(1));
+        assert_eq!(f64_to_i32(-1.0), Some(-1));
+        assert_eq!(f64_to_i32(i32::MAX as f64), Some(i32::MAX));
+        assert_eq!(f64_to_i32(i32::MIN as f64), Some(i32::MIN));
+    }
+
+    #[test]
+    fn f64_to_i32_rejects_nan() {
+        assert_eq!(f64_to_i32(f64::NAN), None);
+    }
+
+    #[test]
+    fn f64_to_i32_rejects_infinity() {
+        assert_eq!(f64_to_i32(f64::INFINITY), None);
+        assert_eq!(f64_to_i32(f64::NEG_INFINITY), None);
+    }
+
+    #[test]
+    fn f64_to_i32_rejects_out_of_range() {
+        assert_eq!(f64_to_i32(i32::MAX as f64 + 1.0), None);
+        assert_eq!(f64_to_i32(i32::MIN as f64 - 1.0), None);
+    }
+
+    #[test]
+    fn f64_to_i32_rejects_fractional() {
+        assert_eq!(f64_to_i32(1.5), None);
+        assert_eq!(f64_to_i32(-0.1), None);
+        assert_eq!(f64_to_i32(0.999), None);
+    }
+
+    #[test]
+    fn f64_to_i32_negative_zero_accepted() {
+        assert_eq!(f64_to_i32(-0.0), Some(0));
+    }
 }

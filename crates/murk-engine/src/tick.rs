@@ -122,7 +122,7 @@ impl TickEngine {
     pub fn new(config: WorldConfig) -> Result<Self, ConfigError> {
         // Validate and build read resolution plan.
         config.validate()?;
-        let defined_fields = config.defined_field_set();
+        let defined_fields = config.defined_field_set()?;
         let plan = murk_propagator::validate_pipeline(
             &config.propagators,
             &defined_fields,
@@ -131,21 +131,24 @@ impl TickEngine {
         )?;
 
         // Build arena field defs.
-        // Safety: validate() already checked fields.len() fits in u32.
         let arena_field_defs: Vec<(FieldId, murk_core::FieldDef)> = config
             .fields
             .iter()
             .enumerate()
-            .map(|(i, def)| {
-                (
-                    FieldId(u32::try_from(i).expect("field count validated")),
-                    def.clone(),
-                )
+            .map(|(i, def)| -> Result<_, ConfigError> {
+                let id = u32::try_from(i).map_err(|_| ConfigError::FieldCountOverflow {
+                    value: config.fields.len(),
+                })?;
+                Ok((FieldId(id), def.clone()))
             })
-            .collect();
+            .collect::<Result<_, _>>()?;
 
         // Safety: validate() already checked cell_count fits in u32.
-        let cell_count = u32::try_from(config.space.cell_count()).expect("cell count validated");
+        let cell_count = u32::try_from(config.space.cell_count()).map_err(|_| {
+            ConfigError::CellCountOverflow {
+                value: config.space.cell_count(),
+            }
+        })?;
         let arena_config = ArenaConfig::new(cell_count);
 
         // Build static arena for any Static fields.
@@ -337,15 +340,29 @@ impl TickEngine {
 
             // 4c. Seed WriteMode::Incremental buffers from previous generation.
             for field in self.plan.incremental_fields_for(i) {
-                if let Some(prev_data) = self.base_cache.read(field) {
-                    // Copy through a temp buffer: base_cache borrows &self,
-                    // guard.writer.write() borrows &mut guard.
-                    let prev: Vec<f32> = prev_data.to_vec();
-                    if let Some(write_buf) = guard.writer.write(field) {
-                        let copy_len = prev.len().min(write_buf.len());
-                        write_buf[..copy_len].copy_from_slice(&prev[..copy_len]);
+                let prev_data = match self.base_cache.read(field) {
+                    Some(data) => data,
+                    // First tick: no previous generation to seed from. Expected.
+                    None => continue,
+                };
+                // Copy through a temp buffer: base_cache borrows &self,
+                // guard.writer.write() borrows &mut guard.
+                let prev: Vec<f32> = prev_data.to_vec();
+                let write_buf = match guard.writer.write(field) {
+                    Some(buf) => buf,
+                    None => {
+                        debug_assert!(
+                            false,
+                            "incremental field {:?} declared in plan but writer returned None \
+                             for propagator '{}'",
+                            field,
+                            prop.name(),
+                        );
+                        continue;
                     }
-                }
+                };
+                let copy_len = prev.len().min(write_buf.len());
+                write_buf[..copy_len].copy_from_slice(&prev[..copy_len]);
             }
 
             // 4d. Reset propagator scratch.
@@ -417,8 +434,8 @@ impl TickEngine {
             propagator_us,
             snapshot_publish_us,
             memory_bytes: self.arena.memory_bytes(),
-            sparse_retired_ranges: self.arena.sparse_retired_range_count() as u32,
-            sparse_pending_retired: self.arena.sparse_pending_retired_count() as u32,
+            sparse_retired_ranges: u32::try_from(self.arena.sparse_retired_range_count()).unwrap_or(u32::MAX),
+            sparse_pending_retired: u32::try_from(self.arena.sparse_pending_retired_count()).unwrap_or(u32::MAX),
             sparse_reuse_hits: self.arena.sparse_reuse_hits(),
             sparse_reuse_misses: self.arena.sparse_reuse_misses(),
             queue_full_rejections: self.counters.queue_full_rejections,
@@ -453,7 +470,7 @@ impl TickEngine {
         self.arena.cancel_tick();
         self.arena.reset_sparse_reuse_counters();
         self.counters.rollback_events = self.counters.rollback_events.saturating_add(1);
-        self.consecutive_rollback_count += 1;
+        self.consecutive_rollback_count = self.consecutive_rollback_count.saturating_add(1);
         if self.consecutive_rollback_count >= self.max_consecutive_rollbacks {
             if !self.tick_disabled {
                 self.counters.tick_disabled_transitions =

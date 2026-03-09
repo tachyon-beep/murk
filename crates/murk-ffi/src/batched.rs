@@ -23,18 +23,19 @@ static BATCHED: Mutex<HandleTable<BatchedArc>> = Mutex::new(HandleTable::new());
 
 /// Clone the Arc for a batched handle, briefly locking the global table.
 ///
-/// Returns `None` if the handle is invalid or the mutex is poisoned.
+/// Returns `Ok(Some(arc))` if the handle is valid, `Ok(None)` if the
+/// handle is invalid, or `Err(())` if the global mutex is poisoned.
 /// On poisoning, stores a diagnostic in [`LAST_PANIC`] so the caller
 /// can retrieve context via `murk_last_panic_message`.
-fn get_batched(handle: u64) -> Option<BatchedArc> {
+fn get_batched(handle: u64) -> Result<Option<BatchedArc>, ()> {
     match BATCHED.lock() {
-        Ok(table) => table.get(handle).cloned(),
+        Ok(table) => Ok(table.get(handle).cloned()),
         Err(_) => {
             crate::LAST_PANIC.with(|cell| {
                 *cell.borrow_mut() =
                     "BATCHED mutex poisoned: a prior panic corrupted shared state".into();
             });
-            None
+            Err(())
         }
     }
 }
@@ -164,8 +165,9 @@ pub extern "C" fn murk_batched_step_and_observe(
 ) -> i32 {
     ffi_guard!({
         let engine_arc = match get_batched(handle) {
-            Some(arc) => arc,
-            None => return MurkStatus::InvalidHandle as i32,
+            Ok(Some(arc)) => arc,
+            Ok(None) => return MurkStatus::InvalidHandle as i32,
+            Err(()) => return MurkStatus::InternalError as i32,
         };
         let mut engine = ffi_lock!(engine_arc);
 
@@ -215,8 +217,9 @@ pub extern "C" fn murk_batched_observe_all(
 ) -> i32 {
     ffi_guard!({
         let engine_arc = match get_batched(handle) {
-            Some(arc) => arc,
-            None => return MurkStatus::InvalidHandle as i32,
+            Ok(Some(arc)) => arc,
+            Ok(None) => return MurkStatus::InvalidHandle as i32,
+            Err(()) => return MurkStatus::InternalError as i32,
         };
         let engine = ffi_lock!(engine_arc);
 
@@ -240,8 +243,9 @@ pub extern "C" fn murk_batched_observe_all(
 pub extern "C" fn murk_batched_reset_world(handle: u64, world_index: usize, seed: u64) -> i32 {
     ffi_guard!({
         let engine_arc = match get_batched(handle) {
-            Some(arc) => arc,
-            None => return MurkStatus::InvalidHandle as i32,
+            Ok(Some(arc)) => arc,
+            Ok(None) => return MurkStatus::InvalidHandle as i32,
+            Err(()) => return MurkStatus::InternalError as i32,
         };
         let mut engine = ffi_lock!(engine_arc);
 
@@ -258,8 +262,9 @@ pub extern "C" fn murk_batched_reset_world(handle: u64, world_index: usize, seed
 pub extern "C" fn murk_batched_reset_all(handle: u64, seeds: *const u64, n_seeds: usize) -> i32 {
     ffi_guard!({
         let engine_arc = match get_batched(handle) {
-            Some(arc) => arc,
-            None => return MurkStatus::InvalidHandle as i32,
+            Ok(Some(arc)) => arc,
+            Ok(None) => return MurkStatus::InvalidHandle as i32,
+            Err(()) => return MurkStatus::InternalError as i32,
         };
         let mut engine = ffi_lock!(engine_arc);
 
@@ -298,16 +303,18 @@ pub extern "C" fn murk_batched_destroy(handle: u64) -> i32 {
 
 /// Number of worlds in the batch.
 ///
-/// **Ambiguity warning:** returns 0 for both "zero worlds" and "invalid handle /
-/// poisoned mutex / caught panic." Prefer [`murk_batched_num_worlds_get`] for
-/// unambiguous error detection.
+/// # Deprecation
+///
+/// Returns 0 for both "zero worlds" and "invalid handle / poisoned mutex /
+/// caught panic" — use [`murk_batched_num_worlds_get`] instead.
 #[no_mangle]
 #[allow(unsafe_code)]
+#[deprecated(note = "ambiguous on error; use murk_batched_num_worlds_get")]
 pub extern "C" fn murk_batched_num_worlds(handle: u64) -> usize {
     ffi_guard_or!(0, {
         let engine_arc = match get_batched(handle) {
-            Some(arc) => arc,
-            None => return 0,
+            Ok(Some(arc)) => arc,
+            Ok(None) | Err(()) => return 0,
         };
         let v = match engine_arc.lock() {
             Ok(e) => e.num_worlds(),
@@ -336,8 +343,9 @@ pub extern "C" fn murk_batched_num_worlds_get(handle: u64, out: *mut usize) -> i
             return MurkStatus::InvalidArgument as i32;
         }
         let engine_arc = match get_batched(handle) {
-            Some(arc) => arc,
-            None => return MurkStatus::InvalidHandle as i32,
+            Ok(Some(arc)) => arc,
+            Ok(None) => return MurkStatus::InvalidHandle as i32,
+            Err(()) => return MurkStatus::InternalError as i32,
         };
         let engine = ffi_lock!(engine_arc);
         unsafe { *out = engine.num_worlds() };
@@ -347,16 +355,18 @@ pub extern "C" fn murk_batched_num_worlds_get(handle: u64, out: *mut usize) -> i
 
 /// Per-world observation output length (f32 elements).
 ///
-/// **Ambiguity warning:** returns 0 for both "no obs plan" and "invalid handle /
-/// poisoned mutex / caught panic." Prefer [`murk_batched_obs_output_len_get`] for
-/// unambiguous error detection.
+/// # Deprecation
+///
+/// Returns 0 for both "no obs plan" and "invalid handle / poisoned mutex /
+/// caught panic" — use [`murk_batched_obs_output_len_get`] instead.
 #[no_mangle]
 #[allow(unsafe_code)]
+#[deprecated(note = "ambiguous on error; use murk_batched_obs_output_len_get")]
 pub extern "C" fn murk_batched_obs_output_len(handle: u64) -> usize {
     ffi_guard_or!(0, {
         let engine_arc = match get_batched(handle) {
-            Some(arc) => arc,
-            None => return 0,
+            Ok(Some(arc)) => arc,
+            Ok(None) | Err(()) => return 0,
         };
         let v = match engine_arc.lock() {
             Ok(e) => e.obs_output_len(),
@@ -385,8 +395,9 @@ pub extern "C" fn murk_batched_obs_output_len_get(handle: u64, out: *mut usize) 
             return MurkStatus::InvalidArgument as i32;
         }
         let engine_arc = match get_batched(handle) {
-            Some(arc) => arc,
-            None => return MurkStatus::InvalidHandle as i32,
+            Ok(Some(arc)) => arc,
+            Ok(None) => return MurkStatus::InvalidHandle as i32,
+            Err(()) => return MurkStatus::InternalError as i32,
         };
         let engine = ffi_lock!(engine_arc);
         unsafe { *out = engine.obs_output_len() };
@@ -396,16 +407,18 @@ pub extern "C" fn murk_batched_obs_output_len_get(handle: u64, out: *mut usize) 
 
 /// Per-world observation mask length (bytes).
 ///
-/// **Ambiguity warning:** returns 0 for both "no obs plan" and "invalid handle /
-/// poisoned mutex / caught panic." Prefer [`murk_batched_obs_mask_len_get`] for
-/// unambiguous error detection.
+/// # Deprecation
+///
+/// Returns 0 for both "no obs plan" and "invalid handle / poisoned mutex /
+/// caught panic" — use [`murk_batched_obs_mask_len_get`] instead.
 #[no_mangle]
 #[allow(unsafe_code)]
+#[deprecated(note = "ambiguous on error; use murk_batched_obs_mask_len_get")]
 pub extern "C" fn murk_batched_obs_mask_len(handle: u64) -> usize {
     ffi_guard_or!(0, {
         let engine_arc = match get_batched(handle) {
-            Some(arc) => arc,
-            None => return 0,
+            Ok(Some(arc)) => arc,
+            Ok(None) | Err(()) => return 0,
         };
         let v = match engine_arc.lock() {
             Ok(e) => e.obs_mask_len(),
@@ -434,8 +447,9 @@ pub extern "C" fn murk_batched_obs_mask_len_get(handle: u64, out: *mut usize) ->
             return MurkStatus::InvalidArgument as i32;
         }
         let engine_arc = match get_batched(handle) {
-            Some(arc) => arc,
-            None => return MurkStatus::InvalidHandle as i32,
+            Ok(Some(arc)) => arc,
+            Ok(None) => return MurkStatus::InvalidHandle as i32,
+            Err(()) => return MurkStatus::InternalError as i32,
         };
         let engine = ffi_lock!(engine_arc);
         unsafe { *out = engine.obs_mask_len() };
@@ -494,6 +508,7 @@ fn batch_error_to_status(e: &murk_engine::batched::BatchError) -> i32 {
 }
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use super::*;
     use crate::config::*;

@@ -15,13 +15,20 @@ use murk_core::error::ObsError;
 ///
 /// Returns `(output, output_mask, output_shape)` where output_shape
 /// is `[(H - kernel_size) / stride + 1, (W - kernel_size) / stride + 1]`.
+///
+/// # Panics
+///
+/// Panics if arguments are invalid. This function is only called from
+/// tests; the FFI execution path uses [`pool_2d_into`] which returns
+/// `Result` instead.
 pub fn pool_2d(
     input: &[f32],
     input_mask: &[u8],
     input_shape: &[usize],
     config: &PoolConfig,
 ) -> (Vec<f32>, Vec<u8>, Vec<usize>) {
-    let (out_h, out_w) = pool_2d_output_shape(input_shape, config);
+    let (out_h, out_w) = pool_2d_output_shape(input_shape, config)
+        .expect("pool_2d: invalid shape/config");
     let out_len = out_h * out_w;
     let mut output = vec![0.0f32; out_len];
     let mut output_mask = vec![0u8; out_len];
@@ -38,19 +45,37 @@ pub fn pool_2d(
 }
 
 /// Return the output shape for a 2D pool operation.
-pub fn pool_2d_output_shape(input_shape: &[usize], config: &PoolConfig) -> (usize, usize) {
-    assert_eq!(input_shape.len(), 2, "pool_2d requires 2D input shape");
+///
+/// Returns [`ObsError::InvalidObsSpec`] if `input_shape` is not 2D,
+/// or if `kernel_size` or `stride` is zero.
+pub fn pool_2d_output_shape(
+    input_shape: &[usize],
+    config: &PoolConfig,
+) -> Result<(usize, usize), ObsError> {
+    if input_shape.len() != 2 {
+        return Err(ObsError::InvalidObsSpec {
+            reason: format!("pool_2d requires 2D input shape, got {}", input_shape.len()),
+        });
+    }
     let h = input_shape[0];
     let w = input_shape[1];
 
     let ks = config.kernel_size;
     let stride = config.stride;
-    assert!(ks > 0, "kernel_size must be > 0");
-    assert!(stride > 0, "stride must be > 0");
+    if ks == 0 {
+        return Err(ObsError::InvalidObsSpec {
+            reason: "kernel_size must be > 0".to_string(),
+        });
+    }
+    if stride == 0 {
+        return Err(ObsError::InvalidObsSpec {
+            reason: "stride must be > 0".to_string(),
+        });
+    }
 
     let out_h = if h >= ks { (h - ks) / stride + 1 } else { 0 };
     let out_w = if w >= ks { (w - ks) / stride + 1 } else { 0 };
-    (out_h, out_w)
+    Ok((out_h, out_w))
 }
 
 /// Apply 2D pooling into caller-provided output buffers (no allocation).
@@ -83,7 +108,7 @@ pub fn pool_2d_into(
         });
     }
 
-    let (out_h, out_w) = pool_2d_output_shape(input_shape, config);
+    let (out_h, out_w) = pool_2d_output_shape(input_shape, config)?;
     let ks = config.kernel_size;
     let stride = config.stride;
     let out_len = out_h * out_w;
@@ -283,7 +308,7 @@ mod tests {
 
         let (expected_output, expected_mask, expected_shape) =
             pool_2d(&input, &mask, &[4, 4], &cfg);
-        let (out_h, out_w) = pool_2d_output_shape(&[4, 4], &cfg);
+        let (out_h, out_w) = pool_2d_output_shape(&[4, 4], &cfg).unwrap();
         let mut output = vec![123.0f32; out_h * out_w];
         let mut output_mask = vec![9u8; out_h * out_w];
         let actual_shape =
