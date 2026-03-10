@@ -10,11 +10,11 @@ engine.
 
 ---
 
-## Current State — v0.1.8 (Release Prep)
+## Current State — v0.1.9
 
-As of February 22, 2026, Murk v0.1.8 is in release prep. Everything
-below is implemented and tested on the release branch; publication is
-the next operational step.
+As of March 2026, Murk v0.1.9 is in release prep. This is a hardening
+release focused on FFI safety, engine robustness, and release-mode
+correctness.
 
 ### Engine
 
@@ -28,13 +28,14 @@ the next operational step.
 | **Realtime-async mode** | Background tick thread, epoch-based reclamation, adaptive backoff, shutdown FSM | 5 stress tests including death spiral and rejection oscillation |
 | **Deterministic replay** | Binary format v2 with per-tick snapshot hashing, divergence reports | 177 determinism tests; FNV-1a hash verification per tick |
 | **Batched engine** | `BatchedEngine` with N-world `step_and_observe()`, single GIL release, `BatchedVecEnv` SB3-compatible adapter | Unit tests + Python integration tests |
-| **0.1.8 hardening** | Panic-safe FFI boundary, topology-aware CFL validation, non-mutating realtime preflight telemetry path | Regression coverage for panic status, full-topology CFL, and preflight metrics integrity |
+| **v0.1.8 hardening** | Panic-safe FFI boundary, topology-aware CFL validation, non-mutating realtime preflight telemetry path | Regression coverage for panic status, full-topology CFL, and preflight metrics integrity |
+| **v0.1.9 hardening** | FFI handle table safety (poisoned mutex vs invalid handle), `debug_assert` → `assert` for release-mode correctness, `expect()` → `Result` propagation, saturating arithmetic, deprecation of ambiguous FFI query functions | 1,029 tests passing; release-mode `#[should_panic]` regression tests |
 
 ### Bindings and Tooling
 
 | Layer | What's There | Evidence |
 |-------|-------------|----------|
-| **C FFI** | 41+ extern functions, slot+generation handle tables, panic-safe boundary, versioned ABI (v3.0) | Safe double-destroy, null validation, panic-to-status conversion; `#![forbid(unsafe_code)]` on everything above FFI |
+| **C FFI** | 41+ extern functions, slot+generation handle tables, panic-safe boundary, versioned ABI (v3.1) | Safe double-destroy, null validation, panic-to-status conversion; `#![forbid(unsafe_code)]` on everything above FFI |
 | **Python** | PyO3/maturin bindings, Gymnasium `Env` + `VecEnv` adapters, `BatchedWorld` + `BatchedVecEnv` high-throughput training, 28+ exposed types, PEP 561 type stubs | 87 passing Python tests including batched engine and PPO training smoke test |
 | **CI/CD** | 7 CI jobs (check, MSRV, test, clippy, fmt, Miri, deny), cross-platform (Ubuntu/macOS/Windows) | Manual release workflow publishing to crates.io and PyPI |
 | **Documentation** | Architecture guide, concepts guide, error reference (19K), replay format spec, determinism catalogue | `#![deny(missing_docs)]` enforced across all 11 public crates |
@@ -45,14 +46,13 @@ The numbers tell a story about architectural fitness:
 
 - **~32K LOC across 13 crates** with clean dependency layering
   (murk-core is a leaf; murk is a facade; everything composes)
-- **700+ tests** — unit, integration, property-based (proptest), stress,
+- **1,000+ tests** — unit, integration, property-based (proptest), stress,
   and end-to-end (PPO training)
 - **Zero `unsafe` in simulation logic** — `#![forbid(unsafe_code)]` on
   10 of 13 crates. Only murk-arena (allocation) and murk-ffi (C ABI)
   are permitted unsafe blocks
-- **Release hardening closed for v0.1.8** — panic-safe FFI paths,
-  topology-aware CFL validation, and realtime preflight observability
-  corrections are implemented with regression coverage
+- **Two hardening releases** — v0.1.8 (panic-safe FFI, CFL validation)
+  and v0.1.9 (release-mode safety, engine robustness, error precision)
 - **14K steps/sec per environment** (70% of MuJoCo), 3μs framework
   overhead per tick
 - **9 critical issues, 14 important issues** identified in design
