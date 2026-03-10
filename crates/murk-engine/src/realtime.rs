@@ -690,9 +690,7 @@ impl RealtimeAsyncWorld {
         let tick_thread = match thread::Builder::new()
             .name("murk-tick".into())
             .spawn(move || {
-                let engine = engine_rx
-                    .recv()
-                    .expect("engine channel closed before send");
+                let engine = engine_rx.recv().expect("engine channel closed before send");
                 let state = TickThreadState::new(
                     engine,
                     tick_ring,

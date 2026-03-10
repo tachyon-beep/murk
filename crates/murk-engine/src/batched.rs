@@ -793,7 +793,9 @@ mod tests {
                     "error should mention missing field, got: {msg}"
                 );
             }
-            Ok(_) => panic!("expected error for obs spec referencing field missing from all worlds"),
+            Ok(_) => {
+                panic!("expected error for obs spec referencing field missing from all worlds")
+            }
         }
     }
 

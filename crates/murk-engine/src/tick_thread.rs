@@ -437,9 +437,11 @@ mod tests {
                 bounds: None,
                 boundary_behavior: BoundaryBehavior::Clamp,
             }],
-            propagators: vec![Box::new(
-                murk_test_utils::ConstPropagator::new("c", FieldId(0), 1.0),
-            )],
+            propagators: vec![Box::new(murk_test_utils::ConstPropagator::new(
+                "c",
+                FieldId(0),
+                1.0,
+            ))],
             dt: 0.1,
             seed: 1,
             ring_buffer_size: 2,

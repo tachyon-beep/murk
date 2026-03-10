@@ -112,7 +112,10 @@ impl BatchedWorld {
         let mut cached_num_worlds: usize = 0;
         let mut cached_obs_output_len: usize = 0;
         let mut cached_obs_mask_len: usize = 0;
-        check_status(murk_batched_num_worlds_get(batch_handle, &mut cached_num_worlds))?;
+        check_status(murk_batched_num_worlds_get(
+            batch_handle,
+            &mut cached_num_worlds,
+        ))?;
         check_status(murk_batched_obs_output_len_get(
             batch_handle,
             &mut cached_obs_output_len,

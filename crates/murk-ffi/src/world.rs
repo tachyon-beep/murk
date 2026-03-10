@@ -578,7 +578,11 @@ fn write_receipts(
     cap: usize,
     n_out: *mut usize,
 ) {
-    let write_count = if out.is_null() { 0 } else { receipts.len().min(cap) };
+    let write_count = if out.is_null() {
+        0
+    } else {
+        receipts.len().min(cap)
+    };
     if write_count > 0 {
         for (i, receipt) in receipts.iter().enumerate().take(write_count) {
             // SAFETY: out points to cap valid MurkReceipt structs.
@@ -1262,7 +1266,10 @@ mod tests {
             murk_world_preflight_get(world_h, &mut preflight),
             MurkStatus::InvalidHandle as i32
         );
-        assert_eq!(preflight.current_tick, 99, "out must not be written on error");
+        assert_eq!(
+            preflight.current_tick, 99,
+            "out must not be written on error"
+        );
     }
 
     #[test]
@@ -1450,7 +1457,13 @@ mod tests {
             MurkStatus::InvalidHandle as i32
         );
         // Output must not be written on error.
-        assert_eq!(preflight.current_tick, 99, "out must not be written on error");
-        assert_eq!(preflight.consecutive_rollbacks, 99, "out must not be written on error");
+        assert_eq!(
+            preflight.current_tick, 99,
+            "out must not be written on error"
+        );
+        assert_eq!(
+            preflight.consecutive_rollbacks, 99,
+            "out must not be written on error"
+        );
     }
 }
