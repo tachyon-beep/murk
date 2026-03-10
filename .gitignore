@@ -36,3 +36,4 @@ book/build/
 docs/bugs/generated/
 .mcp.json
 .filigree/
+.codex/

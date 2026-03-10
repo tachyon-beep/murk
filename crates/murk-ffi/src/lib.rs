@@ -20,6 +20,9 @@
 // FFI functions inherently dereference raw pointers; safety is documented per-block.
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
 
+#[cfg(not(target_pointer_width = "64"))]
+compile_error!("murk-ffi requires a 64-bit target (the C ABI layout assumes 64-bit alignment)");
+
 /// Lock a mutex, returning `MurkStatus::InternalError` if poisoned.
 ///
 /// For use in `extern "C"` functions that return `i32`. On a poisoned

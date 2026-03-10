@@ -69,7 +69,8 @@ pub struct MurkStepMetrics {
     pub ring_skew_retry_events: u64,
 }
 
-// Compile-time layout assertions for ABI stability.
+// Compile-time layout assertions for ABI stability on 64-bit targets.
+// These verify that struct layout matches the C header (murk.h).
 // 4×u64 + 5×u32 + 4 bytes padding + 9×u64 = 128 bytes, align 8.
 const _: () = assert!(std::mem::size_of::<MurkStepMetrics>() == 128);
 const _: () = assert!(std::mem::align_of::<MurkStepMetrics>() == 8);

@@ -365,7 +365,14 @@ fn decode_region(tag: u8, params: &[i32], idx: usize) -> Result<ObsRegion, ObsEr
             let n_coords = params[1] as usize;
             let data = &params[2..];
             if n_coords == 0 {
-                // Empty coordinate list: no data to parse regardless of ndim.
+                if !data.is_empty() {
+                    return Err(ObsError::InvalidObsSpec {
+                        reason: format!(
+                            "entry {idx}: Coords n_coords=0 but {} trailing values",
+                            data.len()
+                        ),
+                    });
+                }
                 return Ok(ObsRegion::Fixed(RegionSpec::Coords(vec![])));
             }
             if ndim == 0 || data.len() != ndim * n_coords {
@@ -835,6 +842,16 @@ mod tests {
             }],
         };
         assert!(serialize(&spec).is_err());
+    }
+
+    #[test]
+    fn coords_zero_n_coords_with_trailing_data_rejected() {
+        // ndim=3, n_coords=0, but two trailing garbage values — must be rejected.
+        let result = decode_region(REGION_COORDS, &[3, 0, 99, 99], 0);
+        assert!(
+            result.is_err(),
+            "expected InvalidObsSpec for n_coords=0 with trailing data, got: {result:?}"
+        );
     }
 
     #[test]

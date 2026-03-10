@@ -18,7 +18,8 @@ use crate::handle::HandleTable;
 use crate::status::MurkStatus;
 use crate::world::worlds;
 
-// Compile-time layout assertions for ABI stability.
+// Compile-time layout assertions for ABI stability on 64-bit targets.
+// These verify that struct layout matches the C header (murk.h).
 const _: () = assert!(std::mem::align_of::<MurkObsEntry>() == 4);
 const _: () = assert!(std::mem::align_of::<MurkObsResult>() == 8);
 const _: () = assert!(std::mem::size_of::<MurkObsResult>() == 16);

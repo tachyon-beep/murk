@@ -38,7 +38,8 @@ pub struct MurkWorldPreflight {
     pub consecutive_rollbacks: u32,
 }
 
-// Compile-time layout assertions for ABI stability.
+// Compile-time layout assertions for ABI stability on 64-bit targets.
+// These verify that struct layout matches the C header (murk.h).
 const _: () = assert!(std::mem::size_of::<MurkWorldPreflight>() == 24);
 const _: () = assert!(std::mem::align_of::<MurkWorldPreflight>() == 8);
 

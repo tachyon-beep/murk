@@ -64,7 +64,8 @@ pub struct MurkReceipt {
     pub command_index: u32,
 }
 
-// Compile-time layout assertions for ABI stability.
+// Compile-time layout assertions for ABI stability on 64-bit targets.
+// These verify that struct layout matches the C header (murk.h).
 // MurkCommand: all fixed-width types, no usize.
 const _: () = assert!(std::mem::align_of::<MurkCommand>() == 8);
 // MurkReceipt: u8 + u64 + i32 + u32 = 24 bytes (with alignment padding).

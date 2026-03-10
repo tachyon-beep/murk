@@ -78,7 +78,8 @@ pub struct MurkPropagatorDef {
     pub scratch_bytes: usize,
 }
 
-// Compile-time layout assertions for ABI stability.
+// Compile-time layout assertions for ABI stability on 64-bit targets.
+// These verify that struct layout matches the C header (murk.h).
 // MurkWriteDecl: u32 + i32 = 8 bytes.
 const _: () = assert!(std::mem::size_of::<MurkWriteDecl>() == 8);
 // MurkStepContext: all fixed-width types (u64 cell_count, not usize).
