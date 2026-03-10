@@ -932,7 +932,9 @@ mod tests {
 
         struct CountingProp;
         impl Propagator for CountingProp {
-            fn name(&self) -> &str { "counting" }
+            fn name(&self) -> &str {
+                "counting"
+            }
             fn reads(&self) -> FieldSet {
                 READS_CALLS.fetch_add(1, Ordering::Relaxed);
                 [FieldId(0)].into_iter().collect()
@@ -958,8 +960,20 @@ mod tests {
         let fields = [FieldId(0), FieldId(1)].into_iter().collect();
         let _ = validate_pipeline(&props, &fields, 0.1, &*test_space());
 
-        assert_eq!(READS_CALLS.load(Ordering::Relaxed), 1, "reads() called more than once");
-        assert_eq!(WRITES_CALLS.load(Ordering::Relaxed), 1, "writes() called more than once");
-        assert_eq!(READS_PREV_CALLS.load(Ordering::Relaxed), 1, "reads_previous() called more than once");
+        assert_eq!(
+            READS_CALLS.load(Ordering::Relaxed),
+            1,
+            "reads() called more than once"
+        );
+        assert_eq!(
+            WRITES_CALLS.load(Ordering::Relaxed),
+            1,
+            "writes() called more than once"
+        );
+        assert_eq!(
+            READS_PREV_CALLS.load(Ordering::Relaxed),
+            1,
+            "reads_previous() called more than once"
+        );
     }
 }

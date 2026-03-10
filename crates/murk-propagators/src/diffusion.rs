@@ -1026,7 +1026,10 @@ mod tests {
         let mut ctx = make_ctx(&reader, &mut writer, &mut scratch, &grid, 0.01);
 
         let result = prop.step(&mut ctx);
-        assert!(result.is_err(), "expected PropagatorError for wrong velocity arity, got Ok");
+        assert!(
+            result.is_err(),
+            "expected PropagatorError for wrong velocity arity, got Ok"
+        );
     }
 
     #[test]

@@ -156,11 +156,11 @@ impl TickEngine {
             .iter()
             .filter(|(_, d)| d.mutability == FieldMutability::Static)
             .map(|(id, d)| {
-                let len = cell_count
-                    .checked_mul(d.field_type.components())
-                    .ok_or(ConfigError::CellCountOverflow {
+                let len = cell_count.checked_mul(d.field_type.components()).ok_or(
+                    ConfigError::CellCountOverflow {
                         value: cell_count as usize,
-                    })?;
+                    },
+                )?;
                 Ok((*id, len))
             })
             .collect::<Result<_, ConfigError>>()?;
@@ -434,8 +434,10 @@ impl TickEngine {
             propagator_us,
             snapshot_publish_us,
             memory_bytes: self.arena.memory_bytes(),
-            sparse_retired_ranges: u32::try_from(self.arena.sparse_retired_range_count()).unwrap_or(u32::MAX),
-            sparse_pending_retired: u32::try_from(self.arena.sparse_pending_retired_count()).unwrap_or(u32::MAX),
+            sparse_retired_ranges: u32::try_from(self.arena.sparse_retired_range_count())
+                .unwrap_or(u32::MAX),
+            sparse_pending_retired: u32::try_from(self.arena.sparse_pending_retired_count())
+                .unwrap_or(u32::MAX),
             sparse_reuse_hits: self.arena.sparse_reuse_hits(),
             sparse_reuse_misses: self.arena.sparse_reuse_misses(),
             queue_full_rejections: self.counters.queue_full_rejections,
@@ -518,7 +520,8 @@ impl TickEngine {
     }
 
     pub(crate) fn set_ring_not_available_events(&mut self, total: u64) {
-        self.counters.ring_not_available_events = self.counters.ring_not_available_events.max(total);
+        self.counters.ring_not_available_events =
+            self.counters.ring_not_available_events.max(total);
         self.refresh_counter_metrics();
     }
 

@@ -653,7 +653,11 @@ mod tests {
         let ring = SnapshotRing::new(4);
         for i in 1..=20u64 {
             ring.push(make_test_snapshot(i));
-            assert_eq!(ring.write_pos(), i, "write_pos should be {i} after {i} pushes");
+            assert_eq!(
+                ring.write_pos(),
+                i,
+                "write_pos should be {i} after {i} pushes"
+            );
         }
     }
 
@@ -665,7 +669,9 @@ mod tests {
         }
         // Positions 0..4 should all be retrievable with correct ticks.
         for i in 0..4u64 {
-            let snap = ring.get_by_pos(i).expect(&format!("pos {i} should be retained"));
+            let snap = ring
+                .get_by_pos(i)
+                .unwrap_or_else(|| panic!("pos {i} should be retained"));
             assert_eq!(snap.tick_id(), TickId(i + 1), "wrong tick at pos {i}");
         }
     }
@@ -710,7 +716,9 @@ mod tests {
         }
         // Retained positions should return correct snapshots.
         for i in 7..10u64 {
-            let snap = ring.get_by_pos(i).expect(&format!("pos {i} should be retained"));
+            let snap = ring
+                .get_by_pos(i)
+                .unwrap_or_else(|| panic!("pos {i} should be retained"));
             assert_eq!(snap.tick_id(), TickId(i + 1));
         }
     }

@@ -27,8 +27,8 @@ pub fn pool_2d(
     input_shape: &[usize],
     config: &PoolConfig,
 ) -> (Vec<f32>, Vec<u8>, Vec<usize>) {
-    let (out_h, out_w) = pool_2d_output_shape(input_shape, config)
-        .expect("pool_2d: invalid shape/config");
+    let (out_h, out_w) =
+        pool_2d_output_shape(input_shape, config).expect("pool_2d: invalid shape/config");
     let out_len = out_h * out_w;
     let mut output = vec![0.0f32; out_len];
     let mut output_mask = vec![0u8; out_len];
@@ -92,7 +92,10 @@ pub fn pool_2d_into(
 ) -> Result<(usize, usize), ObsError> {
     if input_shape.len() != 2 {
         return Err(ObsError::InvalidObsSpec {
-            reason: format!("pool_2d_into requires 2D input shape, got {}", input_shape.len()),
+            reason: format!(
+                "pool_2d_into requires 2D input shape, got {}",
+                input_shape.len()
+            ),
         });
     }
     let h = input_shape[0];
@@ -119,7 +122,11 @@ pub fn pool_2d_into(
     }
     if output_mask.len() < out_len {
         return Err(ObsError::ExecutionFailed {
-            reason: format!("output_mask buffer too small: {} < {}", output_mask.len(), out_len),
+            reason: format!(
+                "output_mask buffer too small: {} < {}",
+                output_mask.len(),
+                out_len
+            ),
         });
     }
 
@@ -327,8 +334,7 @@ mod tests {
         // 4x4 with kernel 2 stride 2 → 2x2 = 4 cells, but we give only 2
         let mut output = vec![0.0f32; 2];
         let mut output_mask = vec![0u8; 2];
-        let result =
-            pool_2d_into(&input, &mask, &[4, 4], &cfg, &mut output, &mut output_mask);
+        let result = pool_2d_into(&input, &mask, &[4, 4], &cfg, &mut output, &mut output_mask);
         assert!(result.is_err());
         let msg = format!("{}", result.unwrap_err());
         assert!(msg.contains("output buffer too small"), "got: {msg}");

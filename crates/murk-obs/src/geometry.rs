@@ -172,7 +172,8 @@ impl GridGeometry {
                 let dq = relative[0];
                 let dr = relative[1];
                 let ds = dq + dr; // implicit third axis s = -(q+r)
-                Ok(dq.unsigned_abs()
+                Ok(dq
+                    .unsigned_abs()
                     .max(dr.unsigned_abs())
                     .max(ds.unsigned_abs()))
             }
@@ -395,7 +396,10 @@ mod tests {
         let s = Hex2D::new(10, 10).unwrap();
         let geo = GridGeometry::from_space(&s).unwrap();
         let err = geo.graph_distance(&[0]).unwrap_err();
-        assert!(matches!(err, murk_core::error::ObsError::InvalidObsSpec { .. }));
+        assert!(matches!(
+            err,
+            murk_core::error::ObsError::InvalidObsSpec { .. }
+        ));
     }
 
     #[test]
@@ -403,6 +407,9 @@ mod tests {
         let s = Hex2D::new(10, 10).unwrap();
         let geo = GridGeometry::from_space(&s).unwrap();
         let err = geo.graph_distance(&[]).unwrap_err();
-        assert!(matches!(err, murk_core::error::ObsError::InvalidObsSpec { .. }));
+        assert!(matches!(
+            err,
+            murk_core::error::ObsError::InvalidObsSpec { .. }
+        ));
     }
 }

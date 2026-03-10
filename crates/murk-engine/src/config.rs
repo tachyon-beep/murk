@@ -179,7 +179,10 @@ impl fmt::Display for ConfigError {
                 write!(f, "invalid backoff config: initial_max_skew ({initial}) exceeds max_skew_cap ({cap})")
             }
             Self::BackoffInvalidFactor { value } => {
-                write!(f, "invalid backoff config: backoff_factor must be finite and >= 1.0, got {value}")
+                write!(
+                    f,
+                    "invalid backoff config: backoff_factor must be finite and >= 1.0, got {value}"
+                )
             }
             Self::BackoffInvalidThreshold { value } => {
                 write!(f, "invalid backoff config: rejection_rate_threshold must be in [0.0, 1.0], got {value}")
@@ -594,7 +597,10 @@ mod tests {
         cfg.backoff.initial_max_skew = 100;
         cfg.backoff.max_skew_cap = 5;
         match cfg.validate() {
-            Err(ConfigError::BackoffSkewExceedsCap { initial: 100, cap: 5 }) => {}
+            Err(ConfigError::BackoffSkewExceedsCap {
+                initial: 100,
+                cap: 5,
+            }) => {}
             other => panic!("expected BackoffSkewExceedsCap, got {other:?}"),
         }
     }
@@ -614,7 +620,7 @@ mod tests {
         let mut cfg = valid_config();
         cfg.backoff.backoff_factor = 0.5;
         match cfg.validate() {
-            Err(ConfigError::BackoffInvalidFactor { value }) if value == 0.5 => {}
+            Err(ConfigError::BackoffInvalidFactor { value: 0.5 }) => {}
             other => panic!("expected BackoffInvalidFactor(0.5), got {other:?}"),
         }
     }
@@ -624,7 +630,7 @@ mod tests {
         let mut cfg = valid_config();
         cfg.backoff.rejection_rate_threshold = 1.5;
         match cfg.validate() {
-            Err(ConfigError::BackoffInvalidThreshold { value }) if value == 1.5 => {}
+            Err(ConfigError::BackoffInvalidThreshold { value: 1.5 }) => {}
             other => panic!("expected BackoffInvalidThreshold(1.5), got {other:?}"),
         }
     }
