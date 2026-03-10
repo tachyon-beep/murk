@@ -155,9 +155,9 @@ impl Propagator for AgentMovementPropagator {
                     reason: "agent_presence field not writable".into(),
                 })?;
 
-        // Tick 0 init: place agents at initial positions.
-        // Early return prevents actions queued before tick 0 from being
-        // processed on the initialization tick.
+        // First-tick init: place agents at initial positions.
+        // TickId(1) is the first executed tick (engine starts at TickId(0)).
+        // Early return prevents queued actions from running during init.
         if tick_id == TickId(1) && !self.initial_positions.is_empty() {
             for &(agent_id, flat_idx) in &self.initial_positions {
                 if flat_idx < cell_count {
