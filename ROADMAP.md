@@ -10,11 +10,11 @@ engine.
 
 ---
 
-## Current State — v0.1.8 (Release Prep)
+## Current State — v0.1.9
 
-As of February 22, 2026, Murk v0.1.8 is in release prep. Everything
-below is implemented and tested on the release branch; publication is
-the next operational step.
+As of March 2026, Murk v0.1.9 is in release prep. This is a hardening
+release focused on FFI safety, engine robustness, and release-mode
+correctness.
 
 ### Engine
 
@@ -28,13 +28,14 @@ the next operational step.
 | **Realtime-async mode** | Background tick thread, epoch-based reclamation, adaptive backoff, shutdown FSM | 5 stress tests including death spiral and rejection oscillation |
 | **Deterministic replay** | Binary format v2 with per-tick snapshot hashing, divergence reports | 177 determinism tests; FNV-1a hash verification per tick |
 | **Batched engine** | `BatchedEngine` with N-world `step_and_observe()`, single GIL release, `BatchedVecEnv` SB3-compatible adapter | Unit tests + Python integration tests |
-| **0.1.8 hardening** | Panic-safe FFI boundary, topology-aware CFL validation, non-mutating realtime preflight telemetry path | Regression coverage for panic status, full-topology CFL, and preflight metrics integrity |
+| **v0.1.8 hardening** | Panic-safe FFI boundary, topology-aware CFL validation, non-mutating realtime preflight telemetry path | Regression coverage for panic status, full-topology CFL, and preflight metrics integrity |
+| **v0.1.9 hardening** | FFI handle table safety (poisoned mutex vs invalid handle), `debug_assert` → `assert` for release-mode correctness, `expect()` → `Result` propagation, saturating arithmetic, deprecation of ambiguous FFI query functions | 1,029 tests passing; release-mode `#[should_panic]` regression tests |
 
 ### Bindings and Tooling
 
 | Layer | What's There | Evidence |
 |-------|-------------|----------|
-| **C FFI** | 41+ extern functions, slot+generation handle tables, panic-safe boundary, versioned ABI (v3.0) | Safe double-destroy, null validation, panic-to-status conversion; `#![forbid(unsafe_code)]` on everything above FFI |
+| **C FFI** | 41+ extern functions, slot+generation handle tables, panic-safe boundary, versioned ABI (v3.1) | Safe double-destroy, null validation, panic-to-status conversion; `#![forbid(unsafe_code)]` on everything above FFI |
 | **Python** | PyO3/maturin bindings, Gymnasium `Env` + `VecEnv` adapters, `BatchedWorld` + `BatchedVecEnv` high-throughput training, 28+ exposed types, PEP 561 type stubs | 87 passing Python tests including batched engine and PPO training smoke test |
 | **CI/CD** | 7 CI jobs (check, MSRV, test, clippy, fmt, Miri, deny), cross-platform (Ubuntu/macOS/Windows) | Manual release workflow publishing to crates.io and PyPI |
 | **Documentation** | Architecture guide, concepts guide, error reference (19K), replay format spec, determinism catalogue | `#![deny(missing_docs)]` enforced across all 11 public crates |
@@ -45,14 +46,13 @@ The numbers tell a story about architectural fitness:
 
 - **~32K LOC across 13 crates** with clean dependency layering
   (murk-core is a leaf; murk is a facade; everything composes)
-- **700+ tests** — unit, integration, property-based (proptest), stress,
+- **1,000+ tests** — unit, integration, property-based (proptest), stress,
   and end-to-end (PPO training)
 - **Zero `unsafe` in simulation logic** — `#![forbid(unsafe_code)]` on
   10 of 13 crates. Only murk-arena (allocation) and murk-ffi (C ABI)
   are permitted unsafe blocks
-- **Release hardening closed for v0.1.8** — panic-safe FFI paths,
-  topology-aware CFL validation, and realtime preflight observability
-  corrections are implemented with regression coverage
+- **Two hardening releases** — v0.1.8 (panic-safe FFI, CFL validation)
+  and v0.1.9 (release-mode safety, engine robustness, error precision)
 - **14K steps/sec per environment** (70% of MuJoCo), 3μs framework
   overhead per tick
 - **9 critical issues, 14 important issues** identified in design
@@ -109,30 +109,65 @@ advanced features for competitive self-play:
 - **Rayon parallelism for `step_and_observe()`** — currently sequential;
   the design supports a 3-line upgrade to `par_iter_mut`
 
-### Render Adapter Interface
+### Three-Port Integration Architecture
 
-**Priority**: High — blocks the "cool tech demo" visualisation layer.
+**Priority**: High — formalises the three-consumer model that Echelon
+requires.
 
-The observation pipeline answers "what does the agent see?" The render
-pipeline answers "what does the human see?" These are structurally
-similar (both read from snapshots, both extract spatial data) but differ
-in fidelity, format, and frequency.
+Murk serves three distinct consumer ports:
 
-**Scope**:
-- `RenderSpec` → `RenderPlan` compilation (mirroring ObsSpec → ObsPlan)
-- Output: structured scene description (positions, field values, events)
-  rather than flat tensors
-- Adapter trait for pluggable renderers (Bevy, terminal, web, etc.)
-- Stateless per-tick scene output initially (renderer maintains its own
-  interpolation/state)
+| Port | Consumer | Interface | Status |
+|------|----------|-----------|--------|
+| 1 | Python / PyTorch (RL training) | murk-python + murk-ffi | **Shipped** |
+| 2 | Graphics engine (visualisation) | murk-render + murk-scene | v0.2 |
+| 3 | Game / simulation control logic | murk-handle | v0.2 |
 
-**Design decision**: full scene description per tick (stateless) vs
-delta stream (stateful). Stateless is simpler, swaps renderers freely,
-and is "free" for replay visualisation since snapshots already contain
-full state. Delta optimisation can come later.
+**Three new crates:**
 
-**Impact**: Makes Echelon visible. Enables replay visualisation for
-debugging and presentation.
+1. **`murk-scene`** (leaf crate) — FlatBuffer schema defining the scene
+   interchange format (`Scene`, `Entity`, `FieldLayer`, `Event`). No
+   dependencies on other murk crates. Renderer adapters depend only on
+   this.
+
+2. **`murk-render`** — `RenderSpec` → `RenderPlan` compilation and
+   execution pipeline. Mirrors the ObsSpec → ObsPlan pattern but produces
+   a FlatBuffer `Scene` (positions, field values, events) rather than
+   flat f32 tensors. Supports viewport culling via `RegionSpec` and LOD
+   via spatial downsampling.
+
+3. **`murk-handle`** — `WorldHandle` adapter that wraps either
+   `LockstepWorld` or `RealtimeAsyncWorld` behind a common API. Forces
+   `OwnedSnapshot` at the boundary (~2μs clone cost in lockstep mode).
+   Includes escape hatches (`as_lockstep()`, `as_realtime()`) for
+   mode-specific features.
+
+**Design decisions:**
+- Scene format: FlatBuffers (consistent with murk-obs, zero-copy,
+  cross-language)
+- WorldHandle pattern: adapter/facade with internal enum (not a trait —
+  avoids vtable overhead and lifetime complications)
+- Scene output: stateless full description per tick (delta optimisation
+  can come later)
+
+**Consumer topology:**
+```text
+  PyTorch RL        Bevy / wgpu       Game Logic
+  (training)        (rendering)       (Echelon)
+      │                  │                │
+ murk-python        murk-scene       murk-handle
+ + murk-ffi        (FlatBuffers)    (WorldHandle)
+      │                  │                │
+      └──────────────────┴────────────────┘
+                         │
+                   murk-engine
+```
+
+**Impact**: Completes the engine's consumer story. Makes Echelon visible
+(Port 2), enables mode-agnostic game logic (Port 3), and enables replay
+visualisation for debugging.
+
+See `docs/plans/2026-02-24-three-port-architecture-design.md` for the
+full design document.
 
 ### Agent-Type Observation Composition
 
@@ -236,7 +271,9 @@ The following APIs must be frozen at 1.0:
 - `ObsSpec` / `ObsPlan` format
 - Replay binary format (wire compatibility)
 - C FFI ABI version
-- `RenderSpec` / `RenderPlan` format (if stabilised by then)
+- `Scene` FlatBuffer schema version (`murk-scene`)
+- `RenderSpec` / `RenderPlan` format (`murk-render`)
+- `WorldHandle` common API surface (`murk-handle`)
 
 ### What Stays Unstable
 
@@ -312,7 +349,8 @@ Expand beyond Gymnasium to first-class adapters for:
 - **TorchRL** (`EnvBase`) — where serious PyTorch RL practitioners live
 - **RLlib** — distributed training at scale
 - **CleanRL** — lightweight single-file RL implementations
-- **Godot/Bevy** — game engine integrations for the render adapter
+- **Godot/Bevy** — game engine integrations (depend on `murk-scene`
+  for FlatBuffer scene data and `murk-handle` for world control)
 
 ### Benchmark Suite and Research Positioning
 

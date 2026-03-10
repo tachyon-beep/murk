@@ -38,11 +38,28 @@ pub struct MurkWorldPreflight {
     pub consecutive_rollbacks: u32,
 }
 
+// Compile-time layout assertions for ABI stability on 64-bit targets.
+// These verify that struct layout matches the C header (murk.h).
+const _: () = assert!(std::mem::size_of::<MurkWorldPreflight>() == 24);
+const _: () = assert!(std::mem::align_of::<MurkWorldPreflight>() == 8);
+
 /// Clone the Arc for a world handle, briefly locking the global table.
 ///
-/// Returns `None` if the handle is invalid or the mutex is poisoned.
-fn get_world(handle: u64) -> Option<WorldArc> {
-    WORLDS.lock().ok()?.get(handle).cloned()
+/// Returns `Ok(Some(arc))` if the handle is valid, `Ok(None)` if the
+/// handle is invalid, or `Err(())` if the global mutex is poisoned.
+/// On poisoning, stores a diagnostic in [`LAST_PANIC`] so the caller
+/// can retrieve context via `murk_last_panic_message`.
+fn get_world(handle: u64) -> Result<Option<WorldArc>, ()> {
+    match WORLDS.lock() {
+        Ok(table) => Ok(table.get(handle).cloned()),
+        Err(_) => {
+            crate::LAST_PANIC.with(|cell| {
+                *cell.borrow_mut() =
+                    "WORLDS mutex poisoned: a prior panic corrupted shared state".into();
+            });
+            Err(())
+        }
+    }
 }
 
 pub(crate) fn worlds() -> &'static Mutex<HandleTable<WorldArc>> {
@@ -152,8 +169,9 @@ pub extern "C" fn murk_lockstep_step(
         }
 
         let world_arc = match get_world(world_handle) {
-            Some(arc) => arc,
-            None => return MurkStatus::InvalidHandle as i32,
+            Ok(Some(arc)) => arc,
+            Ok(None) => return MurkStatus::InvalidHandle as i32,
+            Err(()) => return MurkStatus::InternalError as i32,
         };
         // Per-world lock: only this world is locked, not the global table.
         let mut world = ffi_lock!(world_arc);
@@ -198,8 +216,9 @@ pub extern "C" fn murk_lockstep_step(
 pub extern "C" fn murk_lockstep_reset(world_handle: u64, seed: u64) -> i32 {
     ffi_guard!({
         let world_arc = match get_world(world_handle) {
-            Some(arc) => arc,
-            None => return MurkStatus::InvalidHandle as i32,
+            Ok(Some(arc)) => arc,
+            Ok(None) => return MurkStatus::InvalidHandle as i32,
+            Err(()) => return MurkStatus::InternalError as i32,
         };
         let mut world = ffi_lock!(world_arc);
 
@@ -229,8 +248,9 @@ pub extern "C" fn murk_snapshot_read_field(
         }
 
         let world_arc = match get_world(world_handle) {
-            Some(arc) => arc,
-            None => return MurkStatus::InvalidHandle as i32,
+            Ok(Some(arc)) => arc,
+            Ok(None) => return MurkStatus::InvalidHandle as i32,
+            Err(()) => return MurkStatus::InternalError as i32,
         };
         let world = ffi_lock!(world_arc);
 
@@ -255,15 +275,28 @@ pub extern "C" fn murk_snapshot_read_field(
 
 /// Current tick ID for a world (0 after construction or reset).
 ///
-/// **Ambiguity warning:** returns 0 for both "tick 0" and "invalid handle."
-/// Prefer [`murk_current_tick_get`] for unambiguous error detection.
+/// Returns 0 for both "tick 0" and "invalid handle" — use
+/// [`murk_current_tick_get`] instead.
 #[no_mangle]
 #[allow(unsafe_code)]
+#[deprecated(note = "ambiguous on error; use murk_current_tick_get")]
 pub extern "C" fn murk_current_tick(world_handle: u64) -> u64 {
     ffi_guard_or!(0, {
-        get_world(world_handle)
-            .and_then(|arc| arc.lock().ok().map(|w| w.current_tick().0))
-            .unwrap_or(0)
+        let arc = match get_world(world_handle) {
+            Ok(Some(a)) => a,
+            Ok(None) | Err(()) => return 0,
+        };
+        let v = match arc.lock() {
+            Ok(w) => w.current_tick().0,
+            Err(_) => {
+                crate::LAST_PANIC.with(|cell| {
+                    *cell.borrow_mut() =
+                        "world mutex poisoned: a prior panic corrupted shared state".into();
+                });
+                0
+            }
+        };
+        v
     })
 }
 
@@ -279,8 +312,9 @@ pub extern "C" fn murk_current_tick_get(world_handle: u64, out: *mut u64) -> i32
             return MurkStatus::InvalidArgument as i32;
         }
         let world_arc = match get_world(world_handle) {
-            Some(arc) => arc,
-            None => return MurkStatus::InvalidHandle as i32,
+            Ok(Some(arc)) => arc,
+            Ok(None) => return MurkStatus::InvalidHandle as i32,
+            Err(()) => return MurkStatus::InternalError as i32,
         };
         let world = ffi_lock!(world_arc);
         unsafe { *out = world.current_tick().0 };
@@ -290,15 +324,28 @@ pub extern "C" fn murk_current_tick_get(world_handle: u64, out: *mut u64) -> i32
 
 /// Whether ticking is disabled due to consecutive rollbacks.
 ///
-/// **Ambiguity warning:** returns 0 for both "not disabled" and "invalid handle."
-/// Prefer [`murk_is_tick_disabled_get`] for unambiguous error detection.
+/// Returns 0 for both "not disabled" and "invalid handle" — use
+/// [`murk_is_tick_disabled_get`] instead.
 #[no_mangle]
 #[allow(unsafe_code)]
+#[deprecated(note = "ambiguous on error; use murk_is_tick_disabled_get")]
 pub extern "C" fn murk_is_tick_disabled(world_handle: u64) -> u8 {
     ffi_guard_or!(0, {
-        get_world(world_handle)
-            .and_then(|arc| arc.lock().ok().map(|w| u8::from(w.is_tick_disabled())))
-            .unwrap_or(0)
+        let arc = match get_world(world_handle) {
+            Ok(Some(a)) => a,
+            Ok(None) | Err(()) => return 0,
+        };
+        let v = match arc.lock() {
+            Ok(w) => u8::from(w.is_tick_disabled()),
+            Err(_) => {
+                crate::LAST_PANIC.with(|cell| {
+                    *cell.borrow_mut() =
+                        "world mutex poisoned: a prior panic corrupted shared state".into();
+                });
+                0
+            }
+        };
+        v
     })
 }
 
@@ -314,8 +361,9 @@ pub extern "C" fn murk_is_tick_disabled_get(world_handle: u64, out: *mut u8) -> 
             return MurkStatus::InvalidArgument as i32;
         }
         let world_arc = match get_world(world_handle) {
-            Some(arc) => arc,
-            None => return MurkStatus::InvalidHandle as i32,
+            Ok(Some(arc)) => arc,
+            Ok(None) => return MurkStatus::InvalidHandle as i32,
+            Err(()) => return MurkStatus::InternalError as i32,
         };
         let world = ffi_lock!(world_arc);
         unsafe { *out = u8::from(world.is_tick_disabled()) };
@@ -325,15 +373,28 @@ pub extern "C" fn murk_is_tick_disabled_get(world_handle: u64, out: *mut u8) -> 
 
 /// Number of consecutive rollbacks since the last successful tick.
 ///
-/// **Ambiguity warning:** returns 0 for both "zero rollbacks" and "invalid handle."
-/// Prefer [`murk_consecutive_rollbacks_get`] for unambiguous error detection.
+/// Returns 0 for both "zero rollbacks" and "invalid handle" — use
+/// [`murk_consecutive_rollbacks_get`] instead.
 #[no_mangle]
 #[allow(unsafe_code)]
+#[deprecated(note = "ambiguous on error; use murk_consecutive_rollbacks_get")]
 pub extern "C" fn murk_consecutive_rollbacks(world_handle: u64) -> u32 {
     ffi_guard_or!(0, {
-        get_world(world_handle)
-            .and_then(|arc| arc.lock().ok().map(|w| w.consecutive_rollback_count()))
-            .unwrap_or(0)
+        let arc = match get_world(world_handle) {
+            Ok(Some(a)) => a,
+            Ok(None) | Err(()) => return 0,
+        };
+        let v = match arc.lock() {
+            Ok(w) => w.consecutive_rollback_count(),
+            Err(_) => {
+                crate::LAST_PANIC.with(|cell| {
+                    *cell.borrow_mut() =
+                        "world mutex poisoned: a prior panic corrupted shared state".into();
+                });
+                0
+            }
+        };
+        v
     })
 }
 
@@ -349,8 +410,9 @@ pub extern "C" fn murk_consecutive_rollbacks_get(world_handle: u64, out: *mut u3
             return MurkStatus::InvalidArgument as i32;
         }
         let world_arc = match get_world(world_handle) {
-            Some(arc) => arc,
-            None => return MurkStatus::InvalidHandle as i32,
+            Ok(Some(arc)) => arc,
+            Ok(None) => return MurkStatus::InvalidHandle as i32,
+            Err(()) => return MurkStatus::InternalError as i32,
         };
         let world = ffi_lock!(world_arc);
         unsafe { *out = world.consecutive_rollback_count() };
@@ -370,8 +432,9 @@ pub extern "C" fn murk_world_preflight_get(world_handle: u64, out: *mut MurkWorl
             return MurkStatus::InvalidArgument as i32;
         }
         let world_arc = match get_world(world_handle) {
-            Some(arc) => arc,
-            None => return MurkStatus::InvalidHandle as i32,
+            Ok(Some(arc)) => arc,
+            Ok(None) => return MurkStatus::InvalidHandle as i32,
+            Err(()) => return MurkStatus::InternalError as i32,
         };
         let world = ffi_lock!(world_arc);
         let preflight = MurkWorldPreflight {
@@ -388,15 +451,28 @@ pub extern "C" fn murk_world_preflight_get(world_handle: u64, out: *mut MurkWorl
 
 /// The world's current seed.
 ///
-/// **Ambiguity warning:** returns 0 for both "seed 0" and "invalid handle."
-/// Prefer [`murk_seed_get`] for unambiguous error detection.
+/// Returns 0 for both "seed 0" and "invalid handle" — use
+/// [`murk_seed_get`] instead.
 #[no_mangle]
 #[allow(unsafe_code)]
+#[deprecated(note = "ambiguous on error; use murk_seed_get")]
 pub extern "C" fn murk_seed(world_handle: u64) -> u64 {
     ffi_guard_or!(0, {
-        get_world(world_handle)
-            .and_then(|arc| arc.lock().ok().map(|w| w.seed()))
-            .unwrap_or(0)
+        let arc = match get_world(world_handle) {
+            Ok(Some(a)) => a,
+            Ok(None) | Err(()) => return 0,
+        };
+        let v = match arc.lock() {
+            Ok(w) => w.seed(),
+            Err(_) => {
+                crate::LAST_PANIC.with(|cell| {
+                    *cell.borrow_mut() =
+                        "world mutex poisoned: a prior panic corrupted shared state".into();
+                });
+                0
+            }
+        };
+        v
     })
 }
 
@@ -412,8 +488,9 @@ pub extern "C" fn murk_seed_get(world_handle: u64, out: *mut u64) -> i32 {
             return MurkStatus::InvalidArgument as i32;
         }
         let world_arc = match get_world(world_handle) {
-            Some(arc) => arc,
-            None => return MurkStatus::InvalidHandle as i32,
+            Ok(Some(arc)) => arc,
+            Ok(None) => return MurkStatus::InvalidHandle as i32,
+            Err(()) => return MurkStatus::InternalError as i32,
         };
         let world = ffi_lock!(world_arc);
         unsafe { *out = world.seed() };
@@ -468,8 +545,9 @@ pub extern "C" fn murk_lockstep_step_vec(
             }
 
             let world_arc = match get_world(handles[i]) {
-                Some(arc) => arc,
-                None => return MurkStatus::InvalidHandle as i32,
+                Ok(Some(arc)) => arc,
+                Ok(None) => return MurkStatus::InvalidHandle as i32,
+                Err(()) => return MurkStatus::InternalError as i32,
             };
             let mut world = ffi_lock!(world_arc);
 
@@ -500,8 +578,8 @@ fn write_receipts(
     cap: usize,
     n_out: *mut usize,
 ) {
-    let write_count = receipts.len().min(cap);
-    if !out.is_null() && write_count > 0 {
+    let write_count = if out.is_null() { 0 } else { receipts.len().min(cap) };
+    if write_count > 0 {
         for (i, receipt) in receipts.iter().enumerate().take(write_count) {
             // SAFETY: out points to cap valid MurkReceipt structs.
             unsafe {
@@ -518,6 +596,7 @@ fn write_receipts(
 }
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use super::*;
     use crate::command::MurkCommandType;
@@ -1003,6 +1082,29 @@ mod tests {
     }
 
     #[test]
+    fn write_receipts_null_buffer_reports_zero_count() {
+        use murk_core::command::Receipt;
+        use murk_core::id::TickId;
+
+        let receipts = vec![Receipt {
+            accepted: true,
+            applied_tick_id: Some(TickId(1)),
+            reason_code: None,
+            command_index: 0,
+        }];
+
+        let mut n_out: usize = 999;
+
+        // Null output buffer — n_out must be 0, not 1.
+        write_receipts(&receipts, std::ptr::null_mut(), 10, &mut n_out);
+
+        assert_eq!(
+            n_out, 0,
+            "write_receipts with null buffer must report 0 receipts written, got {n_out}"
+        );
+    }
+
+    #[test]
     fn obsplan_execute_agents_buffer_too_small_does_not_poison_world() {
         let world_h = create_test_world();
         // Populate one tick so observation paths have data.
@@ -1148,6 +1250,19 @@ mod tests {
             MurkStatus::InvalidHandle as i32
         );
         assert_eq!(seed, 999, "out must not be written on error");
+
+        let mut preflight = MurkWorldPreflight {
+            ingress_queue_depth: 99,
+            ingress_queue_capacity: 99,
+            current_tick: 99,
+            tick_disabled: 99,
+            consecutive_rollbacks: 99,
+        };
+        assert_eq!(
+            murk_world_preflight_get(world_h, &mut preflight),
+            MurkStatus::InvalidHandle as i32
+        );
+        assert_eq!(preflight.current_tick, 99, "out must not be written on error");
     }
 
     #[test]
@@ -1316,5 +1431,26 @@ mod tests {
         );
 
         murk_lockstep_destroy(world_h);
+    }
+
+    #[test]
+    fn preflight_get_invalid_handle_returns_error() {
+        let world_h = create_test_world();
+        murk_lockstep_destroy(world_h);
+
+        let mut preflight = MurkWorldPreflight {
+            ingress_queue_depth: 99,
+            ingress_queue_capacity: 99,
+            current_tick: 99,
+            tick_disabled: 99,
+            consecutive_rollbacks: 99,
+        };
+        assert_eq!(
+            murk_world_preflight_get(world_h, &mut preflight),
+            MurkStatus::InvalidHandle as i32
+        );
+        // Output must not be written on error.
+        assert_eq!(preflight.current_tick, 99, "out must not be written on error");
+        assert_eq!(preflight.consecutive_rollbacks, 99, "out must not be written on error");
     }
 }

@@ -1196,6 +1196,21 @@ mod tests {
         assert_eq!(prop.max_dt(&space), None);
     }
 
+    #[test]
+    fn max_dt_floor_overrides_zero_space_degree() {
+        // Space degree is 0 (1×1 Absorb, no neighbours), but max_degree=8
+        // acts as a floor → effective_degree = max(0, 8) = 8 → Some(0.125).
+        let prop = ScalarDiffusion::builder()
+            .input_field(F_HEAT)
+            .output_field(F_HEAT)
+            .coefficient(1.0)
+            .max_degree(8)
+            .build()
+            .unwrap();
+        let space = murk_space::Square4::new(1, 1, murk_space::EdgeBehavior::Absorb).unwrap();
+        assert_eq!(prop.max_dt(&space), Some(1.0 / 8.0));
+    }
+
     #[derive(Debug)]
     struct SkewDegreeSpace {
         instance_id: SpaceInstanceId,

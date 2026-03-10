@@ -249,9 +249,17 @@ impl Space for Fcc12 {
     }
 
     fn max_neighbour_degree(&self) -> usize {
-        // FCC has 12 stencil offsets. For Absorb boundaries this is a
-        // conservative upper bound; Clamp/Wrap can realize all 12 moves.
-        12
+        match self.edge {
+            EdgeBehavior::Clamp | EdgeBehavior::Wrap => 12,
+            EdgeBehavior::Absorb => {
+                // Degenerate 1x1x1 Absorb has 0 neighbours (all offsets go OOB).
+                if self.w == 1 && self.h == 1 && self.d == 1 {
+                    0
+                } else {
+                    12
+                }
+            }
+        }
     }
 
     fn distance(&self, a: &Coord, b: &Coord) -> f64 {
@@ -356,7 +364,7 @@ impl Space for Fcc12 {
                 }
             }
         }
-        debug_assert_eq!(
+        assert_eq!(
             out.len(),
             self.cell_count,
             "canonical_ordering produced {} cells but cell_count is {}",
@@ -465,9 +473,9 @@ fn resolve_axis_fcc(val: i32, len: u32, edge: EdgeBehavior) -> (Option<i32>, boo
 
 /// Per-axis absolute displacement in `u32`, accounting for wrap.
 fn axis_distance_u32(a: i32, b: i32, len: u32, edge: EdgeBehavior) -> u32 {
-    debug_assert!(len > 0, "axis_distance_u32 called with zero-length axis");
+    assert!(len > 0, "axis_distance_u32 called with zero-length axis");
     let diff = (a - b).unsigned_abs();
-    debug_assert!(
+    assert!(
         diff < len,
         "axis_distance_u32: diff {diff} >= len {len} (out-of-bounds coord?)"
     );
@@ -575,6 +583,27 @@ mod tests {
         assert_eq!(s.cell_count(), 1);
         assert!(s.neighbours(&c(0, 0, 0)).is_empty());
         assert_eq!(s.distance(&c(0, 0, 0), &c(0, 0, 0)), 0.0);
+    }
+
+    #[test]
+    fn max_neighbour_degree_degenerate_1x1x1_absorb() {
+        // 1×1×1 Absorb has 0 actual neighbours — max_neighbour_degree
+        // must return 0 (consistent with Square4, Hex2D, Line1D).
+        let s = Fcc12::new(1, 1, 1, EdgeBehavior::Absorb).unwrap();
+        assert_eq!(s.max_neighbour_degree(), 0);
+    }
+
+    #[test]
+    fn max_neighbour_degree_normal_grids() {
+        // Non-degenerate grids return 12.
+        let s = Fcc12::new(4, 4, 4, EdgeBehavior::Absorb).unwrap();
+        assert_eq!(s.max_neighbour_degree(), 12);
+        let s = Fcc12::new(2, 2, 2, EdgeBehavior::Absorb).unwrap();
+        assert_eq!(s.max_neighbour_degree(), 12);
+        let s = Fcc12::new(4, 4, 4, EdgeBehavior::Wrap).unwrap();
+        assert_eq!(s.max_neighbour_degree(), 12);
+        let s = Fcc12::new(4, 4, 4, EdgeBehavior::Clamp).unwrap();
+        assert_eq!(s.max_neighbour_degree(), 12);
     }
 
     // ── Canonical ordering & rank ─────────────────────────────────
@@ -1043,5 +1072,43 @@ mod tests {
                 prop_assert_eq!(s.canonical_rank(coord), Some(i));
             }
         }
+    }
+
+    // ── Regression: debug_assert → assert upgrades ────────────────
+
+    #[test]
+    fn canonical_ordering_count_matches_cell_count_all_parities() {
+        // Verify canonical_ordering().len() == cell_count for a range of
+        // grid sizes, catching any disagreement between count_fcc_cells_checked
+        // and the actual enumeration loop. This exercises the assert_eq!
+        // that was previously a debug_assert_eq! (murk-1a1cfd).
+        for w in 1..=6u32 {
+            for h in 1..=6u32 {
+                for d in 1..=6u32 {
+                    let s = Fcc12::new(w, h, d, EdgeBehavior::Absorb).unwrap();
+                    assert_eq!(
+                        s.canonical_ordering().len(),
+                        s.cell_count(),
+                        "count mismatch for {w}x{h}x{d}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "axis_distance_u32 called with zero-length axis")]
+    fn axis_distance_u32_panics_on_zero_length() {
+        // Regression for murk-dace86: this must panic in both debug and
+        // release builds (was previously debug_assert, stripped in release).
+        axis_distance_u32(0, 0, 0, EdgeBehavior::Wrap);
+    }
+
+    #[test]
+    #[should_panic(expected = "diff")]
+    fn axis_distance_u32_panics_on_out_of_bounds_diff() {
+        // Regression for murk-b20f07: diff=5 >= len=4 must panic
+        // (was previously debug_assert, stripped in release).
+        axis_distance_u32(0, 5, 4, EdgeBehavior::Wrap);
     }
 }

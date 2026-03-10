@@ -46,3 +46,11 @@ pub use resource_field::{RegrowthModel, ResourceField};
 pub use reward::RewardPropagator;
 pub use scalar_diffusion::ScalarDiffusion;
 pub use wave_propagation::WavePropagation;
+
+#[cfg(test)]
+pub(crate) mod test_helpers {
+    /// 4x4 Square4 Wrap space, used by most propagator `max_dt` tests.
+    pub fn test_space() -> murk_space::Square4 {
+        murk_space::Square4::new(4, 4, murk_space::EdgeBehavior::Wrap).unwrap()
+    }
+}

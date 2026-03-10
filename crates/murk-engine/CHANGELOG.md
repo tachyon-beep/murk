@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `ConfigError::ThreadSpawnFailed` variant for graceful thread spawn failure handling
+
+### Changed
+
+- `ConfigError::InvalidBackoff` split into `BackoffSkewExceedsCap`, `BackoffInvalidFactor`, `BackoffInvalidThreshold`, `BackoffZeroDecayRate` for precise programmatic matching
+- `WorldConfig::defined_field_set()` returns `Result<FieldSet, ConfigError>` instead of panicking on overflow
+
+### Fixed
+
+- `RealtimeAsyncWorld::new()`/`reset()` thread spawn panics replaced with `Result` propagation and partial startup rollback (#103)
+- `RealtimeAsyncWorld::reset()` uses rendezvous channel — spawn failure no longer consumes engine permanently
+- `spawn_egress_workers` takes ownership of `obs_tx` for clean partial-failure shutdown
+- `TickEngine` field/cell count `expect()` panics replaced with `Result` propagation
+- `TickEngine` incremental field seeding handles missing base_cache on first tick
+- `consecutive_rollback_count` uses `saturating_add` to prevent overflow
+- `sparse_retired_ranges`/`sparse_pending_retired` metrics use `try_from().unwrap_or(u32::MAX)` instead of truncating `as u32`
+- Subnormal `tick_rate_hz` validation rejects values where `1/hz` overflows to infinity (#104)
+- Unchecked `u64` arithmetic in stall threshold computation replaced with saturating ops (#105)
+- Unchecked `u32 * u32` for static field length uses `checked_mul` with `CellCountOverflow` error (#106)
+
 ## [0.1.7](https://github.com/tachyon-beep/murk/compare/murk-engine-v0.1.5...murk-engine-v0.1.7) - 2026-02-21
 
 ### Added

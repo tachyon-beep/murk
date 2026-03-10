@@ -20,16 +20,26 @@
 // FFI functions inherently dereference raw pointers; safety is documented per-block.
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
 
+#[cfg(not(target_pointer_width = "64"))]
+compile_error!("murk-ffi requires a 64-bit target (the C ABI layout assumes 64-bit alignment)");
+
 /// Lock a mutex, returning `MurkStatus::InternalError` if poisoned.
 ///
 /// For use in `extern "C"` functions that return `i32`. On a poisoned
-/// mutex (caused by a prior panic), this early-returns an error status
-/// instead of panicking — preventing undefined behavior at the FFI boundary.
+/// mutex (caused by a prior panic), this stores a diagnostic in
+/// [`LAST_PANIC`] and early-returns an error status instead of
+/// panicking — preventing undefined behavior at the FFI boundary.
 macro_rules! ffi_lock {
     ($mutex:expr) => {
         match ($mutex).lock() {
             Ok(guard) => guard,
-            Err(_) => return $crate::status::MurkStatus::InternalError as i32,
+            Err(_) => {
+                $crate::LAST_PANIC.with(|cell| {
+                    *cell.borrow_mut() =
+                        "mutex poisoned: a prior panic corrupted shared state".into();
+                });
+                return $crate::status::MurkStatus::InternalError as i32;
+            }
         }
     };
 }
@@ -111,8 +121,9 @@ pub extern "C" fn murk_last_panic_message(buf: *mut std::ffi::c_char, cap: usize
             return 0i32;
         }
         let len = msg.len();
+        let clamped_len = len.min(i32::MAX as usize) as i32;
         if buf.is_null() {
-            return len as i32;
+            return clamped_len;
         }
         let copy_len = if cap > 0 { len.min(cap - 1) } else { 0 };
         // SAFETY: caller guarantees buf points to at least cap writable bytes.
@@ -122,7 +133,7 @@ pub extern "C" fn murk_last_panic_message(buf: *mut std::ffi::c_char, cap: usize
                 *buf.add(copy_len) = 0; // null terminator
             }
         }
-        len as i32
+        clamped_len
     })
 }
 
@@ -137,10 +148,12 @@ pub mod status;
 pub mod types;
 pub mod world;
 
+#[allow(deprecated)]
 pub use batched::{
-    murk_batched_create, murk_batched_destroy, murk_batched_num_worlds, murk_batched_obs_mask_len,
-    murk_batched_obs_output_len, murk_batched_observe_all, murk_batched_reset_all,
-    murk_batched_reset_world, murk_batched_step_and_observe,
+    murk_batched_create, murk_batched_destroy, murk_batched_num_worlds,
+    murk_batched_num_worlds_get, murk_batched_obs_mask_len, murk_batched_obs_mask_len_get,
+    murk_batched_obs_output_len, murk_batched_obs_output_len_get, murk_batched_observe_all,
+    murk_batched_reset_all, murk_batched_reset_world, murk_batched_step_and_observe,
 };
 pub use command::{MurkCommand, MurkCommandType, MurkReceipt};
 pub use config::{
@@ -159,20 +172,23 @@ pub use types::{
     MurkBoundaryBehavior, MurkEdgeBehavior, MurkFieldMutability, MurkFieldType, MurkSpaceType,
     MurkWriteMode,
 };
+#[allow(deprecated)]
 pub use world::{
-    murk_consecutive_rollbacks, murk_current_tick, murk_is_tick_disabled, murk_lockstep_create,
+    murk_consecutive_rollbacks, murk_consecutive_rollbacks_get, murk_current_tick,
+    murk_current_tick_get, murk_is_tick_disabled, murk_is_tick_disabled_get, murk_lockstep_create,
     murk_lockstep_destroy, murk_lockstep_reset, murk_lockstep_step, murk_lockstep_step_vec,
-    murk_seed, murk_snapshot_read_field, murk_world_preflight_get, MurkWorldPreflight,
+    murk_seed, murk_seed_get, murk_snapshot_read_field, murk_world_preflight_get,
+    MurkWorldPreflight,
 };
 
 /// ABI version: major in upper 16 bits, minor in lower 16.
 ///
 /// Bump major on breaking changes, minor on additions.
-/// Current: v3.0 (v2.1→v3.0: MurkStepMetrics layout expansion for ring retention/skew counters)
+/// Current: v3.1 (v3.0→v3.1: MurkStatus::NotApplied variant, batched _get functions)
 #[no_mangle]
 #[allow(unsafe_code)]
 pub extern "C" fn murk_abi_version() -> u32 {
-    3 << 16
+    (3 << 16) | 1
 }
 
 #[cfg(test)]
@@ -180,12 +196,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn abi_version_returns_v3_0() {
+    fn abi_version_returns_v3_1() {
         let v = murk_abi_version();
         let major = v >> 16;
         let minor = v & 0xFFFF;
         assert_eq!(major, 3);
-        assert_eq!(minor, 0);
+        assert_eq!(minor, 1);
     }
 
     #[test]

@@ -5,7 +5,48 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.9] - 2026-03-10
+
+### Added
+
+- **murk-ffi:** `MurkStatus::NotApplied` (-22) — distinct status code for commands accepted but not applied (e.g. OOB coordinate, unknown field); previously aliased to `UnsupportedCommand`
+- **murk-ffi:** `murk_batched_num_worlds_get`, `murk_batched_obs_output_len_get`, `murk_batched_obs_mask_len_get` — unambiguous `_get` variants returning `i32` status with output pointer
+- **murk-ffi:** ABI version bumped from v3.0 to v3.1
+
+### Changed
+
+- **murk-engine:** `ConfigError::InvalidBackoff` split into 4 specific variants (`BackoffSkewExceedsCap`, `BackoffInvalidFactor`, `BackoffInvalidThreshold`, `BackoffZeroDecayRate`) for precise error matching
+- **murk-engine:** `WorldConfig::defined_field_set()` returns `Result<FieldSet, ConfigError>` instead of panicking on overflow
+- **murk-ffi:** `get_world()`/`get_batched()` return `Result<Option<Arc>, ()>` distinguishing poisoned mutex (`MurkStatus::InternalError`) from invalid handle (`InvalidHandle`)
+- **murk-ffi:** Legacy query functions (`murk_current_tick`, `murk_is_tick_disabled`, `murk_consecutive_rollbacks`, `murk_seed`, `murk_batched_num_worlds`, `murk_batched_obs_output_len`, `murk_batched_obs_mask_len`) marked `#[deprecated]`
+- **murk-obs:** `pool_2d_output_shape` returns `Result<(usize, usize), ObsError>` instead of panicking on invalid arguments
+- **murk-python:** Python bindings use `_get` variants for all world/batched queries (unambiguous error reporting)
+
+### Fixed
+
+- **murk-ffi:** `IngressError::NotApplied` now maps to `MurkStatus::NotApplied` (-22) instead of `MurkStatus::UnsupportedCommand` (-21); receipt `reason_code` now distinguishes "command type unsupported" from "command target invalid"
+- **murk-ffi:** Mutex poisoning in `get_world()`/`get_batched()`/`get_obs_plan()` now stores diagnostic in `LAST_PANIC` before returning `None` (previously silently discarded via `.ok()?`)
+- **murk-ffi:** Legacy query functions (`murk_current_tick`, `murk_is_tick_disabled`, `murk_consecutive_rollbacks`, `murk_seed`) now store `LAST_PANIC` diagnostic on inner mutex poisoning
+- **murk-ffi:** Batched query functions (`murk_batched_num_worlds`, `murk_batched_obs_output_len`, `murk_batched_obs_mask_len`) now store `LAST_PANIC` diagnostic on inner mutex poisoning
+- **murk-propagators:** Clippy `erasing_op` in diffusion gradient test (`0 * 2 + 1` → direct indexing)
+- **murk-engine:** `RealtimeAsyncWorld::new()`/`reset()` thread spawn `.expect()` replaced with `Result` propagation + `ThreadSpawnFailed` error variant; partial startup rollback on egress worker failure (#103)
+- **murk-engine:** `RealtimeAsyncWorld::reset()` uses rendezvous channel for engine handoff — spawn failure no longer consumes the engine permanently
+- **murk-engine:** `spawn_egress_workers` takes ownership of `obs_tx` so partial failure drops the sender, cleanly disconnecting already-spawned workers
+- **murk-engine:** `TickEngine` field/cell count panics (`expect()`) replaced with `Result` propagation via `ConfigError`
+- **murk-engine:** `TickEngine` incremental field seeding handles missing `base_cache` on first tick gracefully (no longer silently skips write)
+- **murk-engine:** `consecutive_rollback_count` uses `saturating_add` (prevents overflow in pathological rollback loops)
+- **murk-engine:** `sparse_retired_ranges`/`sparse_pending_retired` metrics use `u32::try_from().unwrap_or(u32::MAX)` instead of truncating `as u32` cast
+- **murk-engine:** Subnormal `tick_rate_hz` validation now rejects values where `1/hz = inf` (#104)
+- **murk-engine:** Unchecked `u64` arithmetic in stall threshold/hold/grace computation replaced with `saturating_mul`/`saturating_add` (#105)
+- **murk-engine:** Unchecked `u32 * u32` for static field length in `TickEngine::new` replaced with `checked_mul` (#106)
+- **murk-bench:** `init_agent_positions` hash uses `wrapping_mul` instead of plain `*` (panicked in debug for ≥14 agents) (#107)
+- **murk-obs:** `ObsPlan::compile` rejects `AgentRect` when `half_extent` dimensionality mismatches space (#110)
+- **murk-obs:** FlatBuffer empty-coords round-trip restored (decoder no longer rejects `ndim==0` for `n_coords==0`) (#111)
+- **murk-obs:** `GridGeometry::canonical_rank` upgraded from `debug_assert!`/`debug_assert_eq!` to `assert!`/`assert_eq!` — negative coordinates caught in release builds (#118)
+- **murk-arena:** `SparseSlab` reuse hit/miss counters use `saturating_add` (prevents overflow on long-running simulations)
+- **murk-space:** `Fcc12::max_neighbour_degree()` returns 0 for degenerate 1×1×1 Absorb grid (consistent with Square4, Hex2D, Line1D)
+- **murk-space:** `Fcc12::canonical_ordering()` count verification upgraded from `debug_assert_eq!` to `assert_eq!` — mismatch caught in release builds (murk-1a1cfd)
+- **murk-space:** `Fcc12::axis_distance_u32()` zero-length and diff-bounds guards upgraded from `debug_assert!` to `assert!` — u32 underflow prevented in release builds (murk-dace86, murk-b20f07)
 
 ## [0.1.8] - 2026-02-22
 
@@ -26,8 +67,8 @@ FFI panic safety hardening and observability improvements.
 
 ### Changed
 
-- ABI version bumped from v2.0 to v2.1
-- `MurkStepMetrics` layout: 48 → 56 bytes (added reuse counters)
+- ABI version bumped from v2.1 to v3.0
+- `MurkStepMetrics` layout: 56 → 128 bytes (ring retention/skew counters expansion)
 - `ScalarDiffusion` CFL bound derived from space topology (no longer defaults to 12-neighbour worst-case)
 - Deprecated `DiffusionPropagator` now derives CFL bound from actual space topology
 - `validate_pipeline()` signature extended with `space: &dyn Space` parameter

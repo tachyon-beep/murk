@@ -115,7 +115,7 @@ Offset  Size     Type                Description
 +...    8        u64 LE              arrival_seq
 ```
 
-**Command size:** varies from 8 bytes (minimum: 1 + 4 + 0 + 1 + 1 + 1 = 8 with empty payload, no source fields) to unbounded depending on payload size and source field presence.
+**Command size:** varies from 24 bytes (minimum: `1 + 4 + 0 + 1 + 1 + 1 + 8 + 8 = 24` with empty payload, no source fields) to unbounded depending on payload size and source field presence.
 
 `expires_after_tick` and `arrival_seq` are serialized in format version 3.
 

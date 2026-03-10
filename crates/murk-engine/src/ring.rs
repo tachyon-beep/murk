@@ -647,4 +647,93 @@ mod tests {
             "latest() must never return None when the ring is non-empty"
         );
     }
+
+    #[test]
+    fn test_write_pos_monotonic_after_many_pushes() {
+        let ring = SnapshotRing::new(4);
+        for i in 1..=20u64 {
+            ring.push(make_test_snapshot(i));
+            assert_eq!(ring.write_pos(), i, "write_pos should be {i} after {i} pushes");
+        }
+    }
+
+    #[test]
+    fn test_position_tag_matches_write_pos() {
+        let ring = SnapshotRing::new(4);
+        for i in 0..4u64 {
+            ring.push(make_test_snapshot(i + 1));
+        }
+        // Positions 0..4 should all be retrievable with correct ticks.
+        for i in 0..4u64 {
+            let snap = ring.get_by_pos(i).expect(&format!("pos {i} should be retained"));
+            assert_eq!(snap.tick_id(), TickId(i + 1), "wrong tick at pos {i}");
+        }
+    }
+
+    #[test]
+    fn test_oldest_retained_pos_tracks_eviction_boundary() {
+        let ring = SnapshotRing::new(4);
+        assert_eq!(ring.oldest_retained_pos(), None);
+
+        ring.push(make_test_snapshot(1));
+        assert_eq!(ring.oldest_retained_pos(), Some(0));
+
+        for i in 2..=4 {
+            ring.push(make_test_snapshot(i));
+        }
+        assert_eq!(ring.oldest_retained_pos(), Some(0));
+
+        // Push 5th — evicts pos 0.
+        ring.push(make_test_snapshot(5));
+        assert_eq!(ring.oldest_retained_pos(), Some(1));
+
+        // Push 6th — evicts pos 1.
+        ring.push(make_test_snapshot(6));
+        assert_eq!(ring.oldest_retained_pos(), Some(2));
+    }
+
+    #[test]
+    fn test_counter_monotonicity_after_wraparound() {
+        let ring = SnapshotRing::new(3);
+        // Push 10 snapshots — wraps multiple times.
+        for i in 1..=10u64 {
+            ring.push(make_test_snapshot(i));
+        }
+        // write_pos should be 10, not reset.
+        assert_eq!(ring.write_pos(), 10);
+        // Old positions (before the retained window) should return None.
+        for i in 0..7u64 {
+            assert!(
+                ring.get_by_pos(i).is_none(),
+                "pos {i} should be evicted (retained window is 7..10)"
+            );
+        }
+        // Retained positions should return correct snapshots.
+        for i in 7..10u64 {
+            let snap = ring.get_by_pos(i).expect(&format!("pos {i} should be retained"));
+            assert_eq!(snap.tick_id(), TickId(i + 1));
+        }
+    }
+
+    #[test]
+    fn test_overwrite_detection_returns_correct_snapshot() {
+        let ring = SnapshotRing::new(3);
+        // Push ticks 1, 2, 3 — fills ring. Slot indices: 0→tick1, 1→tick2, 2→tick3.
+        for i in 1..=3u64 {
+            ring.push(make_test_snapshot(i));
+        }
+        // Push tick 4 — overwrites slot 0. Now slot 0 holds tick 4, not tick 1.
+        ring.push(make_test_snapshot(4));
+
+        // get_by_pos(0) should return None (evicted), NOT tick 4.
+        assert!(ring.get_by_pos(0).is_none(), "pos 0 should be evicted");
+
+        // get_by_pos(3) should return tick 4 (in slot 0, tag=3).
+        let snap = ring.get_by_pos(3).unwrap();
+        assert_eq!(snap.tick_id(), TickId(4));
+
+        // get_by_pos(1) should still return tick 2.
+        let snap = ring.get_by_pos(1).unwrap();
+        assert_eq!(snap.tick_id(), TickId(2));
+    }
 }

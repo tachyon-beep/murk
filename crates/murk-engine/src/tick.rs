@@ -71,6 +71,23 @@ impl std::error::Error for TickError {
 
 // ── TickEngine ───────────────────────────────────────────────────
 
+/// Cumulative counters tracked across ticks and reported in metrics.
+///
+/// Extracting these into a `Default`-deriving struct keeps `new()`,
+/// `reset()`, and `refresh_counter_metrics()` in sync automatically.
+#[derive(Default)]
+struct CumulativeCounters {
+    queue_full_rejections: u64,
+    tick_disabled_rejections: u64,
+    rollback_events: u64,
+    tick_disabled_transitions: u64,
+    worker_stall_events: u64,
+    ring_not_available_events: u64,
+    ring_eviction_events: u64,
+    ring_stale_read_events: u64,
+    ring_skew_retry_events: u64,
+}
+
 /// Single-threaded tick engine for Lockstep mode.
 ///
 /// Owns all simulation state and executes ticks synchronously. Each
@@ -88,15 +105,7 @@ pub struct TickEngine {
     consecutive_rollback_count: u32,
     tick_disabled: bool,
     max_consecutive_rollbacks: u32,
-    total_queue_full_rejections: u64,
-    total_tick_disabled_rejections: u64,
-    total_rollback_events: u64,
-    total_tick_disabled_transitions: u64,
-    total_worker_stall_events: u64,
-    total_ring_not_available_events: u64,
-    total_ring_eviction_events: u64,
-    total_ring_stale_read_events: u64,
-    total_ring_skew_retry_events: u64,
+    counters: CumulativeCounters,
     propagator_scratch: PropagatorScratch,
     base_field_set: BaseFieldSet,
     base_cache: BaseFieldCache,
@@ -113,7 +122,7 @@ impl TickEngine {
     pub fn new(config: WorldConfig) -> Result<Self, ConfigError> {
         // Validate and build read resolution plan.
         config.validate()?;
-        let defined_fields = config.defined_field_set();
+        let defined_fields = config.defined_field_set()?;
         let plan = murk_propagator::validate_pipeline(
             &config.propagators,
             &defined_fields,
@@ -122,29 +131,39 @@ impl TickEngine {
         )?;
 
         // Build arena field defs.
-        // Safety: validate() already checked fields.len() fits in u32.
         let arena_field_defs: Vec<(FieldId, murk_core::FieldDef)> = config
             .fields
             .iter()
             .enumerate()
-            .map(|(i, def)| {
-                (
-                    FieldId(u32::try_from(i).expect("field count validated")),
-                    def.clone(),
-                )
+            .map(|(i, def)| -> Result<_, ConfigError> {
+                let id = u32::try_from(i).map_err(|_| ConfigError::FieldCountOverflow {
+                    value: config.fields.len(),
+                })?;
+                Ok((FieldId(id), def.clone()))
             })
-            .collect();
+            .collect::<Result<_, _>>()?;
 
         // Safety: validate() already checked cell_count fits in u32.
-        let cell_count = u32::try_from(config.space.cell_count()).expect("cell count validated");
+        let cell_count = u32::try_from(config.space.cell_count()).map_err(|_| {
+            ConfigError::CellCountOverflow {
+                value: config.space.cell_count(),
+            }
+        })?;
         let arena_config = ArenaConfig::new(cell_count);
 
         // Build static arena for any Static fields.
         let static_fields: Vec<(FieldId, u32)> = arena_field_defs
             .iter()
             .filter(|(_, d)| d.mutability == FieldMutability::Static)
-            .map(|(id, d)| (*id, cell_count * d.field_type.components()))
-            .collect();
+            .map(|(id, d)| {
+                let len = cell_count
+                    .checked_mul(d.field_type.components())
+                    .ok_or(ConfigError::CellCountOverflow {
+                        value: cell_count as usize,
+                    })?;
+                Ok((*id, len))
+            })
+            .collect::<Result<_, ConfigError>>()?;
         let static_arena = StaticArena::new(&static_fields).into_shared();
 
         let arena = PingPongArena::new(arena_config, arena_field_defs, static_arena)?;
@@ -175,15 +194,7 @@ impl TickEngine {
             consecutive_rollback_count: 0,
             tick_disabled: false,
             max_consecutive_rollbacks: 3,
-            total_queue_full_rejections: 0,
-            total_tick_disabled_rejections: 0,
-            total_rollback_events: 0,
-            total_tick_disabled_transitions: 0,
-            total_worker_stall_events: 0,
-            total_ring_not_available_events: 0,
-            total_ring_eviction_events: 0,
-            total_ring_stale_read_events: 0,
-            total_ring_skew_retry_events: 0,
+            counters: CumulativeCounters::default(),
             propagator_scratch,
             base_field_set,
             base_cache: BaseFieldCache::new(),
@@ -200,14 +211,20 @@ impl TickEngine {
         for receipt in &receipts {
             match receipt.reason_code {
                 Some(IngressError::QueueFull) => {
-                    self.total_queue_full_rejections =
-                        self.total_queue_full_rejections.saturating_add(1);
+                    self.counters.queue_full_rejections =
+                        self.counters.queue_full_rejections.saturating_add(1);
                 }
                 Some(IngressError::TickDisabled) => {
-                    self.total_tick_disabled_rejections =
-                        self.total_tick_disabled_rejections.saturating_add(1);
+                    self.counters.tick_disabled_rejections =
+                        self.counters.tick_disabled_rejections.saturating_add(1);
                 }
-                _ => {}
+                // Accepted commands and other rejection types don't need counting.
+                Some(IngressError::Stale)
+                | Some(IngressError::TickRollback)
+                | Some(IngressError::ShuttingDown)
+                | Some(IngressError::UnsupportedCommand)
+                | Some(IngressError::NotApplied)
+                | None => {}
             }
         }
         self.refresh_counter_metrics();
@@ -267,12 +284,23 @@ impl TickEngine {
                     field_id,
                     value,
                 } => {
-                    if let Some(rank) = self.space.canonical_rank(coord) {
+                    let applied = if let Some(rank) = self.space.canonical_rank(coord) {
                         if let Some(buf) = guard.writer.write(*field_id) {
                             if rank < buf.len() {
                                 buf[rank] = *value;
+                                true
+                            } else {
+                                false
                             }
+                        } else {
+                            false
                         }
+                    } else {
+                        false
+                    };
+                    if !applied {
+                        receipt.accepted = false;
+                        receipt.reason_code = Some(IngressError::NotApplied);
                     }
                 }
                 CommandPayload::SetParameter { .. }
@@ -312,15 +340,29 @@ impl TickEngine {
 
             // 4c. Seed WriteMode::Incremental buffers from previous generation.
             for field in self.plan.incremental_fields_for(i) {
-                if let Some(prev_data) = self.base_cache.read(field) {
-                    // Copy through a temp buffer: base_cache borrows &self,
-                    // guard.writer.write() borrows &mut guard.
-                    let prev: Vec<f32> = prev_data.to_vec();
-                    if let Some(write_buf) = guard.writer.write(field) {
-                        let copy_len = prev.len().min(write_buf.len());
-                        write_buf[..copy_len].copy_from_slice(&prev[..copy_len]);
+                let prev_data = match self.base_cache.read(field) {
+                    Some(data) => data,
+                    // First tick: no previous generation to seed from. Expected.
+                    None => continue,
+                };
+                // Copy through a temp buffer: base_cache borrows &self,
+                // guard.writer.write() borrows &mut guard.
+                let prev: Vec<f32> = prev_data.to_vec();
+                let write_buf = match guard.writer.write(field) {
+                    Some(buf) => buf,
+                    None => {
+                        debug_assert!(
+                            false,
+                            "incremental field {:?} declared in plan but writer returned None \
+                             for propagator '{}'",
+                            field,
+                            prop.name(),
+                        );
+                        continue;
                     }
-                }
+                };
+                let copy_len = prev.len().min(write_buf.len());
+                write_buf[..copy_len].copy_from_slice(&prev[..copy_len]);
             }
 
             // 4d. Reset propagator scratch.
@@ -392,19 +434,19 @@ impl TickEngine {
             propagator_us,
             snapshot_publish_us,
             memory_bytes: self.arena.memory_bytes(),
-            sparse_retired_ranges: self.arena.sparse_retired_range_count() as u32,
-            sparse_pending_retired: self.arena.sparse_pending_retired_count() as u32,
+            sparse_retired_ranges: u32::try_from(self.arena.sparse_retired_range_count()).unwrap_or(u32::MAX),
+            sparse_pending_retired: u32::try_from(self.arena.sparse_pending_retired_count()).unwrap_or(u32::MAX),
             sparse_reuse_hits: self.arena.sparse_reuse_hits(),
             sparse_reuse_misses: self.arena.sparse_reuse_misses(),
-            queue_full_rejections: self.total_queue_full_rejections,
-            tick_disabled_rejections: self.total_tick_disabled_rejections,
-            rollback_events: self.total_rollback_events,
-            tick_disabled_transitions: self.total_tick_disabled_transitions,
-            worker_stall_events: self.total_worker_stall_events,
-            ring_not_available_events: self.total_ring_not_available_events,
-            ring_eviction_events: self.total_ring_eviction_events,
-            ring_stale_read_events: self.total_ring_stale_read_events,
-            ring_skew_retry_events: self.total_ring_skew_retry_events,
+            queue_full_rejections: self.counters.queue_full_rejections,
+            tick_disabled_rejections: self.counters.tick_disabled_rejections,
+            rollback_events: self.counters.rollback_events,
+            tick_disabled_transitions: self.counters.tick_disabled_transitions,
+            worker_stall_events: self.counters.worker_stall_events,
+            ring_not_available_events: self.counters.ring_not_available_events,
+            ring_eviction_events: self.counters.ring_eviction_events,
+            ring_stale_read_events: self.counters.ring_stale_read_events,
+            ring_skew_retry_events: self.counters.ring_skew_retry_events,
         };
         self.arena.reset_sparse_reuse_counters();
         self.last_metrics = metrics.clone();
@@ -424,13 +466,15 @@ impl TickEngine {
         accepted_start: usize,
     ) -> Result<TickResult, TickError> {
         // Guard was dropped → staging buffer abandoned (free rollback).
+        // Cancel the in-progress tick so begin_tick() can be called again.
+        self.arena.cancel_tick();
         self.arena.reset_sparse_reuse_counters();
-        self.total_rollback_events = self.total_rollback_events.saturating_add(1);
-        self.consecutive_rollback_count += 1;
+        self.counters.rollback_events = self.counters.rollback_events.saturating_add(1);
+        self.consecutive_rollback_count = self.consecutive_rollback_count.saturating_add(1);
         if self.consecutive_rollback_count >= self.max_consecutive_rollbacks {
             if !self.tick_disabled {
-                self.total_tick_disabled_transitions =
-                    self.total_tick_disabled_transitions.saturating_add(1);
+                self.counters.tick_disabled_transitions =
+                    self.counters.tick_disabled_transitions.saturating_add(1);
             }
             self.tick_disabled = true;
         }
@@ -463,54 +507,47 @@ impl TickEngine {
         self.param_version = ParameterVersion(0);
         self.tick_disabled = false;
         self.consecutive_rollback_count = 0;
-        self.total_queue_full_rejections = 0;
-        self.total_tick_disabled_rejections = 0;
-        self.total_rollback_events = 0;
-        self.total_tick_disabled_transitions = 0;
-        self.total_worker_stall_events = 0;
-        self.total_ring_not_available_events = 0;
-        self.total_ring_eviction_events = 0;
-        self.total_ring_stale_read_events = 0;
-        self.total_ring_skew_retry_events = 0;
+        self.counters = CumulativeCounters::default();
         self.last_metrics = StepMetrics::default();
         Ok(())
     }
 
     pub(crate) fn record_worker_stall_events(&mut self, count: u64) {
-        self.total_worker_stall_events = self.total_worker_stall_events.saturating_add(count);
+        self.counters.worker_stall_events = self.counters.worker_stall_events.saturating_add(count);
         self.refresh_counter_metrics();
     }
 
     pub(crate) fn set_ring_not_available_events(&mut self, total: u64) {
-        self.total_ring_not_available_events = self.total_ring_not_available_events.max(total);
+        self.counters.ring_not_available_events = self.counters.ring_not_available_events.max(total);
         self.refresh_counter_metrics();
     }
 
     pub(crate) fn set_ring_eviction_events(&mut self, total: u64) {
-        self.total_ring_eviction_events = self.total_ring_eviction_events.max(total);
+        self.counters.ring_eviction_events = self.counters.ring_eviction_events.max(total);
         self.refresh_counter_metrics();
     }
 
     pub(crate) fn set_ring_stale_read_events(&mut self, total: u64) {
-        self.total_ring_stale_read_events = self.total_ring_stale_read_events.max(total);
+        self.counters.ring_stale_read_events = self.counters.ring_stale_read_events.max(total);
         self.refresh_counter_metrics();
     }
 
     pub(crate) fn set_ring_skew_retry_events(&mut self, total: u64) {
-        self.total_ring_skew_retry_events = self.total_ring_skew_retry_events.max(total);
+        self.counters.ring_skew_retry_events = self.counters.ring_skew_retry_events.max(total);
         self.refresh_counter_metrics();
     }
 
     fn refresh_counter_metrics(&mut self) {
-        self.last_metrics.queue_full_rejections = self.total_queue_full_rejections;
-        self.last_metrics.tick_disabled_rejections = self.total_tick_disabled_rejections;
-        self.last_metrics.rollback_events = self.total_rollback_events;
-        self.last_metrics.tick_disabled_transitions = self.total_tick_disabled_transitions;
-        self.last_metrics.worker_stall_events = self.total_worker_stall_events;
-        self.last_metrics.ring_not_available_events = self.total_ring_not_available_events;
-        self.last_metrics.ring_eviction_events = self.total_ring_eviction_events;
-        self.last_metrics.ring_stale_read_events = self.total_ring_stale_read_events;
-        self.last_metrics.ring_skew_retry_events = self.total_ring_skew_retry_events;
+        let c = &self.counters;
+        self.last_metrics.queue_full_rejections = c.queue_full_rejections;
+        self.last_metrics.tick_disabled_rejections = c.tick_disabled_rejections;
+        self.last_metrics.rollback_events = c.rollback_events;
+        self.last_metrics.tick_disabled_transitions = c.tick_disabled_transitions;
+        self.last_metrics.worker_stall_events = c.worker_stall_events;
+        self.last_metrics.ring_not_available_events = c.ring_not_available_events;
+        self.last_metrics.ring_eviction_events = c.ring_eviction_events;
+        self.last_metrics.ring_stale_read_events = c.ring_stale_read_events;
+        self.last_metrics.ring_skew_retry_events = c.ring_skew_retry_events;
     }
 
     /// Get a read-only snapshot of the current published generation.
@@ -1384,6 +1421,76 @@ mod tests {
     }
 
     #[test]
+    fn setfield_oob_receipt_not_applied() {
+        // BUG-099: SetField with OOB coord was silently skipped but receipt
+        // stayed accepted=true with applied_tick_id set. After fix, OOB
+        // SetField must produce accepted=false with NotApplied reason.
+        let mut engine = simple_engine();
+
+        // Coord [999] is out of bounds for a Line1D(10).
+        let oob_coord: Coord = vec![999i32].into();
+        let cmd = Command {
+            payload: CommandPayload::SetField {
+                coord: oob_coord,
+                field_id: FieldId(0),
+                value: 1.0,
+            },
+            expires_after_tick: TickId(100),
+            source_id: None,
+            source_seq: None,
+            priority_class: 1,
+            arrival_seq: 0,
+        };
+        engine.submit_commands(vec![cmd]);
+
+        let result = engine.execute_tick().unwrap();
+        assert_eq!(result.receipts.len(), 1);
+        let receipt = &result.receipts[0];
+        assert!(
+            !receipt.accepted,
+            "OOB SetField must be marked not accepted"
+        );
+        assert_eq!(
+            receipt.applied_tick_id, None,
+            "OOB SetField must not have applied_tick_id"
+        );
+        assert_eq!(
+            receipt.reason_code,
+            Some(IngressError::NotApplied),
+            "OOB SetField must carry NotApplied reason"
+        );
+    }
+
+    #[test]
+    fn setfield_unknown_field_receipt_not_applied() {
+        // SetField targeting a non-existent field should also report NotApplied.
+        let mut engine = simple_engine();
+
+        let coord: Coord = vec![0i32].into();
+        let cmd = Command {
+            payload: CommandPayload::SetField {
+                coord,
+                field_id: FieldId(99), // no such field
+                value: 1.0,
+            },
+            expires_after_tick: TickId(100),
+            source_id: None,
+            source_seq: None,
+            priority_class: 1,
+            arrival_seq: 0,
+        };
+        engine.submit_commands(vec![cmd]);
+
+        let result = engine.execute_tick().unwrap();
+        assert_eq!(result.receipts.len(), 1);
+        assert!(!result.receipts[0].accepted);
+        assert_eq!(
+            result.receipts[0].reason_code,
+            Some(IngressError::NotApplied)
+        );
+    }
+
+    #[test]
     fn writemode_incremental_seeds_from_previous_gen() {
         // Regression test for BUG-015: WriteMode::Incremental buffers must
         // be pre-seeded with previous-generation data, not zero-filled.
@@ -1466,5 +1573,35 @@ mod tests {
         let snap = engine.snapshot();
         assert_eq!(snap.read(FieldId(0)).unwrap()[0], 42.0);
         assert_eq!(snap.read(FieldId(0)).unwrap()[1], 99.0);
+    }
+
+    /// BUG-106: Unchecked u32 * u32 for static field length panics on overflow.
+    #[test]
+    fn static_field_overflow_returns_error() {
+        let config = WorldConfig {
+            space: Box::new(Line1D::new(3, EdgeBehavior::Absorb).unwrap()),
+            fields: vec![FieldDef {
+                name: "huge_vec".to_string(),
+                field_type: FieldType::Vector {
+                    dims: u32::MAX / 2, // 3 * (u32::MAX/2) overflows u32
+                },
+                mutability: FieldMutability::Static,
+                units: None,
+                bounds: None,
+                boundary_behavior: BoundaryBehavior::Clamp,
+            }],
+            propagators: vec![Box::new(ConstPropagator::new("c", FieldId(0), 1.0))],
+            dt: 0.1,
+            seed: 42,
+            ring_buffer_size: 8,
+            max_ingress_queue: 1024,
+            tick_rate_hz: None,
+            backoff: crate::config::BackoffConfig::default(),
+        };
+        match TickEngine::new(config) {
+            Err(crate::config::ConfigError::CellCountOverflow { .. }) => {}
+            Ok(_) => panic!("expected CellCountOverflow, got Ok"),
+            Err(e) => panic!("expected CellCountOverflow, got {e}"),
+        }
     }
 }

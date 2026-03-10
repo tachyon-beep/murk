@@ -9,8 +9,8 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
 use murk_ffi::{
-    murk_current_tick, murk_is_tick_disabled, murk_lockstep_create, murk_lockstep_destroy,
-    murk_lockstep_reset, murk_lockstep_step, murk_seed, murk_snapshot_read_field,
+    murk_current_tick_get, murk_is_tick_disabled_get, murk_lockstep_create, murk_lockstep_destroy,
+    murk_lockstep_reset, murk_lockstep_step, murk_seed_get, murk_snapshot_read_field,
     murk_world_preflight_get, MurkCommand, MurkReceipt, MurkStepMetrics, MurkWorldPreflight,
 };
 
@@ -174,24 +174,42 @@ impl World {
     #[getter]
     fn current_tick(&self, py: Python<'_>) -> PyResult<u64> {
         let h = self.require_handle()?;
-        // Release GIL: murk_current_tick locks WORLDS.
-        Ok(py.detach(|| murk_current_tick(h)))
+        // Release GIL: murk_current_tick_get locks WORLDS.
+        let (status, val) = py.detach(|| {
+            let mut v: u64 = 0;
+            let s = murk_current_tick_get(h, &mut v);
+            (s, v)
+        });
+        check_status(status)?;
+        Ok(val)
     }
 
     /// The world's RNG seed.
     #[getter]
     fn seed(&self, py: Python<'_>) -> PyResult<u64> {
         let h = self.require_handle()?;
-        // Release GIL: murk_seed locks WORLDS.
-        Ok(py.detach(|| murk_seed(h)))
+        // Release GIL: murk_seed_get locks WORLDS.
+        let (status, val) = py.detach(|| {
+            let mut v: u64 = 0;
+            let s = murk_seed_get(h, &mut v);
+            (s, v)
+        });
+        check_status(status)?;
+        Ok(val)
     }
 
     /// Whether ticking is disabled (consecutive rollbacks).
     #[getter]
     fn is_tick_disabled(&self, py: Python<'_>) -> PyResult<bool> {
         let h = self.require_handle()?;
-        // Release GIL: murk_is_tick_disabled locks WORLDS.
-        Ok(py.detach(|| murk_is_tick_disabled(h) != 0))
+        // Release GIL: murk_is_tick_disabled_get locks WORLDS.
+        let (status, val) = py.detach(|| {
+            let mut v: u8 = 0;
+            let s = murk_is_tick_disabled_get(h, &mut v);
+            (s, v)
+        });
+        check_status(status)?;
+        Ok(val != 0)
     }
 
     /// Non-blocking queue-depth/readiness snapshot.

@@ -142,7 +142,7 @@ pub fn init_agent_positions(cell_count: usize, n: u16, seed: u64) -> Vec<(u16, u
         // Simple deterministic placement: spread agents across the grid
         let mut pos = ((seed
             .wrapping_mul(6364136223846793005)
-            .wrapping_add(i as u64 * 1442695040888963407))
+            .wrapping_add((i as u64).wrapping_mul(1442695040888963407)))
             % cell_count as u64) as usize;
 
         // Linear probe to avoid collisions (guaranteed to terminate: n <= cell_count)
@@ -210,6 +210,17 @@ mod tests {
         let indices: Vec<usize> = positions.iter().map(|&(_, idx)| idx).collect();
         let unique: std::collections::HashSet<usize> = indices.iter().copied().collect();
         assert_eq!(unique.len(), 3, "all positions should be unique");
+    }
+
+    /// BUG-107: init_agent_positions used plain `*` instead of wrapping_mul,
+    /// causing overflow panic in debug builds for n >= 14.
+    #[test]
+    fn init_agent_positions_large_n_no_overflow() {
+        let positions = init_agent_positions(1000, 100, 42);
+        assert_eq!(positions.len(), 100);
+        let unique: std::collections::HashSet<usize> =
+            positions.iter().map(|&(_, idx)| idx).collect();
+        assert_eq!(unique.len(), 100, "all positions should be unique");
     }
 
     #[test]

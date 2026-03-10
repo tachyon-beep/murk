@@ -115,10 +115,10 @@ impl SparseSlab {
         let (segment_index, offset) =
             if let Some(pos) = self.retired_ranges.iter().position(|r| r.len == len) {
                 let r = self.retired_ranges.swap_remove(pos);
-                self.reuse_hits += 1;
+                self.reuse_hits = self.reuse_hits.saturating_add(1);
                 (r.segment_index, r.offset)
             } else {
-                self.reuse_misses += 1;
+                self.reuse_misses = self.reuse_misses.saturating_add(1);
                 segments.alloc(len)?
             };
 

@@ -165,8 +165,8 @@ impl TickThreadState {
             shutdown_flag,
             tick_stopped,
             tick_budget: Duration::from_secs_f64(1.0 / tick_rate_hz),
-            max_epoch_hold_ns: max_epoch_hold_ms * 1_000_000,
-            cancel_grace_ns: cancel_grace_ms * 1_000_000,
+            max_epoch_hold_ns: max_epoch_hold_ms.saturating_mul(1_000_000),
+            cancel_grace_ns: cancel_grace_ms.saturating_mul(1_000_000),
             backoff: AdaptiveBackoff::new(backoff_config),
         }
     }
@@ -257,7 +257,7 @@ impl TickThreadState {
     fn effective_hold_ns(&self) -> u64 {
         let effective = self.backoff.effective_max_skew().max(1);
         let initial = self.backoff.initial_max_skew().max(1);
-        self.max_epoch_hold_ns * effective / initial
+        self.max_epoch_hold_ns.saturating_mul(effective) / initial
     }
 
     /// Check for stalled workers and force-unpin them.
@@ -281,7 +281,7 @@ impl TickThreadState {
                 worker.request_cancel();
 
                 // If already past the grace period, force unpin.
-                if hold_ns > effective_hold_ns + self.cancel_grace_ns {
+                if hold_ns > effective_hold_ns.saturating_add(self.cancel_grace_ns) {
                     worker.unpin();
                     worker.clear_cancel();
                     stall_events = stall_events.saturating_add(1);
@@ -414,6 +414,61 @@ mod tests {
         let skew = backoff.record_tick(true);
         assert_eq!(skew, 8);
         // Scale ratio: 8/2 = 4.0 — hold threshold would quadruple
+    }
+
+    /// BUG-105: TickThreadState::new used unchecked u64 arithmetic for
+    /// ms→ns conversion. Verify that extreme values don't panic.
+    #[test]
+    fn extreme_epoch_hold_ms_does_not_overflow() {
+        use crate::epoch::{EpochCounter, WorkerEpoch};
+        use crate::ring::SnapshotRing;
+        use crate::tick::TickEngine;
+        use murk_core::id::FieldId;
+        use murk_core::{BoundaryBehavior, FieldDef, FieldMutability, FieldType};
+        use murk_space::{EdgeBehavior, Line1D};
+
+        let config = crate::config::WorldConfig {
+            space: Box::new(Line1D::new(4, EdgeBehavior::Absorb).unwrap()),
+            fields: vec![FieldDef {
+                name: "f".to_string(),
+                field_type: FieldType::Scalar,
+                mutability: FieldMutability::PerTick,
+                units: None,
+                bounds: None,
+                boundary_behavior: BoundaryBehavior::Clamp,
+            }],
+            propagators: vec![Box::new(
+                murk_test_utils::ConstPropagator::new("c", FieldId(0), 1.0),
+            )],
+            dt: 0.1,
+            seed: 1,
+            ring_buffer_size: 2,
+            max_ingress_queue: 8,
+            tick_rate_hz: Some(60.0),
+            backoff: BackoffConfig::default(),
+        };
+        let engine = TickEngine::new(config).unwrap();
+        let ring = Arc::new(SnapshotRing::new(2));
+        let epoch = Arc::new(EpochCounter::new());
+        let workers: Arc<[WorkerEpoch]> = vec![WorkerEpoch::new(0)].into();
+        let (_tx, rx) = crossbeam_channel::bounded(1);
+        let shutdown = Arc::new(AtomicBool::new(true));
+        let stopped = Arc::new(AtomicBool::new(false));
+
+        // This must not panic despite u64::MAX * 1_000_000 overflow.
+        let _state = TickThreadState::new(
+            engine,
+            ring,
+            epoch,
+            workers,
+            rx,
+            shutdown,
+            stopped,
+            60.0,
+            u64::MAX, // would overflow without saturating_mul
+            u64::MAX,
+            &BackoffConfig::default(),
+        );
     }
 
     #[test]

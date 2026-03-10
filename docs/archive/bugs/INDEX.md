@@ -3,34 +3,114 @@
 Generated 2026-02-17 from static analysis triage of 110 source reports.
 Updated 2026-02-21 with wave-4 deep audit findings (#54-#94).
 Updated 2026-02-22: closed #53 (v0.1.7), #97 (v0.1.8).
+Updated 2026-02-24: wave-5 static analysis (#99-#119), 21 new open bugs.
+Updated 2026-02-24: wave B panic/crash hardening (#103-#107), 5 bugs fixed.
+Updated 2026-02-24: murk-obs validation cluster (#110, #111, #118), 3 bugs fixed.
 
-**Status (updated 2026-02-22):** 98 fixed, 0 partially fixed, 0 open.
+**Status (updated 2026-02-24):** 106 fixed, 0 partially fixed, 13 open.
 
 ## Open Bugs
 
-### Critical (0 open)
+### Critical (2 open)
 
-| # | Ticket | Crate | Summary | Status |
-|---|--------|-------|---------|--------|
-| — | (none) | — | — | — |
+| # | Ticket | Crate | Summary | Status | Wave |
+|---|--------|-------|---------|--------|------|
+| 99 | [engine-setfield-oob-receipt-marked-applied](engine-setfield-oob-receipt-marked-applied.md) | murk-engine | OOB SetField silently skipped but receipt reports `applied_tick_id` | open | A |
+| 100 | [arena-begin-tick-reentry-sparse-corruption](arena-begin-tick-reentry-sparse-corruption.md) | murk-arena | No re-entry guard on `begin_tick()`; double call corrupts published sparse snapshots | open | A |
 
-### High (0 open)
+### High (11 open)
 
-| # | Ticket | Crate | Summary | Status |
-|---|--------|-------|---------|--------|
-| — | (none) | — | — | — |
+| # | Ticket | Crate | Summary | Status | Wave |
+|---|--------|-------|---------|--------|------|
+| 101 | [propagators-diffusion-generic-gradient-periodic-sign](propagators-diffusion-generic-gradient-periodic-sign.md) | murk-propagators | `step_generic` gradient uses raw coordinate deltas; wrong sign at wrap boundaries | open | A |
+| 102 | [propagators-agent-movement-respawn-on-all-zero](propagators-agent-movement-respawn-on-all-zero.md) | murk-propagators | All-zero field heuristic instead of tick ID; agents respawn on any all-zero tick | open | A |
+| 103 | [engine-realtime-new-panics-on-thread-spawn-failure](closed/engine-realtime-new-panics-on-thread-spawn-failure.md) | murk-engine | `.expect()` on thread spawn panics + leaks already-started threads | **fixed** | B |
+| 104 | [engine-tick-rate-hz-reciprocal-overflow](closed/engine-tick-rate-hz-reciprocal-overflow.md) | murk-engine | Subnormal `tick_rate_hz` passes validation but `1/x = inf` panics `Duration::from_secs_f64` | **fixed** | B |
+| 105 | [engine-stall-threshold-arithmetic-overflow](closed/engine-stall-threshold-arithmetic-overflow.md) | murk-engine | Unchecked `u64` arithmetic in stall threshold / hold / grace computation | **fixed** | B |
+| 106 | [engine-tick-static-field-length-overflow](closed/engine-tick-static-field-length-overflow.md) | murk-engine | Unchecked `u32 * u32` for static field length in `TickEngine::new` bypasses arena's `checked_mul` | **fixed** | B |
+| 108 | [engine-batched-obsspec-missing-field-atomicity](engine-batched-obsspec-missing-field-atomicity.md) | murk-engine | `BatchedEngine` steps worlds before observation fails on missing field | open | C |
+| 109 | [arena-descriptor-duplicate-field-ids](arena-descriptor-duplicate-field-ids.md) | murk-arena | `FieldDescriptor::from_field_defs` silently accepts duplicate FieldIds (#14 only fixed StaticArena) | open | C |
+| 110 | [obs-plan-agentrect-missing-halfextent-ndim-check](closed/obs-plan-agentrect-missing-halfextent-ndim-check.md) | murk-obs | `AgentRect` half_extent not validated against `space.ndim()`; zip silently truncates | **fixed** | C |
+| 111 | [obs-flatbuf-empty-coords-roundtrip-failure](closed/obs-flatbuf-empty-coords-roundtrip-failure.md) | murk-obs | `serialize` accepts empty coords but `deserialize` rejects `ndim==0`; roundtrip failure | **fixed** | C |
+| 114 | [ffi-c-header-enum-name-collision](ffi-c-header-enum-name-collision.md) | murk-ffi | Duplicate unscoped C enum constants (`Absorb`, `Clamp`, `Wrap`) make header uncompilable | open | D |
 
-### Medium (0 open)
+### Medium (6 open)
 
-| # | Ticket | Crate | Summary | Status |
-|---|--------|-------|---------|--------|
-| — | (none) | — | — | — |
+| # | Ticket | Crate | Summary | Status | Wave |
+|---|--------|-------|---------|--------|------|
+| 107 | [bench-init-agent-positions-overflow](closed/bench-init-agent-positions-overflow.md) | murk-bench | Plain `*` instead of `wrapping_mul` in hash; panics in debug for ≥14 agents | **fixed** | B |
+| 112 | [propagators-diffusion-unchecked-field-arity](propagators-diffusion-unchecked-field-arity.md) | murk-propagators | No field slice length validation before `[i*2+comp]` indexing | open | C |
+| 115 | [ffi-config-edge-behavior-unchecked-f64-cast](ffi-config-edge-behavior-unchecked-f64-cast.md) | murk-ffi | Raw `as i32` casts for enum params; NaN→0 maps to valid variant | open | D |
+| 116 | [ffi-write-receipts-null-buffer-count](ffi-write-receipts-null-buffer-count.md) | murk-ffi | Reports non-zero receipt count even when output buffer is null | open | D |
+| 118 | [obs-geometry-graph-distance-hex-panic-short-input](closed/obs-geometry-graph-distance-hex-panic-short-input.md) | murk-obs | Hex branch panics on short input in release builds (debug_assert elided) | **fixed** | E |
+| 119 | [propagator-validate-pipeline-multi-call](propagator-validate-pipeline-multi-call.md) | murk-propagator | `validate_pipeline` calls `writes()`/`reads()` multiple times per propagator | open | E |
 
-### Low (0 open)
+### Low (2 open)
 
-| # | Ticket | Crate | Summary | Status |
-|---|--------|-------|---------|--------|
-| — | (none) | — | — | — |
+| # | Ticket | Crate | Summary | Status | Wave |
+|---|--------|-------|---------|--------|------|
+| 113 | [propagators-agent-emission-additive-copy-before-length-check](propagators-agent-emission-additive-copy-before-length-check.md) | murk-propagators | `copy_from_slice` before length check in Additive mode | open | C |
+| 117 | [engine-config-cellcountoverflow-misused-for-field-count](engine-config-cellcountoverflow-misused-for-field-count.md) | murk-engine | `CellCountOverflow` Display says "cell count" when used for field-count overflow | open | E |
+
+## Resolution Waves
+
+Suggested fix order clusters bugs by impact class, then by crate locality to minimize context-switching.
+
+### Wave A — Silent Correctness (fix first)
+
+These produce **wrong results without any error signal**. Callers cannot detect the problem.
+
+| # | Ticket | Crate | Fix Locality |
+|---|--------|-------|--------------|
+| 99 | engine-setfield-oob-receipt-marked-applied | murk-engine | `tick.rs` — receipt handling |
+| 100 | arena-begin-tick-reentry-sparse-corruption | murk-arena | `pingpong.rs` — add re-entry guard |
+| 101 | propagators-diffusion-generic-gradient-periodic-sign | murk-propagators | `diffusion.rs` — signed displacement |
+| 102 | propagators-agent-movement-respawn-on-all-zero | murk-propagators | `agent_movement.rs` — tick ID check |
+
+### Wave B — Panic/Crash Hardening (**ALL FIXED**)
+
+These **crashed the process** via `.expect()` or unchecked arithmetic instead of returning errors. All five fixed in this session.
+
+| # | Ticket | Crate | Fix Summary |
+|---|--------|-------|-------------|
+| 103 | engine-realtime-new-panics-on-thread-spawn-failure | murk-engine | `.expect()` → `Result` + `ThreadSpawnFailed` variant; partial startup rollback |
+| 104 | engine-tick-rate-hz-reciprocal-overflow | murk-engine | Validation rejects `hz` where `1.0/hz` is infinite |
+| 105 | engine-stall-threshold-arithmetic-overflow | murk-engine | `saturating_mul`/`saturating_add` for all ms→ns and stall arithmetic |
+| 106 | engine-tick-static-field-length-overflow | murk-engine | `checked_mul` + `CellCountOverflow` error on static field length |
+| 107 | bench-init-agent-positions-overflow | murk-bench | `wrapping_mul` for hash computation |
+
+### Wave C — Validation Gaps (fix third)
+
+Missing input/config validation that lets bad state through. Each fix is a localized guard.
+
+| # | Ticket | Crate | Fix Locality |
+|---|--------|-------|--------------|
+| 108 | engine-batched-obsspec-missing-field-atomicity | murk-engine | `batched.rs` — field existence preflight |
+| 109 | arena-descriptor-duplicate-field-ids | murk-arena | `descriptor.rs` — insert() return check |
+| 110 | obs-plan-agentrect-missing-halfextent-ndim-check | murk-obs | ndim validation in AgentRect compile path |
+| 111 | obs-flatbuf-empty-coords-roundtrip-failure | murk-obs | Decoder accepts n_coords==0 regardless of ndim |
+| 112 | propagators-diffusion-unchecked-field-arity | murk-propagators | `diffusion.rs` — length preflight |
+| 113 | propagators-agent-emission-additive-copy-before-length-check | murk-propagators | `agent_emission.rs` — length check before copy |
+
+### Wave D — FFI Boundary (fix fourth)
+
+Affects C consumers only. The header collision (#114) blocks any C compilation.
+
+| # | Ticket | Crate | Fix Locality |
+|---|--------|-------|--------------|
+| 114 | ffi-c-header-enum-name-collision | murk-ffi | `cbindgen.toml` — prefix_with_name |
+| 115 | ffi-config-edge-behavior-unchecked-f64-cast | murk-ffi | `config.rs` — f64_to_i32 helper |
+| 116 | ffi-write-receipts-null-buffer-count | murk-ffi | `world.rs` — null buffer guard |
+
+### Wave E — Minor Polish (fix last)
+
+Low-impact issues: wrong error message, edge-case panic in pub API, wasteful but correct multi-call.
+
+| # | Ticket | Crate | Fix Locality |
+|---|--------|-------|--------------|
+| 117 | engine-config-cellcountoverflow-misused-for-field-count | murk-engine | `config.rs` — new error variant or message |
+| 118 | obs-geometry-graph-distance-hex-panic-short-input | murk-obs | `debug_assert_eq!` → `assert_eq!` for release safety |
+| 119 | propagator-validate-pipeline-multi-call | murk-propagator | `pipeline.rs` — precompute metadata
 
 ## Closed Bugs (98 fixed)
 
@@ -38,6 +118,14 @@ Tickets moved to [closed/](closed/).
 
 | # | Ticket | Crate | Summary | Fix Commit |
 |---|--------|-------|---------|------------|
+| 110 | [obs-plan-agentrect-missing-halfextent-ndim-check](closed/obs-plan-agentrect-missing-halfextent-ndim-check.md) | murk-obs | `half_extent.len() != ndim` validation in AgentRect compile path | (this session) |
+| 111 | [obs-flatbuf-empty-coords-roundtrip-failure](closed/obs-flatbuf-empty-coords-roundtrip-failure.md) | murk-obs | Decoder accepts `n_coords==0` regardless of `ndim`; roundtrip restored | (this session) |
+| 118 | [obs-geometry-graph-distance-hex-panic-short-input](closed/obs-geometry-graph-distance-hex-panic-short-input.md) | murk-obs | `debug_assert_eq!` → `assert_eq!` for release safety | (this session) |
+| 103 | [engine-realtime-new-panics-on-thread-spawn-failure](closed/engine-realtime-new-panics-on-thread-spawn-failure.md) | murk-engine | `.expect()` → `Result` + `ThreadSpawnFailed`; partial startup rollback | (this session) |
+| 104 | [engine-tick-rate-hz-reciprocal-overflow](closed/engine-tick-rate-hz-reciprocal-overflow.md) | murk-engine | Validation rejects `hz` where `1.0/hz` is infinite | (this session) |
+| 105 | [engine-stall-threshold-arithmetic-overflow](closed/engine-stall-threshold-arithmetic-overflow.md) | murk-engine | `saturating_mul`/`saturating_add` for all ms→ns and stall arithmetic | (this session) |
+| 106 | [engine-tick-static-field-length-overflow](closed/engine-tick-static-field-length-overflow.md) | murk-engine | `checked_mul` + `CellCountOverflow` on static field length | (this session) |
+| 107 | [bench-init-agent-positions-overflow](closed/bench-init-agent-positions-overflow.md) | murk-bench | `wrapping_mul` for hash computation | (this session) |
 | 53 | [ffi-cbindgen-missing-c-header](closed/ffi-cbindgen-missing-c-header.md) | murk-ffi | cbindgen auto-generates C header with 42+ functions, 8 structs, 8 enums | v0.1.7 |
 | 97 | [arena-sparse-fragmentation-metric](closed/arena-sparse-fragmentation-metric.md) | murk-arena | Sparse reuse_hits/reuse_misses wired through engine, FFI, and Python | v0.1.8 |
 | 29 | [arena-sparse-segment-memory-leak](closed/arena-sparse-segment-memory-leak.md) | murk-arena | Two-phase retired range reclamation in SparseSlab; pending→retired→reuse | (this session) |
@@ -141,12 +229,12 @@ Tickets moved to [closed/](closed/).
 
 | Crate | Critical | High | Medium | Low | Total Open |
 |-------|----------|------|--------|-----|------------|
-| murk-engine | 0 | 0 | 0 | 0 | 0 |
-| murk-arena | 0 | 0 | 0 | 0 | 0 |
-| murk-ffi | 0 | 0 | 0 | 0 | 0 |
+| murk-engine | 1 | 1 | 0 | 1 | 3 |
+| murk-arena | 1 | 1 | 0 | 0 | 2 |
+| murk-ffi | 0 | 1 | 2 | 0 | 3 |
 | murk-python | 0 | 0 | 0 | 0 | 0 |
-| murk-propagator | 0 | 0 | 0 | 0 | 0 |
-| murk-propagators | 0 | 0 | 0 | 0 | 0 |
+| murk-propagator | 0 | 0 | 1 | 0 | 1 |
+| murk-propagators | 0 | 2 | 1 | 1 | 4 |
 | murk-obs | 0 | 0 | 0 | 0 | 0 |
 | murk-replay | 0 | 0 | 0 | 0 | 0 |
 | murk-space | 0 | 0 | 0 | 0 | 0 |
@@ -156,7 +244,7 @@ Tickets moved to [closed/](closed/).
 | examples | 0 | 0 | 0 | 0 | 0 |
 | scripts | 0 | 0 | 0 | 0 | 0 |
 | workspace (cross-crate) | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **0** | **0** | **0** | **0** | **0** |
+| **Total** | **2** | **5** | **4** | **2** | **13** |
 
 Note: Workspace-wide tickets (#90-#92) affect multiple crates and are counted once under "workspace".
 

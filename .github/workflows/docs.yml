@@ -1,6 +1,9 @@
 name: Docs
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
 
 # Allow only one concurrent deployment, skipping runs queued between the
 # run in-progress and latest queued.  Do NOT cancel in-progress runs so

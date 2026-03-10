@@ -24,19 +24,19 @@ enum MurkBoundaryBehavior {
   /**
    * Clamp to nearest bound.
    */
-  Clamp = 0,
+  MurkBoundaryBehavior_Clamp = 0,
   /**
    * Reflect off the bound.
    */
-  Reflect = 1,
+  MurkBoundaryBehavior_Reflect = 1,
   /**
    * Absorb at the boundary.
    */
-  Absorb = 2,
+  MurkBoundaryBehavior_Absorb = 2,
   /**
    * Wrap around to opposite bound.
    */
-  Wrap = 3,
+  MurkBoundaryBehavior_Wrap = 3,
 };
 typedef int32_t MurkBoundaryBehavior;
 
@@ -47,11 +47,11 @@ enum MurkCommandType {
   /**
    * Set a global scalar parameter.
    */
-  SetParameter = 0,
+  MurkCommandType_SetParameter = 0,
   /**
    * Set a single field value at a coordinate.
    */
-  SetField = 1,
+  MurkCommandType_SetField = 1,
 };
 typedef int32_t MurkCommandType;
 
@@ -62,15 +62,15 @@ enum MurkEdgeBehavior {
   /**
    * Absorb: cells at edge have no neighbor beyond.
    */
-  Absorb = 0,
+  MurkEdgeBehavior_Absorb = 0,
   /**
    * Clamp: beyond-edge neighbors map to edge cell.
    */
-  Clamp = 1,
+  MurkEdgeBehavior_Clamp = 1,
   /**
    * Wrap: periodic boundary.
    */
-  Wrap = 2,
+  MurkEdgeBehavior_Wrap = 2,
 };
 typedef int32_t MurkEdgeBehavior;
 
@@ -81,15 +81,15 @@ enum MurkFieldMutability {
   /**
    * Generation 0 forever.
    */
-  Static = 0,
+  MurkFieldMutability_Static = 0,
   /**
    * New allocation each tick if modified.
    */
-  PerTick = 1,
+  MurkFieldMutability_PerTick = 1,
   /**
    * New allocation only when modified.
    */
-  Sparse = 2,
+  MurkFieldMutability_Sparse = 2,
 };
 typedef int32_t MurkFieldMutability;
 
@@ -100,15 +100,15 @@ enum MurkFieldType {
   /**
    * Single f32 per cell.
    */
-  Scalar = 0,
+  MurkFieldType_Scalar = 0,
   /**
    * Fixed-size f32 vector per cell.
    */
-  Vector = 1,
+  MurkFieldType_Vector = 1,
   /**
    * Categorical (discrete) value per cell.
    */
-  Categorical = 2,
+  MurkFieldType_Categorical = 2,
 };
 typedef int32_t MurkFieldType;
 
@@ -119,31 +119,31 @@ enum MurkSpaceType {
   /**
    * 1D line with configurable edge behavior.
    */
-  Line1D = 0,
+  MurkSpaceType_Line1D = 0,
   /**
    * 1D ring (always-wrap periodic boundary).
    */
-  Ring1D = 1,
+  MurkSpaceType_Ring1D = 1,
   /**
    * 2D grid, 4-connected (N/S/E/W).
    */
-  Square4 = 2,
+  MurkSpaceType_Square4 = 2,
   /**
    * 2D grid, 8-connected (+ diagonals).
    */
-  Square8 = 3,
+  MurkSpaceType_Square8 = 3,
   /**
    * 2D hexagonal lattice, 6-connected (pointy-top).
    */
-  Hex2D = 4,
+  MurkSpaceType_Hex2D = 4,
   /**
    * Cartesian product of arbitrary spaces.
    */
-  ProductSpace = 5,
+  MurkSpaceType_ProductSpace = 5,
   /**
    * 3D FCC lattice, 12-connected (isotropic).
    */
-  Fcc12 = 6,
+  MurkSpaceType_Fcc12 = 6,
 };
 typedef int32_t MurkSpaceType;
 
@@ -156,95 +156,100 @@ enum MurkStatus {
   /**
    * Success.
    */
-  Ok = 0,
+  MurkStatus_Ok = 0,
   /**
    * Handle is invalid or was already destroyed.
    */
-  InvalidHandle = -1,
+  MurkStatus_InvalidHandle = -1,
   /**
    * Observation plan was compiled for a different generation.
    */
-  PlanInvalidated = -2,
+  MurkStatus_PlanInvalidated = -2,
   /**
    * Exact-tick egress request timed out (RealtimeAsync only).
    */
-  TimeoutWaitingForTick = -3,
+  MurkStatus_TimeoutWaitingForTick = -3,
   /**
    * Requested tick evicted from ring buffer.
    */
-  NotAvailable = -4,
+  MurkStatus_NotAvailable = -4,
   /**
    * ObsPlan valid_ratio below threshold.
    */
-  InvalidComposition = -5,
+  MurkStatus_InvalidComposition = -5,
   /**
    * Command queue at capacity.
    */
-  QueueFull = -6,
+  MurkStatus_QueueFull = -6,
   /**
    * Command basis_tick_id is too old.
    */
-  Stale = -7,
+  MurkStatus_Stale = -7,
   /**
    * Tick was rolled back.
    */
-  TickRollback = -8,
+  MurkStatus_TickRollback = -8,
   /**
    * Arena allocation failed (OOM).
    */
-  AllocationFailed = -9,
+  MurkStatus_AllocationFailed = -9,
   /**
    * A propagator's step function failed.
    */
-  PropagatorFailed = -10,
+  MurkStatus_PropagatorFailed = -10,
   /**
    * Observation plan execution failed mid-fill.
    */
-  ExecutionFailed = -11,
+  MurkStatus_ExecutionFailed = -11,
   /**
    * Malformed ObsSpec at compilation time.
    */
-  InvalidObsSpec = -12,
+  MurkStatus_InvalidObsSpec = -12,
   /**
    * dt exceeds a propagator's max_dt constraint.
    */
-  DtOutOfRange = -13,
+  MurkStatus_DtOutOfRange = -13,
   /**
    * Egress worker exceeded max_epoch_hold.
    */
-  WorkerStalled = -14,
+  MurkStatus_WorkerStalled = -14,
   /**
    * World is shutting down.
    */
-  ShuttingDown = -15,
+  MurkStatus_ShuttingDown = -15,
   /**
    * Ticking disabled after consecutive rollbacks.
    */
-  TickDisabled = -16,
+  MurkStatus_TickDisabled = -16,
   /**
    * Configuration validation error.
    */
-  ConfigError = -17,
+  MurkStatus_ConfigError = -17,
   /**
    * An argument is null, out of range, or otherwise invalid.
    */
-  InvalidArgument = -18,
+  MurkStatus_InvalidArgument = -18,
   /**
    * Caller-provided buffer is too small.
    */
-  BufferTooSmall = -19,
+  MurkStatus_BufferTooSmall = -19,
   /**
    * Internal error (e.g. poisoned mutex after a prior panic).
    */
-  InternalError = -20,
+  MurkStatus_InternalError = -20,
   /**
    * Command type not supported by the tick executor.
    */
-  UnsupportedCommand = -21,
+  MurkStatus_UnsupportedCommand = -21,
+  /**
+   * Command was accepted but could not be applied (e.g. invalid coordinate
+   * or unknown field).
+   */
+  MurkStatus_NotApplied = -22,
   /**
    * A Rust panic was caught at the FFI boundary.
    */
-  Panicked = -128,
+  MurkStatus_Panicked = -128,
 };
 typedef int32_t MurkStatus;
 
@@ -255,11 +260,11 @@ enum MurkWriteMode {
   /**
    * Fresh buffer — propagator must fill every cell.
    */
-  Full = 0,
+  MurkWriteMode_Full = 0,
   /**
    * Seeded from previous generation; propagator updates selectively.
    */
-  Incremental = 1,
+  MurkWriteMode_Incremental = 1,
 };
 typedef int32_t MurkWriteMode;
 
@@ -640,7 +645,7 @@ int32_t murk_last_panic_message(char *buf, uintptr_t cap);
  * ABI version: major in upper 16 bits, minor in lower 16.
  *
  * Bump major on breaking changes, minor on additions.
- * Current: v3.0 (v2.1→v3.0: MurkStepMetrics layout expansion for ring retention/skew counters)
+ * Current: v3.1 (v3.0→v3.1: MurkStatus::NotApplied variant, batched _get functions)
  */
 uint32_t murk_abi_version(void);
 
@@ -702,23 +707,56 @@ int32_t murk_batched_destroy(uint64_t handle);
 /**
  * Number of worlds in the batch.
  *
- * Returns 0 for invalid handles.
+ * # Deprecation
+ *
+ * Returns 0 for both "zero worlds" and "invalid handle / poisoned mutex /
+ * caught panic" — use [`murk_batched_num_worlds_get`] instead.
  */
 uintptr_t murk_batched_num_worlds(uint64_t handle);
 
 /**
+ * Number of worlds with explicit error reporting.
+ *
+ * Writes the count to `*out` and returns `MURK_OK`. Returns
+ * `InvalidHandle` or `InternalError` without writing to `out`.
+ */
+int32_t murk_batched_num_worlds_get(uint64_t handle, uintptr_t *out);
+
+/**
  * Per-world observation output length (f32 elements).
  *
- * Returns 0 for invalid handles or if no obs plan.
+ * # Deprecation
+ *
+ * Returns 0 for both "no obs plan" and "invalid handle / poisoned mutex /
+ * caught panic" — use [`murk_batched_obs_output_len_get`] instead.
  */
 uintptr_t murk_batched_obs_output_len(uint64_t handle);
 
 /**
+ * Per-world observation output length with explicit error reporting.
+ *
+ * Writes the length to `*out` and returns `MURK_OK`. Returns
+ * `InvalidHandle` or `InternalError` without writing to `out`.
+ */
+int32_t murk_batched_obs_output_len_get(uint64_t handle, uintptr_t *out);
+
+/**
  * Per-world observation mask length (bytes).
  *
- * Returns 0 for invalid handles or if no obs plan.
+ * # Deprecation
+ *
+ * Returns 0 for both "no obs plan" and "invalid handle / poisoned mutex /
+ * caught panic" — use [`murk_batched_obs_mask_len_get`] instead.
  */
 uintptr_t murk_batched_obs_mask_len(uint64_t handle);
+
+/**
+ * Per-world observation mask length with explicit error reporting.
+ *
+ * Writes the length to `*out` and returns `MURK_OK`. Returns
+ * `InvalidHandle` or `InternalError` without writing to `out`.
+ */
+int32_t murk_batched_obs_mask_len_get(uint64_t handle, uintptr_t *out);
 
 /**
  * Create a new config builder. Returns handle via `out`.
@@ -935,8 +973,8 @@ int32_t murk_snapshot_read_field(uint64_t world_handle,
 /**
  * Current tick ID for a world (0 after construction or reset).
  *
- * **Ambiguity warning:** returns 0 for both "tick 0" and "invalid handle."
- * Prefer [`murk_current_tick_get`] for unambiguous error detection.
+ * Returns 0 for both "tick 0" and "invalid handle" — use
+ * [`murk_current_tick_get`] instead.
  */
 uint64_t murk_current_tick(uint64_t world_handle);
 
@@ -951,8 +989,8 @@ int32_t murk_current_tick_get(uint64_t world_handle, uint64_t *out);
 /**
  * Whether ticking is disabled due to consecutive rollbacks.
  *
- * **Ambiguity warning:** returns 0 for both "not disabled" and "invalid handle."
- * Prefer [`murk_is_tick_disabled_get`] for unambiguous error detection.
+ * Returns 0 for both "not disabled" and "invalid handle" — use
+ * [`murk_is_tick_disabled_get`] instead.
  */
 uint8_t murk_is_tick_disabled(uint64_t world_handle);
 
@@ -967,8 +1005,8 @@ int32_t murk_is_tick_disabled_get(uint64_t world_handle, uint8_t *out);
 /**
  * Number of consecutive rollbacks since the last successful tick.
  *
- * **Ambiguity warning:** returns 0 for both "zero rollbacks" and "invalid handle."
- * Prefer [`murk_consecutive_rollbacks_get`] for unambiguous error detection.
+ * Returns 0 for both "zero rollbacks" and "invalid handle" — use
+ * [`murk_consecutive_rollbacks_get`] instead.
  */
 uint32_t murk_consecutive_rollbacks(uint64_t world_handle);
 
@@ -991,8 +1029,8 @@ int32_t murk_world_preflight_get(uint64_t world_handle, struct MurkWorldPrefligh
 /**
  * The world's current seed.
  *
- * **Ambiguity warning:** returns 0 for both "seed 0" and "invalid handle."
- * Prefer [`murk_seed_get`] for unambiguous error detection.
+ * Returns 0 for both "seed 0" and "invalid handle" — use
+ * [`murk_seed_get`] instead.
  */
 uint64_t murk_seed(uint64_t world_handle);
 

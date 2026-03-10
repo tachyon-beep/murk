@@ -229,18 +229,40 @@ pub fn validate_pipeline(
         return Err(PipelineError::EmptyPipeline);
     }
 
+    // Snapshot all trait declarations once per propagator to avoid
+    // redundant calls (which could return inconsistent data with
+    // interior mutability).
+    struct PropMeta {
+        name: String,
+        reads: FieldSet,
+        reads_previous: FieldSet,
+        writes: Vec<(FieldId, WriteMode)>,
+        max_dt: Option<f64>,
+    }
+
+    let metas: Vec<PropMeta> = propagators
+        .iter()
+        .map(|p| PropMeta {
+            name: p.name().to_string(),
+            reads: p.reads(),
+            reads_previous: p.reads_previous(),
+            writes: p.writes(),
+            max_dt: p.max_dt(space),
+        })
+        .collect();
+
     // 2. Write-write conflicts
     {
         let mut last_writer: IndexMap<FieldId, usize> = IndexMap::new();
         let mut conflicts: Vec<WriteConflict> = Vec::new();
 
-        for (i, prop) in propagators.iter().enumerate() {
-            for (field_id, _mode) in prop.writes() {
+        for (i, meta) in metas.iter().enumerate() {
+            for &(field_id, _mode) in &meta.writes {
                 if let Some(&j) = last_writer.get(&field_id) {
                     conflicts.push(WriteConflict {
                         field_id,
-                        first_writer: propagators[j].name().to_string(),
-                        second_writer: prop.name().to_string(),
+                        first_writer: metas[j].name.clone(),
+                        second_writer: meta.name.clone(),
                     });
                 }
                 last_writer.insert(field_id, i);
@@ -252,27 +274,27 @@ pub fn validate_pipeline(
     }
 
     // 3. Field reference existence
-    for prop in propagators {
-        for field_id in prop.reads().iter() {
+    for meta in &metas {
+        for field_id in meta.reads.iter() {
             if !defined_fields.contains(field_id) {
                 return Err(PipelineError::UndefinedField {
-                    propagator: prop.name().to_string(),
+                    propagator: meta.name.clone(),
                     field_id,
                 });
             }
         }
-        for field_id in prop.reads_previous().iter() {
+        for field_id in meta.reads_previous.iter() {
             if !defined_fields.contains(field_id) {
                 return Err(PipelineError::UndefinedField {
-                    propagator: prop.name().to_string(),
+                    propagator: meta.name.clone(),
                     field_id,
                 });
             }
         }
-        for (field_id, _) in prop.writes() {
+        for &(field_id, _) in &meta.writes {
             if !defined_fields.contains(field_id) {
                 return Err(PipelineError::UndefinedField {
-                    propagator: prop.name().to_string(),
+                    propagator: meta.name.clone(),
                     field_id,
                 });
             }
@@ -283,17 +305,17 @@ pub fn validate_pipeline(
     {
         let mut min_max_dt = f64::INFINITY;
         let mut constraining = String::new();
-        for prop in propagators {
-            if let Some(max) = prop.max_dt(space) {
+        for meta in &metas {
+            if let Some(max) = meta.max_dt {
                 if !max.is_finite() || max <= 0.0 {
                     return Err(PipelineError::InvalidMaxDt {
-                        propagator: prop.name().to_string(),
+                        propagator: meta.name.clone(),
                         value: max,
                     });
                 }
                 if max < min_max_dt {
                     min_max_dt = max;
-                    constraining = prop.name().to_string();
+                    constraining = meta.name.clone();
                 }
             }
         }
@@ -308,15 +330,15 @@ pub fn validate_pipeline(
 
     // 5. Build ReadResolutionPlan
     let mut last_writer: IndexMap<FieldId, usize> = IndexMap::new();
-    let mut routes: Vec<IndexMap<FieldId, ReadSource>> = Vec::with_capacity(propagators.len());
-    let mut write_modes: Vec<IndexMap<FieldId, WriteMode>> = Vec::with_capacity(propagators.len());
+    let mut routes: Vec<IndexMap<FieldId, ReadSource>> = Vec::with_capacity(metas.len());
+    let mut write_modes: Vec<IndexMap<FieldId, WriteMode>> = Vec::with_capacity(metas.len());
 
-    for (i, prop) in propagators.iter().enumerate() {
+    for (i, meta) in metas.iter().enumerate() {
         let mut prop_routes = IndexMap::new();
         let mut prop_write_modes = IndexMap::new();
 
         // Route reads() through overlay
-        for field_id in prop.reads().iter() {
+        for field_id in meta.reads.iter() {
             let source = if let Some(&j) = last_writer.get(&field_id) {
                 ReadSource::Staged { writer_index: j }
             } else {
@@ -331,7 +353,7 @@ pub fn validate_pipeline(
         routes.push(prop_routes);
 
         // Record write modes and update last_writer for subsequent propagators
-        for (field_id, mode) in prop.writes() {
+        for &(field_id, mode) in &meta.writes {
             prop_write_modes.insert(field_id, mode);
             last_writer.insert(field_id, i);
         }
@@ -896,5 +918,48 @@ mod tests {
         let fields = [FieldId(0)].into_iter().collect();
         let result = validate_pipeline(&props, &fields, 0.1, &*test_space());
         assert!(matches!(result, Err(PipelineError::InvalidMaxDt { .. })));
+    }
+
+    // ── Trait method call counting ────────────────────────────
+
+    #[test]
+    fn trait_methods_called_once_per_propagator() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+
+        static READS_CALLS: AtomicU32 = AtomicU32::new(0);
+        static WRITES_CALLS: AtomicU32 = AtomicU32::new(0);
+        static READS_PREV_CALLS: AtomicU32 = AtomicU32::new(0);
+
+        struct CountingProp;
+        impl Propagator for CountingProp {
+            fn name(&self) -> &str { "counting" }
+            fn reads(&self) -> FieldSet {
+                READS_CALLS.fetch_add(1, Ordering::Relaxed);
+                [FieldId(0)].into_iter().collect()
+            }
+            fn reads_previous(&self) -> FieldSet {
+                READS_PREV_CALLS.fetch_add(1, Ordering::Relaxed);
+                FieldSet::empty()
+            }
+            fn writes(&self) -> Vec<(FieldId, WriteMode)> {
+                WRITES_CALLS.fetch_add(1, Ordering::Relaxed);
+                vec![(FieldId(1), WriteMode::Full)]
+            }
+            fn step(&self, _ctx: &mut StepContext<'_>) -> Result<(), PropagatorError> {
+                Ok(())
+            }
+        }
+
+        READS_CALLS.store(0, Ordering::Relaxed);
+        WRITES_CALLS.store(0, Ordering::Relaxed);
+        READS_PREV_CALLS.store(0, Ordering::Relaxed);
+
+        let props: Vec<Box<dyn Propagator>> = vec![Box::new(CountingProp)];
+        let fields = [FieldId(0), FieldId(1)].into_iter().collect();
+        let _ = validate_pipeline(&props, &fields, 0.1, &*test_space());
+
+        assert_eq!(READS_CALLS.load(Ordering::Relaxed), 1, "reads() called more than once");
+        assert_eq!(WRITES_CALLS.load(Ordering::Relaxed), 1, "writes() called more than once");
+        assert_eq!(READS_PREV_CALLS.load(Ordering::Relaxed), 1, "reads_previous() called more than once");
     }
 }

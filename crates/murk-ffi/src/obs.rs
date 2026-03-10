@@ -18,7 +18,8 @@ use crate::handle::HandleTable;
 use crate::status::MurkStatus;
 use crate::world::worlds;
 
-// Compile-time layout assertions for ABI stability.
+// Compile-time layout assertions for ABI stability on 64-bit targets.
+// These verify that struct layout matches the C header (murk.h).
 const _: () = assert!(std::mem::align_of::<MurkObsEntry>() == 4);
 const _: () = assert!(std::mem::align_of::<MurkObsResult>() == 8);
 const _: () = assert!(std::mem::size_of::<MurkObsResult>() == 16);
@@ -36,8 +37,19 @@ const MAX_EXECUTE_AGENT_DIMS: usize = 16;
 /// Clone the Arc for a plan handle, briefly locking the global table.
 ///
 /// Returns `None` if the handle is invalid or the mutex is poisoned.
+/// On poisoning, stores a diagnostic in [`LAST_PANIC`] so the caller
+/// can retrieve context via `murk_last_panic_message`.
 fn get_obs_plan(handle: u64) -> Option<ObsPlanArc> {
-    OBS_PLANS.lock().ok()?.get(handle).cloned()
+    match OBS_PLANS.lock() {
+        Ok(table) => table.get(handle).cloned(),
+        Err(_) => {
+            crate::LAST_PANIC.with(|cell| {
+                *cell.borrow_mut() =
+                    "OBS_PLANS mutex poisoned: a prior panic corrupted shared state".into();
+            });
+            None
+        }
+    }
 }
 
 /// Convert a C `MurkObsEntry` to a Rust `ObsEntry`.
@@ -259,9 +271,15 @@ pub extern "C" fn murk_obsplan_execute(
         };
         let mut plan_state = ffi_lock!(plan_arc);
 
-        // Check buffer sizes.
-        let expected_out = plan_state.cache.output_len().unwrap_or(0);
-        let expected_mask = plan_state.cache.mask_len().unwrap_or(0);
+        // Check buffer sizes. None means plan not compiled.
+        let expected_out = match plan_state.cache.output_len() {
+            Some(v) => v,
+            None => return MurkStatus::InvalidObsSpec as i32,
+        };
+        let expected_mask = match plan_state.cache.mask_len() {
+            Some(v) => v,
+            None => return MurkStatus::InvalidObsSpec as i32,
+        };
         if output_len < expected_out {
             return MurkStatus::BufferTooSmall as i32;
         }

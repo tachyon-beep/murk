@@ -64,6 +64,9 @@ impl DiffusionPropagator {
             })?
             .to_vec();
 
+        let cell_count = (rows * cols) as usize;
+        check_field_arity(&heat_prev, &vel_prev, cell_count)?;
+
         let heat_out =
             ctx.writes()
                 .write(HEAT)
@@ -167,6 +170,34 @@ impl DiffusionPropagator {
             })
             .collect();
 
+        // Compute per-axis extents for signed minimal displacement on wrapped
+        // topologies. Without this, raw deltas like +3 on a length-4 ring are
+        // used instead of the correct -1.
+        let ndim = ctx.space().ndim();
+        let mut axis_extents = vec![0i32; ndim];
+        for coord in &ordering {
+            for k in 0..ndim.min(coord.len()) {
+                axis_extents[k] = axis_extents[k].max(coord[k] + 1);
+            }
+        }
+
+        /// Map a raw coordinate delta to the signed minimal displacement on a
+        /// periodic axis of the given extent. For non-periodic (extent <= 1)
+        /// axes the raw delta is returned unchanged.
+        fn signed_delta(raw: i32, extent: i32) -> i32 {
+            if extent <= 1 {
+                return raw;
+            }
+            let half = extent / 2;
+            if raw > half {
+                raw - extent
+            } else if raw < -half {
+                raw + extent
+            } else {
+                raw
+            }
+        }
+
         // Precompute gradient neighbour info: (nb_rank, delta_col, delta_row)
         let grad_info: Vec<Vec<(usize, i32, i32)>> = ordering
             .iter()
@@ -176,8 +207,18 @@ impl DiffusionPropagator {
                     .iter()
                     .filter_map(|nb| {
                         ctx.space().canonical_rank(nb).map(|rank| {
-                            let dc = if nb.len() >= 2 { nb[1] - coord[1] } else { 0 };
-                            let dr = nb[0] - coord[0];
+                            let dc = if nb.len() >= 2 {
+                                signed_delta(
+                                    nb[1] - coord[1],
+                                    axis_extents.get(1).copied().unwrap_or(0),
+                                )
+                            } else {
+                                0
+                            };
+                            let dr = signed_delta(
+                                nb[0] - coord[0],
+                                axis_extents.first().copied().unwrap_or(0),
+                            );
                             (rank, dc, dr)
                         })
                     })
@@ -201,6 +242,8 @@ impl DiffusionPropagator {
                 reason: "velocity field not readable".into(),
             })?
             .to_vec();
+
+        check_field_arity(&heat_prev, &vel_prev, cell_count)?;
 
         // Compute outputs into local buffers, then write all at once
         let mut heat_new = vec![0.0f32; cell_count];
@@ -278,6 +321,32 @@ impl DiffusionPropagator {
 
         Ok(())
     }
+}
+
+/// Validate that field slices have the expected lengths for this propagator.
+fn check_field_arity(
+    heat: &[f32],
+    velocity: &[f32],
+    cell_count: usize,
+) -> Result<(), PropagatorError> {
+    if heat.len() != cell_count {
+        return Err(PropagatorError::ExecutionFailed {
+            reason: format!(
+                "heat field length mismatch: expected {cell_count}, got {}",
+                heat.len()
+            ),
+        });
+    }
+    if velocity.len() != cell_count * 2 {
+        return Err(PropagatorError::ExecutionFailed {
+            reason: format!(
+                "velocity field length mismatch: expected {} (vec2), got {}",
+                cell_count * 2,
+                velocity.len()
+            ),
+        });
+    }
+    Ok(())
 }
 
 impl Propagator for DiffusionPropagator {
@@ -460,7 +529,7 @@ mod tests {
 
     #[test]
     fn max_dt_constraint() {
-        let space = Square4::new(4, 4, EdgeBehavior::Wrap).unwrap();
+        let space = crate::test_helpers::test_space();
         let prop = DiffusionPropagator::new(0.25);
         // Square4 has degree 4, so 1 / (4 * 0.25) = 1.0.
         let dt = prop.max_dt(&space).unwrap();
@@ -862,6 +931,102 @@ mod tests {
             "wrap grad_x at (0,0) should be -10, got {}",
             grad[0]
         );
+    }
+
+    #[test]
+    fn generic_path_wrap_gradient_sign() {
+        // BUG-101: step_generic computed gradient deltas as raw nb[k] - coord[k],
+        // which is wrong on wrapped axes. On Ring1D(4) with heat = [0, 10, 20, 30],
+        // cell 0's left neighbour is cell 3. Raw delta = 3 - 0 = +3, but the
+        // correct signed displacement is -1. The gradient dh/dr at cell 0 should
+        // reflect that cell 3 (heat=30) is one step to the LEFT.
+        use murk_space::Ring1D;
+
+        let ring = Ring1D::new(4).unwrap();
+        let n = ring.cell_count(); // 4
+        let prop = DiffusionPropagator::new(0.0); // zero diffusion, only test gradient
+
+        // Linear heat ramp: [0, 10, 20, 30]
+        let heat: Vec<f32> = (0..n).map(|i| i as f32 * 10.0).collect();
+
+        let mut reader = MockFieldReader::new();
+        reader.set_field(HEAT, heat);
+        reader.set_field(VELOCITY, vec![0.0; n * 2]);
+
+        let mut writer = MockFieldWriter::new();
+        writer.add_field(HEAT, n);
+        writer.add_field(VELOCITY, n * 2);
+        writer.add_field(HEAT_GRADIENT, n * 2);
+
+        let mut scratch = ScratchRegion::new(0);
+        // Ring1D is 1D so only grad_y (row component) is meaningful; grad_x = 0.
+        let mut ctx = StepContext::new(
+            &reader,
+            &reader,
+            &mut writer,
+            &mut scratch,
+            &ring,
+            TickId(1),
+            0.01,
+        );
+
+        prop.step(&mut ctx).unwrap();
+
+        let grad = writer.get_field(HEAT_GRADIENT).unwrap();
+
+        // Cell 0: neighbours are cell 1 (heat=10, dr=+1) and cell 3 (heat=30, dr=-1).
+        // dh/dr from cell 1: (10 - 0) / 1 = 10
+        // dh/dr from cell 3: (30 - 0) / -1 = -30
+        // Average: (10 + (-30)) / 2 = -10
+        // Gradient is a flat array: [grad_x_cell0, grad_y_cell0, grad_x_cell1, grad_y_cell1, ...]
+        let grad_y_cell0 = grad[1]; // cell 0, y-component
+        assert!(
+            (grad_y_cell0 - (-10.0)).abs() < 1e-4,
+            "gradient at cell 0 should be -10 (wrap boundary), got {grad_y_cell0}"
+        );
+
+        // Cell 1 (interior): neighbours are cell 0 (dr=-1) and cell 2 (dr=+1).
+        // dh/dr from cell 0: (0 - 10) / -1 = 10
+        // dh/dr from cell 2: (20 - 10) / 1 = 10
+        // Average: 10
+        let grad_y_cell1 = grad[3]; // cell 1, y-component
+        assert!(
+            (grad_y_cell1 - 10.0).abs() < 1e-4,
+            "gradient at cell 1 should be 10, got {grad_y_cell1}"
+        );
+
+        // All grad_x components should be zero (1D space, no column axis).
+        let arity = 2;
+        for i in 0..n {
+            assert!(
+                grad[i * arity].abs() < 1e-6,
+                "grad_x at cell {i} should be 0, got {}",
+                grad[i * arity]
+            );
+        }
+    }
+
+    #[test]
+    fn wrong_velocity_arity_returns_error() {
+        // Velocity should be vec2 (2 * cell_count) but we provide scalar (1 * cell_count).
+        let grid = Square4::new(3, 3, EdgeBehavior::Absorb).unwrap();
+        let n = grid.cell_count();
+        let prop = DiffusionPropagator::new(0.1);
+
+        let mut reader = MockFieldReader::new();
+        reader.set_field(HEAT, vec![0.0; n]);
+        reader.set_field(VELOCITY, vec![0.0; n]); // Wrong: should be n*2
+
+        let mut writer = MockFieldWriter::new();
+        writer.add_field(HEAT, n);
+        writer.add_field(VELOCITY, n); // Wrong arity
+        writer.add_field(HEAT_GRADIENT, n * 2);
+
+        let mut scratch = ScratchRegion::new(0);
+        let mut ctx = make_ctx(&reader, &mut writer, &mut scratch, &grid, 0.01);
+
+        let result = prop.step(&mut ctx);
+        assert!(result.is_err(), "expected PropagatorError for wrong velocity arity, got Ok");
     }
 
     #[test]

@@ -118,13 +118,32 @@ pub enum ConfigError {
         /// The invalid value.
         value: f64,
     },
-    /// BackoffConfig invariant violated.
-    InvalidBackoff {
-        /// Description of which invariant was violated.
-        reason: String,
+    /// `initial_max_skew` exceeds `max_skew_cap`.
+    BackoffSkewExceedsCap {
+        /// The configured initial max skew.
+        initial: u64,
+        /// The configured cap.
+        cap: u64,
     },
-    /// Cell count or field count exceeds `u32::MAX`.
+    /// `backoff_factor` is not finite or is less than 1.0.
+    BackoffInvalidFactor {
+        /// The invalid value.
+        value: f64,
+    },
+    /// `rejection_rate_threshold` is outside `[0.0, 1.0]` or not finite.
+    BackoffInvalidThreshold {
+        /// The invalid value.
+        value: f64,
+    },
+    /// `decay_rate` is zero.
+    BackoffZeroDecayRate,
+    /// Cell count exceeds `u32::MAX`.
     CellCountOverflow {
+        /// The value that overflowed.
+        value: usize,
+    },
+    /// Field count exceeds `u32::MAX`.
+    FieldCountOverflow {
         /// The value that overflowed.
         value: usize,
     },
@@ -135,6 +154,11 @@ pub enum ConfigError {
     },
     /// Engine could not be recovered from tick thread (e.g. thread panicked).
     EngineRecoveryFailed,
+    /// A background thread could not be spawned.
+    ThreadSpawnFailed {
+        /// Description of which thread failed.
+        reason: String,
+    },
 }
 
 impl fmt::Display for ConfigError {
@@ -151,17 +175,32 @@ impl fmt::Display for ConfigError {
             Self::InvalidTickRate { value } => {
                 write!(f, "tick_rate_hz must be finite and positive, got {value}")
             }
-            Self::InvalidBackoff { reason } => {
-                write!(f, "invalid backoff config: {reason}")
+            Self::BackoffSkewExceedsCap { initial, cap } => {
+                write!(f, "invalid backoff config: initial_max_skew ({initial}) exceeds max_skew_cap ({cap})")
+            }
+            Self::BackoffInvalidFactor { value } => {
+                write!(f, "invalid backoff config: backoff_factor must be finite and >= 1.0, got {value}")
+            }
+            Self::BackoffInvalidThreshold { value } => {
+                write!(f, "invalid backoff config: rejection_rate_threshold must be in [0.0, 1.0], got {value}")
+            }
+            Self::BackoffZeroDecayRate => {
+                write!(f, "invalid backoff config: decay_rate must be at least 1")
             }
             Self::CellCountOverflow { value } => {
                 write!(f, "cell count {value} exceeds u32::MAX")
+            }
+            Self::FieldCountOverflow { value } => {
+                write!(f, "field count {value} exceeds u32::MAX")
             }
             Self::InvalidField { reason } => {
                 write!(f, "invalid field: {reason}")
             }
             Self::EngineRecoveryFailed => {
                 write!(f, "engine could not be recovered from tick thread")
+            }
+            Self::ThreadSpawnFailed { reason } => {
+                write!(f, "thread spawn failed: {reason}")
             }
         }
     }
@@ -244,7 +283,7 @@ impl WorldConfig {
         }
         // 2c. Field count must fit in u32 (FieldId is u32).
         if u32::try_from(self.fields.len()).is_err() {
-            return Err(ConfigError::CellCountOverflow {
+            return Err(ConfigError::FieldCountOverflow {
                 value: self.fields.len(),
             });
         }
@@ -258,51 +297,43 @@ impl WorldConfig {
         if self.max_ingress_queue == 0 {
             return Err(ConfigError::IngressQueueZero);
         }
-        // 5. tick_rate_hz, if present, must be finite and positive.
+        // 5. tick_rate_hz, if present, must be finite and positive, and
+        //    its reciprocal must also be finite (rejects subnormals where
+        //    1.0/hz = inf, which would panic in Duration::from_secs_f64).
         if let Some(hz) = self.tick_rate_hz {
-            if !hz.is_finite() || hz <= 0.0 {
+            if !hz.is_finite() || hz <= 0.0 || !(1.0 / hz).is_finite() {
                 return Err(ConfigError::InvalidTickRate { value: hz });
             }
         }
         // 6. BackoffConfig invariants.
         let b = &self.backoff;
         if b.initial_max_skew > b.max_skew_cap {
-            return Err(ConfigError::InvalidBackoff {
-                reason: format!(
-                    "initial_max_skew ({}) exceeds max_skew_cap ({})",
-                    b.initial_max_skew, b.max_skew_cap,
-                ),
+            return Err(ConfigError::BackoffSkewExceedsCap {
+                initial: b.initial_max_skew,
+                cap: b.max_skew_cap,
             });
         }
         if !b.backoff_factor.is_finite() || b.backoff_factor < 1.0 {
-            return Err(ConfigError::InvalidBackoff {
-                reason: format!(
-                    "backoff_factor must be finite and >= 1.0, got {}",
-                    b.backoff_factor,
-                ),
+            return Err(ConfigError::BackoffInvalidFactor {
+                value: b.backoff_factor,
             });
         }
         if !b.rejection_rate_threshold.is_finite()
             || b.rejection_rate_threshold < 0.0
             || b.rejection_rate_threshold > 1.0
         {
-            return Err(ConfigError::InvalidBackoff {
-                reason: format!(
-                    "rejection_rate_threshold must be in [0.0, 1.0], got {}",
-                    b.rejection_rate_threshold,
-                ),
+            return Err(ConfigError::BackoffInvalidThreshold {
+                value: b.rejection_rate_threshold,
             });
         }
         if b.decay_rate == 0 {
-            return Err(ConfigError::InvalidBackoff {
-                reason: "decay_rate must be at least 1".to_string(),
-            });
+            return Err(ConfigError::BackoffZeroDecayRate);
         }
 
         // 7. Pipeline validation (delegates to murk-propagator).
         //    The plan is intentionally discarded here — the world constructor
         //    calls validate_pipeline() again to obtain it.
-        let defined = self.defined_field_set();
+        let defined = self.defined_field_set()?;
         let _ = validate_pipeline(&self.propagators, &defined, self.dt, &*self.space)?;
 
         Ok(())
@@ -310,13 +341,17 @@ impl WorldConfig {
 
     /// Build a [`FieldSet`] from the configured field definitions.
     ///
-    /// # Panics
-    ///
-    /// Panics if the number of fields exceeds `u32::MAX`. This is
-    /// unreachable in practice since `validate()` is called first.
-    pub(crate) fn defined_field_set(&self) -> FieldSet {
+    /// Returns [`ConfigError::FieldCountOverflow`] if the number of
+    /// fields exceeds `u32::MAX`.
+    pub(crate) fn defined_field_set(&self) -> Result<FieldSet, ConfigError> {
         (0..self.fields.len())
-            .map(|i| FieldId(u32::try_from(i).expect("field count validated")))
+            .map(|i| {
+                u32::try_from(i)
+                    .map(FieldId)
+                    .map_err(|_| ConfigError::FieldCountOverflow {
+                        value: self.fields.len(),
+                    })
+            })
             .collect()
     }
 }
@@ -500,6 +535,30 @@ mod tests {
     }
 
     #[test]
+    fn cell_count_overflow_display_says_cell_count() {
+        let err = ConfigError::CellCountOverflow {
+            value: u32::MAX as usize + 1,
+        };
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("cell count"),
+            "CellCountOverflow Display should say 'cell count', got: {msg}"
+        );
+    }
+
+    #[test]
+    fn field_count_overflow_display_says_field_count() {
+        let err = ConfigError::FieldCountOverflow {
+            value: u32::MAX as usize + 1,
+        };
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("field count"),
+            "FieldCountOverflow Display should say 'field count', got: {msg}"
+        );
+    }
+
+    #[test]
     fn async_config_resolved_worker_count_clamps_zero() {
         let cfg = AsyncConfig {
             worker_count: Some(0),
@@ -535,8 +594,8 @@ mod tests {
         cfg.backoff.initial_max_skew = 100;
         cfg.backoff.max_skew_cap = 5;
         match cfg.validate() {
-            Err(ConfigError::InvalidBackoff { .. }) => {}
-            other => panic!("expected InvalidBackoff, got {other:?}"),
+            Err(ConfigError::BackoffSkewExceedsCap { initial: 100, cap: 5 }) => {}
+            other => panic!("expected BackoffSkewExceedsCap, got {other:?}"),
         }
     }
 
@@ -545,8 +604,8 @@ mod tests {
         let mut cfg = valid_config();
         cfg.backoff.backoff_factor = f64::NAN;
         match cfg.validate() {
-            Err(ConfigError::InvalidBackoff { .. }) => {}
-            other => panic!("expected InvalidBackoff, got {other:?}"),
+            Err(ConfigError::BackoffInvalidFactor { .. }) => {}
+            other => panic!("expected BackoffInvalidFactor, got {other:?}"),
         }
     }
 
@@ -555,8 +614,8 @@ mod tests {
         let mut cfg = valid_config();
         cfg.backoff.backoff_factor = 0.5;
         match cfg.validate() {
-            Err(ConfigError::InvalidBackoff { .. }) => {}
-            other => panic!("expected InvalidBackoff, got {other:?}"),
+            Err(ConfigError::BackoffInvalidFactor { value }) if value == 0.5 => {}
+            other => panic!("expected BackoffInvalidFactor(0.5), got {other:?}"),
         }
     }
 
@@ -565,8 +624,8 @@ mod tests {
         let mut cfg = valid_config();
         cfg.backoff.rejection_rate_threshold = 1.5;
         match cfg.validate() {
-            Err(ConfigError::InvalidBackoff { .. }) => {}
-            other => panic!("expected InvalidBackoff, got {other:?}"),
+            Err(ConfigError::BackoffInvalidThreshold { value }) if value == 1.5 => {}
+            other => panic!("expected BackoffInvalidThreshold(1.5), got {other:?}"),
         }
     }
 
@@ -575,8 +634,31 @@ mod tests {
         let mut cfg = valid_config();
         cfg.backoff.decay_rate = 0;
         match cfg.validate() {
-            Err(ConfigError::InvalidBackoff { .. }) => {}
-            other => panic!("expected InvalidBackoff, got {other:?}"),
+            Err(ConfigError::BackoffZeroDecayRate) => {}
+            other => panic!("expected BackoffZeroDecayRate, got {other:?}"),
+        }
+    }
+
+    /// BUG-103: ThreadSpawnFailed error variant exists and formats correctly.
+    #[test]
+    fn thread_spawn_failed_error_display() {
+        let err = ConfigError::ThreadSpawnFailed {
+            reason: "tick thread: resource limit".to_string(),
+        };
+        let msg = format!("{err}");
+        assert!(msg.contains("thread spawn failed"));
+        assert!(msg.contains("tick thread"));
+    }
+
+    /// BUG-104: Subnormal tick_rate_hz passes validation but 1/hz = inf
+    /// panics in Duration::from_secs_f64.
+    #[test]
+    fn validate_subnormal_tick_rate_hz_rejected() {
+        let mut cfg = valid_config();
+        cfg.tick_rate_hz = Some(f64::from_bits(1)); // smallest positive subnormal
+        match cfg.validate() {
+            Err(ConfigError::InvalidTickRate { .. }) => {}
+            other => panic!("expected InvalidTickRate, got {other:?}"),
         }
     }
 
@@ -591,5 +673,36 @@ mod tests {
             rejection_rate_threshold: 0.20,
         };
         assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn thread_spawn_failed_error_source_is_none() {
+        use std::error::Error;
+        let err = ConfigError::ThreadSpawnFailed {
+            reason: "egress worker 2: resource limit".into(),
+        };
+        assert!(err.source().is_none());
+    }
+
+    #[test]
+    fn thread_spawn_failed_reason_preserved() {
+        let err = ConfigError::ThreadSpawnFailed {
+            reason: "egress worker 2: os error 11".into(),
+        };
+        match &err {
+            ConfigError::ThreadSpawnFailed { reason } => {
+                assert_eq!(reason, "egress worker 2: os error 11");
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn thread_spawn_failed_debug_contains_reason() {
+        let err = ConfigError::ThreadSpawnFailed {
+            reason: "tick thread: RLIMIT_NPROC".into(),
+        };
+        let dbg = format!("{err:?}");
+        assert!(dbg.contains("RLIMIT_NPROC"), "Debug output: {dbg}");
     }
 }
