@@ -107,7 +107,7 @@ jobs:
         run: |
           python -m venv .venv
           source .venv/bin/activate
-          pip install maturin numpy gymnasium pytest pytest-timeout stable-baselines3
+          pip install maturin numpy gymnasium pytest pytest-timeout stable-baselines3 tqdm rich
       - name: Build murk-python
         run: |
           source .venv/bin/activate
