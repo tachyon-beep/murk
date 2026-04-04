@@ -173,7 +173,7 @@ impl TickEngine {
 
         // Build field_id -> expected total_len lookup from FieldDefs.
         // Single source of truth: cell_count * components (same formula the arena uses).
-        let field_total_lens: std::collections::HashMap<FieldId, usize> = arena_field_defs
+        let field_total_lens: indexmap::IndexMap<FieldId, usize> = arena_field_defs
             .iter()
             .map(|(id, def)| {
                 let total = cell_count as usize * def.field_type.components() as usize;
