@@ -1026,4 +1026,46 @@ mod tests {
             "MissingDt Display should contain 'dt', got: {msg}"
         );
     }
+
+    #[test]
+    fn builder_space_last_value_wins() {
+        let config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(5, EdgeBehavior::Absorb).unwrap()))
+            .space(Box::new(Line1D::new(20, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .dt(0.1)
+            .build()
+            .unwrap();
+        assert_eq!(config.space.cell_count(), 20);
+    }
+
+    #[test]
+    fn builder_ingress_queue_zero_rejected() {
+        let result = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .dt(0.1)
+            .max_ingress_queue(0)
+            .build();
+        match result {
+            Err(ConfigError::IngressQueueZero) => {}
+            other => panic!("expected IngressQueueZero, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn builder_nan_dt_rejected() {
+        let result = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .dt(f64::NAN)
+            .build();
+        match result {
+            Err(ConfigError::Pipeline(PipelineError::InvalidDt { .. })) => {}
+            other => panic!("expected Pipeline(InvalidDt), got {other:?}"),
+        }
+    }
 }

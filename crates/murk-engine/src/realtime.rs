@@ -183,12 +183,11 @@ impl RealtimeAsyncWorld {
         // Share the space for agent-relative observations.
         let space: Arc<dyn Space> = Arc::from(config.space);
 
-        // Direct struct construction is intentional here: we replace `space`
-        // with an ArcSpaceWrapper so TickEngine and this world share the same
-        // spatial topology via Arc. The original config was validated by the
-        // caller (either via WorldConfigBuilder::build() or direct validate()).
-        // TickEngine::new() calls validate_pipeline() internally, so the
-        // reconstructed config is re-validated before use.
+        // Reconstruct config with an Arc-backed space wrapper so TickEngine
+        // and this world share the same spatial topology. Direct struct
+        // construction is intentional — Rust's exhaustive field requirement
+        // ensures this stays in sync if WorldConfig gains new fields.
+        // TickEngine::new() re-validates the reconstructed config internally.
         let engine_space: Box<dyn Space> = Box::new(ArcSpaceWrapper(Arc::clone(&space)));
         let engine_config = WorldConfig {
             space: engine_space,

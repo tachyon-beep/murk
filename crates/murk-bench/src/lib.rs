@@ -156,17 +156,17 @@ mod tests {
     use murk_propagators::agent_movement::new_action_buffer;
 
     #[test]
-    fn reference_profile_validates() {
+    fn reference_profile_builds() {
         let ab = new_action_buffer();
-        let config = reference_profile(42, ab);
-        config.validate().unwrap();
+        // build() inside reference_profile() already validates.
+        let _config = reference_profile(42, ab);
     }
 
     #[test]
-    fn stress_profile_validates() {
+    fn stress_profile_builds() {
         let ab = new_action_buffer();
-        let config = stress_profile(42, ab);
-        config.validate().unwrap();
+        // build() inside stress_profile() already validates.
+        let _config = stress_profile(42, ab);
     }
 
     #[test]
