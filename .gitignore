@@ -31,6 +31,9 @@ crates/murk-python/dist/
 # mdBook build output
 book/build/
 
+# Worktrees
+.worktrees/
+
 # Agent config
 .claude/
 docs/bugs/generated/
