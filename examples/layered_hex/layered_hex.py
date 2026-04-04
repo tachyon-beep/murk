@@ -33,7 +33,7 @@ from stable_baselines3.common.utils import set_random_seed
 import murk
 from murk import (
     Command, Config, ObsEntry, FieldMutability, FieldType,
-    EdgeBehavior, SpaceType, WriteMode,
+    SpaceType, WriteMode,
 )
 
 # --- World parameters --------------------------------------------------------
@@ -455,7 +455,7 @@ def main():
     print(f"  Floors:      {N_FLOORS} (Line1D, Absorb edges)")
     print(f"  Total cells: {CELL_COUNT} (ProductSpace)")
     print(f"  Goal:        ({GOAL_Q},{GOAL_R},{GOAL_Z}) — floor 2, corner")
-    print(f"  Actions:     9 (stay + 6 hex + down + up)")
+    print("  Actions:     9 (stay + 6 hex + down + up)")
     print(f"  Obs size:    {CELL_COUNT * 2} (beacon + agent_pos)")
     print(f"  Warmup:      {WARMUP_TICKS} ticks")
     print(f"  Training:    {TOTAL_TIMESTEPS:,} timesteps")

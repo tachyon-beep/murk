@@ -134,7 +134,128 @@ pub fn assert_compile_region_all_covers_all(space: &dyn Space) {
     );
 }
 
-/// Run all 8 compliance checks on a space.
+/// Assert that `ndim()` matches the length of coords from `canonical_ordering()`.
+pub fn assert_ndim_consistent(space: &dyn Space) {
+    let ordering = space.canonical_ordering();
+    assert!(!ordering.is_empty(), "canonical_ordering must be non-empty");
+    for (i, coord) in ordering.iter().enumerate() {
+        assert_eq!(
+            coord.len(),
+            space.ndim(),
+            "coord at rank {} has length {}, but ndim() = {}",
+            i,
+            coord.len(),
+            space.ndim(),
+        );
+    }
+}
+
+/// Assert that all coords returned by `neighbours()` are valid (have a canonical rank).
+pub fn assert_neighbours_returns_valid_coords(space: &dyn Space) {
+    for coord in space.canonical_ordering() {
+        for nb in space.neighbours(&coord) {
+            assert!(
+                space.canonical_rank(&nb).is_some(),
+                "neighbours({:?}) returned {:?} which has no canonical rank",
+                coord,
+                nb,
+            );
+        }
+    }
+}
+
+/// Assert that `neighbours()` panics on wrong-arity coord (debug builds only).
+///
+/// Gated with `#[cfg(debug_assertions)]` because `debug_assert!` is a no-op
+/// in release mode — the panic would not fire and this test would fail.
+#[cfg(debug_assertions)]
+pub fn assert_neighbours_rejects_wrong_arity(space: &dyn Space) {
+    use murk_core::Coord;
+    use smallvec::smallvec;
+
+    let wrong_coord: Coord = if space.ndim() == 1 {
+        smallvec![0i32, 0i32] // 2D coord for a 1D space
+    } else {
+        smallvec![0i32] // 1D coord for a 2D+ space
+    };
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        space.neighbours(&wrong_coord)
+    }));
+    match result {
+        Err(payload) => {
+            // Verify it's the arity assert, not an accidental index-OOB panic.
+            let msg = payload
+                .downcast_ref::<String>()
+                .map(|s| s.as_str())
+                .or_else(|| payload.downcast_ref::<&str>().copied());
+            if let Some(msg) = msg {
+                assert!(
+                    msg.contains("coord arity"),
+                    "unexpected panic in neighbours(): {msg}",
+                );
+            }
+        }
+        Ok(_) => panic!(
+            "neighbours() with {}-arity coord should panic for {}-dim space",
+            wrong_coord.len(),
+            space.ndim(),
+        ),
+    }
+}
+
+/// Assert that `distance()` panics on wrong-arity coords (debug builds only).
+#[cfg(debug_assertions)]
+pub fn assert_distance_rejects_wrong_arity(space: &dyn Space) {
+    use murk_core::Coord;
+    use smallvec::smallvec;
+
+    let wrong_coord: Coord = if space.ndim() == 1 {
+        smallvec![0i32, 0i32]
+    } else {
+        smallvec![0i32]
+    };
+    let good_coord = &space.canonical_ordering()[0];
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        space.distance(&wrong_coord, good_coord)
+    }));
+    match result {
+        Err(payload) => {
+            let msg = payload
+                .downcast_ref::<String>()
+                .map(|s| s.as_str())
+                .or_else(|| payload.downcast_ref::<&str>().copied());
+            if let Some(msg) = msg {
+                assert!(
+                    msg.contains("coord a arity"),
+                    "unexpected panic in distance(wrong, good): {msg}",
+                );
+            }
+        }
+        Ok(_) => panic!("distance(wrong, good) should panic for wrong-arity coord"),
+    }
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        space.distance(good_coord, &wrong_coord)
+    }));
+    match result {
+        Err(payload) => {
+            let msg = payload
+                .downcast_ref::<String>()
+                .map(|s| s.as_str())
+                .or_else(|| payload.downcast_ref::<&str>().copied());
+            if let Some(msg) = msg {
+                assert!(
+                    msg.contains("coord b arity"),
+                    "unexpected panic in distance(good, wrong): {msg}",
+                );
+            }
+        }
+        Ok(_) => panic!("distance(good, wrong) should panic for wrong-arity coord"),
+    }
+}
+
+/// Run all compliance checks on a space.
 pub fn run_full_compliance(space: &dyn Space) {
     assert_distance_reflexive(space);
     assert_distance_symmetric(space);
@@ -144,4 +265,11 @@ pub fn run_full_compliance(space: &dyn Space) {
     assert_canonical_ordering_complete(space);
     assert_compile_region_all_valid_ratio(space);
     assert_compile_region_all_covers_all(space);
+    assert_ndim_consistent(space);
+    assert_neighbours_returns_valid_coords(space);
+    #[cfg(debug_assertions)]
+    {
+        assert_neighbours_rejects_wrong_arity(space);
+        assert_distance_rejects_wrong_arity(space);
+    }
 }

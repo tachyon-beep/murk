@@ -88,6 +88,22 @@ struct CumulativeCounters {
     ring_skew_retry_events: u64,
 }
 
+/// Per-propagator expected field buffer lengths, computed once at construction.
+///
+/// Built from `FieldDef::field_type.components()` and `cell_count`. Used by
+/// the pre-dispatch validation loop to check buffer sizes without calling
+/// `reads()`/`writes()` per-tick (those return heap-allocated collections).
+struct FieldExpectations {
+    /// `read[propagator_index]` = Vec of (FieldId, expected_len).
+    /// Covers `reads()` fields only (validated against overlay).
+    read: Vec<Vec<(FieldId, usize)>>,
+    /// `read_previous[propagator_index]` = Vec of (FieldId, expected_len).
+    /// Covers `reads_previous()` fields (validated against base_cache).
+    read_previous: Vec<Vec<(FieldId, usize)>>,
+    /// `write[propagator_index]` = Vec of (FieldId, expected_len).
+    write: Vec<Vec<(FieldId, usize)>>,
+}
+
 /// Single-threaded tick engine for Lockstep mode.
 ///
 /// Owns all simulation state and executes ticks synchronously. Each
@@ -97,6 +113,7 @@ pub struct TickEngine {
     arena: PingPongArena,
     propagators: Vec<Box<dyn Propagator>>,
     plan: ReadResolutionPlan,
+    expectations: FieldExpectations,
     ingress: IngressQueue,
     space: Box<dyn murk_space::Space>,
     dt: f64,
@@ -120,7 +137,11 @@ impl TickEngine {
     /// constructs the arena, and pre-computes the base field set.
     /// Consumes the `WorldConfig`.
     pub fn new(config: WorldConfig) -> Result<Self, ConfigError> {
-        // Validate and build read resolution plan.
+        // This validate() call is intentional even though WorldConfigBuilder::build()
+        // also validates. TickEngine::new() may receive configs constructed via
+        // pub(crate) struct literals (e.g., the ArcSpaceWrapper reconstruction in
+        // realtime.rs), which bypass the builder. Defense-in-depth: validate here
+        // regardless of how the config was constructed.
         config.validate()?;
         let defined_fields = config.defined_field_set()?;
         let plan = murk_propagator::validate_pipeline(
@@ -149,6 +170,86 @@ impl TickEngine {
                 value: config.space.cell_count(),
             }
         })?;
+
+        // Build field_id -> expected total_len lookup from FieldDefs.
+        // Single source of truth: cell_count * components (same formula the arena uses).
+        let field_total_lens: indexmap::IndexMap<FieldId, usize> = arena_field_defs
+            .iter()
+            .map(|(id, def)| {
+                let total = cell_count as usize * def.field_type.components() as usize;
+                (*id, total)
+            })
+            .collect();
+
+        // Build per-propagator expected buffer lengths.
+        // reads()/writes() are called once here, not per-tick.
+        let expectations = {
+            let mut read_exp = Vec::with_capacity(config.propagators.len());
+            let mut read_prev_exp = Vec::with_capacity(config.propagators.len());
+            let mut write_exp = Vec::with_capacity(config.propagators.len());
+            for prop in &config.propagators {
+                let reads: Vec<(FieldId, usize)> = prop
+                    .reads()
+                    .iter()
+                    .map(|fid| {
+                        field_total_lens
+                            .get(&fid)
+                            .map(|&len| (fid, len))
+                            .ok_or_else(|| {
+                                ConfigError::Pipeline(
+                                    murk_propagator::PipelineError::UndefinedField {
+                                        propagator: prop.name().to_string(),
+                                        field_id: fid,
+                                    },
+                                )
+                            })
+                    })
+                    .collect::<Result<_, _>>()?;
+                let reads_prev: Vec<(FieldId, usize)> = prop
+                    .reads_previous()
+                    .iter()
+                    .map(|fid| {
+                        field_total_lens
+                            .get(&fid)
+                            .map(|&len| (fid, len))
+                            .ok_or_else(|| {
+                                ConfigError::Pipeline(
+                                    murk_propagator::PipelineError::UndefinedField {
+                                        propagator: prop.name().to_string(),
+                                        field_id: fid,
+                                    },
+                                )
+                            })
+                    })
+                    .collect::<Result<_, _>>()?;
+                let writes: Vec<(FieldId, usize)> = prop
+                    .writes()
+                    .iter()
+                    .map(|(fid, _mode)| {
+                        field_total_lens
+                            .get(fid)
+                            .map(|&len| (*fid, len))
+                            .ok_or_else(|| {
+                                ConfigError::Pipeline(
+                                    murk_propagator::PipelineError::UndefinedField {
+                                        propagator: prop.name().to_string(),
+                                        field_id: *fid,
+                                    },
+                                )
+                            })
+                    })
+                    .collect::<Result<_, _>>()?;
+                read_exp.push(reads);
+                read_prev_exp.push(reads_prev);
+                write_exp.push(writes);
+            }
+            FieldExpectations {
+                read: read_exp,
+                read_previous: read_prev_exp,
+                write: write_exp,
+            }
+        };
+
         let arena_config = ArenaConfig::new(cell_count);
 
         // Build static arena for any Static fields.
@@ -186,6 +287,7 @@ impl TickEngine {
             arena,
             propagators: config.propagators,
             plan,
+            expectations,
             ingress,
             space: config.space,
             dt: config.dt,
@@ -351,22 +453,142 @@ impl TickEngine {
                 let write_buf = match guard.writer.write(field) {
                     Some(buf) => buf,
                     None => {
-                        debug_assert!(
-                            false,
-                            "incremental field {:?} declared in plan but writer returned None \
-                             for propagator '{}'",
-                            field,
-                            prop.name(),
+                        let prop_name = prop.name().to_string();
+                        return self.handle_rollback(
+                            prop_name,
+                            murk_core::PropagatorError::ExecutionFailed {
+                                reason: format!(
+                                    "incremental field {:?} declared in plan but writer \
+                                     returned None",
+                                    field,
+                                ),
+                            },
+                            receipts,
+                            accepted_receipt_start,
                         );
-                        continue;
                     }
                 };
-                let copy_len = prev.len().min(write_buf.len());
-                write_buf[..copy_len].copy_from_slice(&prev[..copy_len]);
+                let prev_len = prev.len();
+                let buf_len = write_buf.len();
+                if prev_len != buf_len {
+                    let prop_name = prop.name().to_string();
+                    return self.handle_rollback(
+                        prop_name,
+                        murk_core::PropagatorError::ExecutionFailed {
+                            reason: format!(
+                                "incremental seed for field {:?}: prev len {} != write buf len {}",
+                                field, prev_len, buf_len,
+                            ),
+                        },
+                        receipts,
+                        accepted_receipt_start,
+                    );
+                }
+                write_buf.copy_from_slice(&prev);
             }
 
             // 4d. Reset propagator scratch.
             self.propagator_scratch.reset();
+
+            // 4dx. Validate field buffer lengths before dispatch.
+            for &(field_id, expected_len) in &self.expectations.read[i] {
+                match overlay.read(field_id) {
+                    Some(buf) if buf.len() != expected_len => {
+                        let prop_name = prop.name().to_string();
+                        return self.handle_rollback(
+                            prop_name,
+                            murk_core::PropagatorError::ExecutionFailed {
+                                reason: format!(
+                                    "read field {:?} buffer length {} != expected {}",
+                                    field_id,
+                                    buf.len(),
+                                    expected_len,
+                                ),
+                            },
+                            receipts,
+                            accepted_receipt_start,
+                        );
+                    }
+                    None => {
+                        let prop_name = prop.name().to_string();
+                        return self.handle_rollback(
+                            prop_name,
+                            murk_core::PropagatorError::ExecutionFailed {
+                                reason: format!("declared read field {:?} not present", field_id,),
+                            },
+                            receipts,
+                            accepted_receipt_start,
+                        );
+                    }
+                    Some(_) => {} // length matches — validation passed
+                }
+            }
+            for &(field_id, expected_len) in &self.expectations.read_previous[i] {
+                match self.base_cache.read(field_id) {
+                    Some(buf) if buf.len() != expected_len => {
+                        let prop_name = prop.name().to_string();
+                        return self.handle_rollback(
+                            prop_name,
+                            murk_core::PropagatorError::ExecutionFailed {
+                                reason: format!(
+                                    "read_previous field {:?} buffer length {} != expected {}",
+                                    field_id,
+                                    buf.len(),
+                                    expected_len,
+                                ),
+                            },
+                            receipts,
+                            accepted_receipt_start,
+                        );
+                    }
+                    None => {
+                        let prop_name = prop.name().to_string();
+                        return self.handle_rollback(
+                            prop_name,
+                            murk_core::PropagatorError::ExecutionFailed {
+                                reason: format!(
+                                    "declared read_previous field {:?} not present",
+                                    field_id,
+                                ),
+                            },
+                            receipts,
+                            accepted_receipt_start,
+                        );
+                    }
+                    Some(_) => {} // length matches — validation passed
+                }
+            }
+            for &(field_id, expected_len) in &self.expectations.write[i] {
+                let actual_len = guard.writer.read(field_id).map(|b| b.len());
+                match actual_len {
+                    Some(len) if len != expected_len => {
+                        let prop_name = prop.name().to_string();
+                        return self.handle_rollback(
+                            prop_name,
+                            murk_core::PropagatorError::ExecutionFailed {
+                                reason: format!(
+                                    "write field {:?} buffer length {} != expected {}",
+                                    field_id, len, expected_len,
+                                ),
+                            },
+                            receipts,
+                            accepted_receipt_start,
+                        );
+                    }
+                    None => {
+                        let prop_name = prop.name().to_string();
+                        return self.handle_rollback(
+                            prop_name,
+                            murk_core::PropagatorError::ExecutionFailed {
+                                reason: format!("declared write field {:?} not present", field_id,),
+                            },
+                            receipts,
+                            accepted_receipt_start,
+                        );
+                    }
+                    Some(_) => {} // length matches — validation passed
+                }
+            }
 
             // 4e. Construct StepContext and call step().
             {
@@ -608,7 +830,9 @@ mod tests {
     use murk_core::command::CommandPayload;
     use murk_core::id::{Coord, ParameterKey};
     use murk_core::traits::SnapshotAccess;
-    use murk_core::{BoundaryBehavior, FieldDef, FieldMutability, FieldType};
+    use murk_core::{
+        BoundaryBehavior, FieldDef, FieldMutability, FieldSet, FieldType, PropagatorError,
+    };
     use murk_propagator::propagator::WriteMode;
     use murk_space::{EdgeBehavior, Line1D};
     use murk_test_utils::{ConstPropagator, FailingPropagator, IdentityPropagator};
@@ -651,39 +875,37 @@ mod tests {
     }
 
     fn simple_engine() -> TickEngine {
-        let config = WorldConfig {
-            space: Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()),
-            fields: vec![scalar_field("energy")],
-            propagators: vec![Box::new(ConstPropagator::new("const", FieldId(0), 42.0))],
-            dt: 0.1,
-            seed: 42,
-            ring_buffer_size: 8,
-            max_ingress_queue: 1024,
-            tick_rate_hz: None,
-            backoff: crate::config::BackoffConfig::default(),
-        };
+        let config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                42.0,
+            ))])
+            .dt(0.1)
+            .seed(42)
+            .build()
+            .unwrap();
         TickEngine::new(config).unwrap()
     }
 
     fn two_field_engine() -> TickEngine {
-        let config = WorldConfig {
-            space: Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()),
-            fields: vec![scalar_field("field0"), scalar_field("field1")],
-            propagators: vec![
+        let config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("field0"), scalar_field("field1")])
+            .propagators(vec![
                 Box::new(ConstPropagator::new("write_f0", FieldId(0), 7.0)),
                 Box::new(IdentityPropagator::new(
                     "copy_f0_to_f1",
                     FieldId(0),
                     FieldId(1),
                 )),
-            ],
-            dt: 0.1,
-            seed: 42,
-            ring_buffer_size: 8,
-            max_ingress_queue: 1024,
-            tick_rate_hz: None,
-            backoff: crate::config::BackoffConfig::default(),
-        };
+            ])
+            .dt(0.1)
+            .seed(42)
+            .build()
+            .unwrap();
         TickEngine::new(config).unwrap()
     }
 
@@ -733,14 +955,14 @@ mod tests {
             }
         }
 
-        let config = WorldConfig {
-            space: Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()),
-            fields: vec![
+        let config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![
                 scalar_field("field0"),
                 scalar_field("field1"),
                 scalar_field("field2"),
-            ],
-            propagators: vec![
+            ])
+            .propagators(vec![
                 Box::new(ConstPropagator::new("write_f0", FieldId(0), 7.0)),
                 Box::new(IdentityPropagator::new(
                     "copy_f0_to_f1",
@@ -753,52 +975,43 @@ mod tests {
                     FieldId(1),
                     FieldId(2),
                 )),
-            ],
-            dt: 0.1,
-            seed: 42,
-            ring_buffer_size: 8,
-            max_ingress_queue: 1024,
-            tick_rate_hz: None,
-            backoff: crate::config::BackoffConfig::default(),
-        };
+            ])
+            .dt(0.1)
+            .seed(42)
+            .build()
+            .unwrap();
         TickEngine::new(config).unwrap()
     }
 
     fn failing_engine(succeed_count: usize) -> TickEngine {
-        let config = WorldConfig {
-            space: Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()),
-            fields: vec![scalar_field("energy")],
-            propagators: vec![Box::new(FailingPropagator::new(
+        let config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(FailingPropagator::new(
                 "fail",
                 FieldId(0),
                 succeed_count,
-            ))],
-            dt: 0.1,
-            seed: 42,
-            ring_buffer_size: 8,
-            max_ingress_queue: 1024,
-            tick_rate_hz: None,
-            backoff: crate::config::BackoffConfig::default(),
-        };
+            ))])
+            .dt(0.1)
+            .seed(42)
+            .build()
+            .unwrap();
         TickEngine::new(config).unwrap()
     }
 
     fn partial_failure_engine() -> TickEngine {
         // PropA succeeds always, PropB fails immediately.
-        let config = WorldConfig {
-            space: Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()),
-            fields: vec![scalar_field("field0"), scalar_field("field1")],
-            propagators: vec![
+        let config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("field0"), scalar_field("field1")])
+            .propagators(vec![
                 Box::new(ConstPropagator::new("ok_prop", FieldId(0), 1.0)),
                 Box::new(FailingPropagator::new("fail_prop", FieldId(1), 0)),
-            ],
-            dt: 0.1,
-            seed: 42,
-            ring_buffer_size: 8,
-            max_ingress_queue: 1024,
-            tick_rate_hz: None,
-            backoff: crate::config::BackoffConfig::default(),
-        };
+            ])
+            .dt(0.1)
+            .seed(42)
+            .build()
+            .unwrap();
         TickEngine::new(config).unwrap()
     }
 
@@ -845,20 +1058,17 @@ mod tests {
             }
         }
 
-        let config = WorldConfig {
-            space: Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()),
-            fields: vec![scalar_field("field0"), scalar_field("field1")],
-            propagators: vec![
+        let config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("field0"), scalar_field("field1")])
+            .propagators(vec![
                 Box::new(ConstPropagator::new("write_f0", FieldId(0), 99.0)),
                 Box::new(ReadsPrevPropagator),
-            ],
-            dt: 0.1,
-            seed: 42,
-            ring_buffer_size: 8,
-            max_ingress_queue: 1024,
-            tick_rate_hz: None,
-            backoff: crate::config::BackoffConfig::default(),
-        };
+            ])
+            .dt(0.1)
+            .seed(42)
+            .build()
+            .unwrap();
         let mut engine = TickEngine::new(config).unwrap();
 
         // Tick 1: PropA writes 99.0 to field0. ReadsPrev reads field0
@@ -1232,17 +1442,19 @@ mod tests {
 
     #[test]
     fn queue_full_rejections_are_counted_in_metrics() {
-        let config = WorldConfig {
-            space: Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()),
-            fields: vec![scalar_field("energy")],
-            propagators: vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))],
-            dt: 0.1,
-            seed: 42,
-            ring_buffer_size: 8,
-            max_ingress_queue: 1,
-            tick_rate_hz: None,
-            backoff: crate::config::BackoffConfig::default(),
-        };
+        let config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
+            .dt(0.1)
+            .seed(42)
+            .max_ingress_queue(1)
+            .build()
+            .unwrap();
         let mut engine = TickEngine::new(config).unwrap();
 
         let submit_receipts =
@@ -1334,20 +1546,17 @@ mod tests {
         }
 
         fn sparse_engine(fail_on_call: Option<usize>) -> TickEngine {
-            let config = WorldConfig {
-                space: Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()),
-                fields: vec![sparse_scalar_field("sparse0"), scalar_field("field1")],
-                propagators: vec![
+            let config = WorldConfig::builder()
+                .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+                .fields(vec![sparse_scalar_field("sparse0"), scalar_field("field1")])
+                .propagators(vec![
                     Box::new(ConstPropagator::new("write_sparse", FieldId(0), 3.0)),
                     Box::new(MaybeFailPropagator::new(FieldId(1), fail_on_call)),
-                ],
-                dt: 0.1,
-                seed: 42,
-                ring_buffer_size: 8,
-                max_ingress_queue: 1024,
-                tick_rate_hz: None,
-                backoff: crate::config::BackoffConfig::default(),
-            };
+                ])
+                .dt(0.1)
+                .seed(42)
+                .build()
+                .unwrap();
             let mut engine = TickEngine::new(config).unwrap();
             engine.arena.reset_sparse_reuse_counters();
             engine
@@ -1536,17 +1745,14 @@ mod tests {
             }
         }
 
-        let config = WorldConfig {
-            space: Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()),
-            fields: vec![scalar_field("state")],
-            propagators: vec![Box::new(IncrementalOnce::new())],
-            dt: 0.1,
-            seed: 42,
-            ring_buffer_size: 8,
-            max_ingress_queue: 1024,
-            tick_rate_hz: None,
-            backoff: crate::config::BackoffConfig::default(),
-        };
+        let config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("state")])
+            .propagators(vec![Box::new(IncrementalOnce::new())])
+            .dt(0.1)
+            .seed(42)
+            .build()
+            .unwrap();
         let mut engine = TickEngine::new(config).unwrap();
 
         // Tick 1: propagator writes 42.0 and 99.0.
@@ -1578,12 +1784,377 @@ mod tests {
         assert_eq!(snap.read(FieldId(0)).unwrap()[1], 99.0);
     }
 
+    // ── Buffer validation tests ───────────────────────────────
+    //
+    // These are positive tests only (correctly configured engines pass).
+    // The engine's buffer validation is defense-in-depth: the arena
+    // allocates buffers from the same FieldDef that expectations are
+    // computed from, so length mismatches cannot occur through the
+    // public API. Negative tests would require corrupting internal
+    // arena state, which is not possible through the public API.
+
+    fn vector_field(name: &str, dims: u32) -> FieldDef {
+        FieldDef {
+            name: name.to_string(),
+            field_type: FieldType::Vector { dims },
+            mutability: FieldMutability::PerTick,
+            units: None,
+            bounds: None,
+            boundary_behavior: BoundaryBehavior::Clamp,
+        }
+    }
+
+    #[test]
+    fn buffer_validation_passes_scalar_engine() {
+        let mut engine = simple_engine();
+        assert!(
+            engine.execute_tick().is_ok(),
+            "scalar engine should pass buffer validation"
+        );
+    }
+
+    #[test]
+    fn buffer_validation_passes_vector_field() {
+        struct VectorWriter;
+        impl Propagator for VectorWriter {
+            fn name(&self) -> &str {
+                "vec_writer"
+            }
+            fn reads(&self) -> murk_core::FieldSet {
+                murk_core::FieldSet::empty()
+            }
+            fn writes(&self) -> Vec<(FieldId, WriteMode)> {
+                vec![(FieldId(0), WriteMode::Full)]
+            }
+            fn step(
+                &self,
+                ctx: &mut murk_propagator::StepContext<'_>,
+            ) -> Result<(), murk_core::PropagatorError> {
+                let out = ctx.writes().write(FieldId(0)).unwrap();
+                out.fill(0.0);
+                Ok(())
+            }
+        }
+        let config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![vector_field("velocity", 2)])
+            .propagators(vec![Box::new(VectorWriter)])
+            .dt(0.1)
+            .seed(42)
+            .build()
+            .unwrap();
+        let mut engine = TickEngine::new(config).unwrap();
+        assert!(
+            engine.execute_tick().is_ok(),
+            "vector field should pass validation"
+        );
+    }
+
+    #[test]
+    fn buffer_validation_passes_multi_propagator() {
+        let mut engine = three_field_engine();
+        assert!(
+            engine.execute_tick().is_ok(),
+            "multi-propagator engine should pass buffer validation"
+        );
+    }
+
+    #[test]
+    fn buffer_validation_passes_reads_previous_on_tick_1() {
+        // Use a propagator that declares reads_previous() to actually exercise
+        // the read_previous validation path (expectations.read_previous[i]).
+        struct ReadsPrevWriter;
+        impl Propagator for ReadsPrevWriter {
+            fn name(&self) -> &str {
+                "reads_prev_writer"
+            }
+            fn reads(&self) -> FieldSet {
+                FieldSet::empty()
+            }
+            fn reads_previous(&self) -> FieldSet {
+                [FieldId(0)].into_iter().collect()
+            }
+            fn writes(&self) -> Vec<(FieldId, WriteMode)> {
+                vec![(FieldId(1), WriteMode::Full)]
+            }
+            fn step(
+                &self,
+                ctx: &mut murk_propagator::StepContext<'_>,
+            ) -> Result<(), PropagatorError> {
+                let prev = ctx.reads_previous().read(FieldId(0)).unwrap().to_vec();
+                let out = ctx.writes().write(FieldId(1)).unwrap();
+                out.copy_from_slice(&prev);
+                Ok(())
+            }
+        }
+
+        let config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("source"), scalar_field("dest")])
+            .propagators(vec![
+                Box::new(ConstPropagator::new("seed", FieldId(0), 5.0)),
+                Box::new(ReadsPrevWriter),
+            ])
+            .dt(0.1)
+            .seed(42)
+            .build()
+            .unwrap();
+        let mut engine = TickEngine::new(config).unwrap();
+
+        // Verify read_previous expectations are actually populated.
+        assert!(
+            !engine.expectations.read_previous[1].is_empty(),
+            "ReadsPrevWriter should have read_previous expectations"
+        );
+        assert_eq!(engine.expectations.read_previous[1], vec![(FieldId(0), 10)]);
+
+        // Tick 0→1: reads_previous sees initial zeros via base_cache.
+        assert!(
+            engine.execute_tick().is_ok(),
+            "tick 1 should pass validation"
+        );
+        // Tick 1→2: reads_previous sees published tick 1 data.
+        assert!(
+            engine.execute_tick().is_ok(),
+            "tick 2 should pass validation"
+        );
+    }
+
+    #[test]
+    fn rollback_still_works_with_validation() {
+        let mut engine = failing_engine(0);
+        let result = engine.execute_tick();
+        match result {
+            Err(TickError {
+                kind: StepError::PropagatorFailed { name, .. },
+                ..
+            }) => {
+                assert_eq!(name, "fail", "error should name the failing propagator");
+            }
+            other => panic!("expected PropagatorFailed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn field_expectations_computes_correct_lengths() {
+        // IdentityPropagator: reads() = FieldId(0), writes() = FieldId(1).
+        // FieldId(0) is scalar (10*1=10), FieldId(1) is vector(3) (10*3=30).
+        let config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("scalar_f"), vector_field("vector_f", 3)])
+            .propagators(vec![Box::new(IdentityPropagator::new(
+                "copy_scalar_to_vector",
+                FieldId(0),
+                FieldId(1),
+            ))])
+            .dt(0.1)
+            .seed(42)
+            .build()
+            .unwrap();
+        let engine = TickEngine::new(config).unwrap();
+        // IdentityPropagator reads FieldId(0) (scalar: 10*1=10).
+        assert_eq!(
+            engine.expectations.read[0],
+            vec![(FieldId(0), 10)],
+            "scalar read should expect cell_count * 1"
+        );
+        // IdentityPropagator writes FieldId(1) (vector(3): 10*3=30).
+        assert_eq!(
+            engine.expectations.write[0],
+            vec![(FieldId(1), 30)],
+            "vector write should expect cell_count * 3"
+        );
+    }
+
+    #[test]
+    fn buffer_validation_rejects_corrupted_expectation() {
+        // Mutate expectations to inject a wrong expected length, verifying
+        // the validation loop fires and triggers rollback before step().
+        let mut engine = simple_engine();
+        // First tick succeeds normally.
+        assert!(engine.execute_tick().is_ok());
+
+        // Corrupt the write expectation: change expected length from 10 to 999.
+        assert!(!engine.expectations.write[0].is_empty());
+        engine.expectations.write[0][0].1 = 999;
+
+        // Next tick should fail with a buffer length mismatch.
+        let result = engine.execute_tick();
+        match result {
+            Err(TickError {
+                kind: StepError::PropagatorFailed { reason, .. },
+                ..
+            }) => match reason {
+                PropagatorError::ExecutionFailed { reason } => {
+                    assert!(
+                        reason.contains("buffer length"),
+                        "error should mention buffer length: {reason}"
+                    );
+                }
+                other => panic!("expected ExecutionFailed, got {other:?}"),
+            },
+            other => panic!("expected PropagatorFailed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn buffer_validation_rejects_corrupted_read_expectation() {
+        // Corrupt the read expectation length for propagator 1 (IdentityPropagator
+        // reads field0). After corruption, the validation loop should fire before
+        // step() and trigger rollback.
+        let mut engine = two_field_engine();
+        // First tick succeeds normally to publish a snapshot.
+        assert!(engine.execute_tick().is_ok());
+
+        // Corrupt read expectation: change expected read length to a wrong value.
+        assert!(!engine.expectations.read[1].is_empty());
+        engine.expectations.read[1][0].1 = 777;
+
+        let result = engine.execute_tick();
+        match result {
+            Err(TickError {
+                kind: StepError::PropagatorFailed { reason, .. },
+                ..
+            }) => match reason {
+                PropagatorError::ExecutionFailed { reason } => {
+                    assert!(
+                        reason.contains("buffer length"),
+                        "error should mention buffer length: {reason}"
+                    );
+                }
+                other => panic!("expected ExecutionFailed, got {other:?}"),
+            },
+            other => panic!("expected PropagatorFailed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn buffer_validation_rejects_corrupted_read_previous_expectation() {
+        // Use a propagator with reads_previous, then corrupt the expectation.
+        struct ReadsPrevConst;
+        impl Propagator for ReadsPrevConst {
+            fn name(&self) -> &str {
+                "reads_prev_const"
+            }
+            fn reads(&self) -> FieldSet {
+                FieldSet::empty()
+            }
+            fn reads_previous(&self) -> FieldSet {
+                [FieldId(0)].into_iter().collect()
+            }
+            fn writes(&self) -> Vec<(FieldId, WriteMode)> {
+                vec![(FieldId(1), WriteMode::Full)]
+            }
+            fn step(
+                &self,
+                ctx: &mut murk_propagator::StepContext<'_>,
+            ) -> Result<(), PropagatorError> {
+                let out = ctx.writes().write(FieldId(1)).unwrap();
+                out.fill(1.0);
+                Ok(())
+            }
+        }
+
+        let config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("source"), scalar_field("dest")])
+            .propagators(vec![
+                Box::new(ConstPropagator::new("seed", FieldId(0), 5.0)),
+                Box::new(ReadsPrevConst),
+            ])
+            .dt(0.1)
+            .seed(42)
+            .build()
+            .unwrap();
+        let mut engine = TickEngine::new(config).unwrap();
+
+        // First tick to publish a snapshot (so base_cache is populated).
+        assert!(engine.execute_tick().is_ok());
+
+        // Corrupt read_previous expectation for propagator 1.
+        assert!(!engine.expectations.read_previous[1].is_empty());
+        engine.expectations.read_previous[1][0].1 = 888;
+
+        let result = engine.execute_tick();
+        match result {
+            Err(TickError {
+                kind: StepError::PropagatorFailed { reason, .. },
+                ..
+            }) => match reason {
+                PropagatorError::ExecutionFailed { reason } => {
+                    assert!(
+                        reason.contains("buffer length"),
+                        "error should mention buffer length: {reason}"
+                    );
+                }
+                other => panic!("expected ExecutionFailed, got {other:?}"),
+            },
+            other => panic!("expected PropagatorFailed, got {other:?}"),
+        }
+    }
+
+    // ── TickError Display and Error impl coverage ────────────
+
+    #[test]
+    fn tick_error_display_delegates_to_kind() {
+        let err = TickError {
+            kind: StepError::TickDisabled,
+            receipts: vec![],
+        };
+        let msg = format!("{err}");
+        assert!(!msg.is_empty(), "TickError Display should produce output");
+    }
+
+    #[test]
+    fn tick_error_source_returns_kind() {
+        use std::error::Error;
+        let err = TickError {
+            kind: StepError::TickDisabled,
+            receipts: vec![],
+        };
+        assert!(
+            err.source().is_some(),
+            "TickError::source() should return the underlying StepError"
+        );
+    }
+
+    // ── Accessor coverage ────────────────────────────────────
+
+    #[test]
+    fn owned_snapshot_returns_data() {
+        let mut engine = simple_engine();
+        engine.execute_tick().unwrap();
+        let owned = engine.owned_snapshot();
+        let data = owned.read(FieldId(0)).unwrap();
+        assert!(data.iter().all(|&v| v == 42.0));
+    }
+
+    #[test]
+    fn ingress_queue_depth_and_capacity() {
+        let mut engine = simple_engine();
+        assert_eq!(engine.ingress_queue_depth(), 0);
+        assert!(engine.ingress_queue_capacity() > 0);
+
+        engine.submit_commands(vec![make_cmd(100)]);
+        assert_eq!(engine.ingress_queue_depth(), 1);
+
+        engine.execute_tick().unwrap();
+        assert_eq!(engine.ingress_queue_depth(), 0);
+    }
+
+    #[test]
+    fn space_accessor_returns_correct_topology() {
+        let engine = simple_engine();
+        assert_eq!(engine.space().cell_count(), 10);
+        assert_eq!(engine.space().ndim(), 1);
+    }
+
     /// BUG-106: Unchecked u32 * u32 for static field length panics on overflow.
     #[test]
     fn static_field_overflow_returns_error() {
-        let config = WorldConfig {
-            space: Box::new(Line1D::new(3, EdgeBehavior::Absorb).unwrap()),
-            fields: vec![FieldDef {
+        let config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(3, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![FieldDef {
                 name: "huge_vec".to_string(),
                 field_type: FieldType::Vector {
                     dims: u32::MAX / 2, // 3 * (u32::MAX/2) overflows u32
@@ -1592,15 +2163,12 @@ mod tests {
                 units: None,
                 bounds: None,
                 boundary_behavior: BoundaryBehavior::Clamp,
-            }],
-            propagators: vec![Box::new(ConstPropagator::new("c", FieldId(0), 1.0))],
-            dt: 0.1,
-            seed: 42,
-            ring_buffer_size: 8,
-            max_ingress_queue: 1024,
-            tick_rate_hz: None,
-            backoff: crate::config::BackoffConfig::default(),
-        };
+            }])
+            .propagators(vec![Box::new(ConstPropagator::new("c", FieldId(0), 1.0))])
+            .dt(0.1)
+            .seed(42)
+            .build()
+            .unwrap();
         match TickEngine::new(config) {
             Err(crate::config::ConfigError::CellCountOverflow { .. }) => {}
             Ok(_) => panic!("expected CellCountOverflow, got Ok"),

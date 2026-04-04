@@ -3,9 +3,6 @@
 import threading
 import time
 
-import numpy as np
-import pytest
-
 from murk._murk import (
     Config,
     EdgeBehavior,
@@ -49,13 +46,10 @@ def test_concurrent_worlds_make_progress():
         world.destroy()
 
     threads = [threading.Thread(target=worker, args=(i,)) for i in range(n_threads)]
-    start = time.monotonic()
     for t in threads:
         t.start()
     for t in threads:
         t.join(timeout=30)
-    elapsed = time.monotonic() - start
-
     for i, r in enumerate(results):
         assert r == n_steps, f"Thread {i} only completed {r}/{n_steps} steps"
 

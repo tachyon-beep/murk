@@ -9,7 +9,7 @@
 #![forbid(unsafe_code)]
 #![deny(rustdoc::broken_intra_doc_links)]
 
-use murk_engine::{BackoffConfig, WorldConfig};
+use murk_engine::WorldConfig;
 #[allow(deprecated)]
 use murk_propagators::fields::{HEAT, HEAT_GRADIENT, VELOCITY};
 use murk_propagators::{
@@ -28,10 +28,12 @@ pub fn reference_profile(seed: u64, action_buffer: ActionBuffer) -> WorldConfig 
     let cell_count = 100 * 100;
     let initial_positions = init_agent_positions(cell_count, 4, seed);
 
-    WorldConfig {
-        space: Box::new(Square4::new(100, 100, EdgeBehavior::Absorb).unwrap()),
-        fields: murk_propagators::reference_fields(),
-        propagators: vec![
+    WorldConfig::builder()
+        .space(Box::new(
+            Square4::new(100, 100, EdgeBehavior::Absorb).unwrap(),
+        ))
+        .fields(murk_propagators::reference_fields())
+        .propagators(vec![
             Box::new(
                 ScalarDiffusion::builder()
                     .input_field(HEAT)
@@ -60,14 +62,11 @@ pub fn reference_profile(seed: u64, action_buffer: ActionBuffer) -> WorldConfig 
                 initial_positions,
             )),
             Box::new(RewardPropagator::new(1.0, -0.01)),
-        ],
-        dt: 0.1,
-        seed,
-        ring_buffer_size: 8,
-        max_ingress_queue: 1024,
-        tick_rate_hz: None,
-        backoff: BackoffConfig::default(),
-    }
+        ])
+        .dt(0.1)
+        .seed(seed)
+        .build()
+        .unwrap()
 }
 
 /// Build a stress benchmark profile: 316x316 grid (~100K cells).
@@ -78,10 +77,12 @@ pub fn stress_profile(seed: u64, action_buffer: ActionBuffer) -> WorldConfig {
     let cell_count = 316 * 316;
     let initial_positions = init_agent_positions(cell_count, 4, seed);
 
-    WorldConfig {
-        space: Box::new(Square4::new(316, 316, EdgeBehavior::Absorb).unwrap()),
-        fields: murk_propagators::reference_fields(),
-        propagators: vec![
+    WorldConfig::builder()
+        .space(Box::new(
+            Square4::new(316, 316, EdgeBehavior::Absorb).unwrap(),
+        ))
+        .fields(murk_propagators::reference_fields())
+        .propagators(vec![
             Box::new(
                 ScalarDiffusion::builder()
                     .input_field(HEAT)
@@ -110,14 +111,11 @@ pub fn stress_profile(seed: u64, action_buffer: ActionBuffer) -> WorldConfig {
                 initial_positions,
             )),
             Box::new(RewardPropagator::new(1.0, -0.01)),
-        ],
-        dt: 0.1,
-        seed,
-        ring_buffer_size: 8,
-        max_ingress_queue: 1024,
-        tick_rate_hz: None,
-        backoff: BackoffConfig::default(),
-    }
+        ])
+        .dt(0.1)
+        .seed(seed)
+        .build()
+        .unwrap()
 }
 
 /// Generate deterministic initial agent positions.
@@ -162,17 +160,17 @@ mod tests {
     use murk_propagators::agent_movement::new_action_buffer;
 
     #[test]
-    fn reference_profile_validates() {
+    fn reference_profile_builds() {
         let ab = new_action_buffer();
-        let config = reference_profile(42, ab);
-        config.validate().unwrap();
+        // build() inside reference_profile() already validates.
+        let _config = reference_profile(42, ab);
     }
 
     #[test]
-    fn stress_profile_validates() {
+    fn stress_profile_builds() {
         let ab = new_action_buffer();
-        let config = stress_profile(42, ab);
-        config.validate().unwrap();
+        // build() inside stress_profile() already validates.
+        let _config = stress_profile(42, ab);
     }
 
     #[test]

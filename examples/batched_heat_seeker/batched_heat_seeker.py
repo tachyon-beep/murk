@@ -374,7 +374,7 @@ def demo_rollout(num_envs: int = 4, num_steps: int = 30):
     env = BatchedHeatSeekerEnv(num_envs=num_envs, base_seed=1234)
     obs, _ = env.reset(seed=1234)
 
-    print(f"  Initial agent positions:")
+    print("  Initial agent positions:")
     for i in range(num_envs):
         print(f"    world {i}: ({env._agent_x[i]:2d}, {env._agent_y[i]:2d})")
     print()

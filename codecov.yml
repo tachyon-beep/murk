@@ -1,14 +1,16 @@
 coverage:
   status:
-    # Project-level: overall repo coverage must not drop significantly.
+    # Coverage is informational, not a merge gate. Writing tests to hit
+    # an arbitrary coverage number produces low-value tests that slow
+    # down the suite without catching real bugs.
     project:
       default:
-        target: auto    # track against baseline, not a fixed number
-        threshold: 1%   # allow up to 1% drop before failing
-
-    # Patch-level coverage disabled — if changed lines were easy to cover
-    # we'd have done it already. Rely on project-level target instead.
-    patch: off
+        informational: true   # report but never block merges
+        target: auto
+        threshold: 2%
+    patch:
+      default:
+        informational: true   # report but never block merges
 
   # Don't block PR merges on coverage upload failures.
   notify:

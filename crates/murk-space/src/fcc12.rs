@@ -230,6 +230,13 @@ impl Space for Fcc12 {
     }
 
     fn neighbours(&self, coord: &Coord) -> SmallVec<[Coord; 8]> {
+        debug_assert_eq!(
+            coord.len(),
+            self.ndim(),
+            "coord arity {}, expected {}",
+            coord.len(),
+            self.ndim()
+        );
         let (x, y, z) = (coord[0], coord[1], coord[2]);
         let mut result = SmallVec::new();
         for (dx, dy, dz) in FCC_OFFSETS {
@@ -263,6 +270,20 @@ impl Space for Fcc12 {
     }
 
     fn distance(&self, a: &Coord, b: &Coord) -> f64 {
+        debug_assert_eq!(
+            a.len(),
+            self.ndim(),
+            "coord a arity {}, expected {}",
+            a.len(),
+            self.ndim()
+        );
+        debug_assert_eq!(
+            b.len(),
+            self.ndim(),
+            "coord b arity {}, expected {}",
+            b.len(),
+            self.ndim()
+        );
         let dx = axis_distance_u32(a[0], b[0], self.w, self.edge);
         let dy = axis_distance_u32(a[1], b[1], self.h, self.edge);
         let dz = axis_distance_u32(a[2], b[2], self.d, self.edge);

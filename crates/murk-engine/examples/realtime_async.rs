@@ -31,7 +31,7 @@ use murk_core::{
     BoundaryBehavior, Command, CommandPayload, FieldDef, FieldId, FieldMutability, FieldSet,
     FieldType, PropagatorError, SnapshotAccess, TickId,
 };
-use murk_engine::{AsyncConfig, BackoffConfig, RealtimeAsyncWorld, WorldConfig};
+use murk_engine::{AsyncConfig, RealtimeAsyncWorld, WorldConfig};
 use murk_obs::{ObsDtype, ObsEntry, ObsPlan, ObsRegion, ObsSpec, ObsTransform};
 use murk_propagator::{Propagator, StepContext, WriteMode};
 use murk_space::{EdgeBehavior, RegionSpec, Space, Square4};
@@ -166,17 +166,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // KEY DIFFERENCE from lockstep: tick_rate_hz is set.
     // This tells the tick thread how fast to advance the simulation.
     // In lockstep mode, tick_rate_hz is None (caller drives ticks).
-    let config = WorldConfig {
-        space: Box::new(space),
-        fields,
-        propagators: vec![Box::new(DiffusionPropagator)],
-        dt: DT,
-        seed: 42,
-        ring_buffer_size: 8,
-        max_ingress_queue: 1024,
-        tick_rate_hz: Some(30.0), // 30 Hz — tick thread sleeps ~33ms between ticks
-        backoff: BackoffConfig::default(),
-    };
+    let config = WorldConfig::builder()
+        .space(Box::new(space))
+        .fields(fields)
+        .propagators(vec![Box::new(DiffusionPropagator)])
+        .dt(DT)
+        .seed(42)
+        .tick_rate_hz(30.0) // 30 Hz — tick thread sleeps ~33ms between ticks
+        .build()
+        .expect("invalid WorldConfig");
 
     // 4. Create RealtimeAsyncWorld.
     //

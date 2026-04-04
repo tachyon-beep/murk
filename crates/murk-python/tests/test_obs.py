@@ -1,7 +1,6 @@
 """Tests for ObsPlan compile, execute, and numpy buffer correctness."""
 
 import numpy as np
-import pytest
 
 from murk._murk import ObsEntry, ObsPlan
 
@@ -95,7 +94,7 @@ def test_obsplan_reuse_across_steps():
 def test_obsentry_accepts_enum_types():
     """ObsEntry accepts RegionType and TransformType enums."""
     from murk import RegionType, TransformType, PoolKernel
-    entry = ObsEntry(
+    ObsEntry(
         0,
         region_type=RegionType.All,
         transform_type=TransformType.Identity,

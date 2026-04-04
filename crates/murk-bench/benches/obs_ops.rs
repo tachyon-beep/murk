@@ -16,6 +16,7 @@ use smallvec::smallvec;
 const HEAT: FieldId = FieldId(0);
 
 use murk_bench::reference_profile;
+use murk_space::{EdgeBehavior, Square4};
 
 /// Build a fixed-region ObsSpec: 1 field (heat), All region, no transform.
 fn fixed_obs_spec() -> ObsSpec {
@@ -64,9 +65,8 @@ fn make_agent_centers(n: usize) -> Vec<Coord> {
 
 /// Benchmark: compile fixed and agent-relative plans.
 fn bench_obs_compile(c: &mut Criterion) {
-    let ab = new_action_buffer();
-    let config = reference_profile(42, ab);
-    let space = config.space.as_ref();
+    let space = Square4::new(100, 100, EdgeBehavior::Absorb).unwrap();
+    let space: &dyn murk_space::Space = &space;
 
     let mut group = c.benchmark_group("obs_compile");
     for (name, spec) in [
@@ -85,9 +85,8 @@ fn bench_obs_compile(c: &mut Criterion) {
 
 /// Benchmark: execute fixed-region extraction over a 10K-cell snapshot.
 fn bench_obs_execute_fixed_10k(c: &mut Criterion) {
-    let ab = new_action_buffer();
-    let config = reference_profile(42, ab);
-    let space = config.space.as_ref();
+    let space = Square4::new(100, 100, EdgeBehavior::Absorb).unwrap();
+    let space: &dyn murk_space::Space = &space;
 
     let spec = fixed_obs_spec();
     let plan_result = ObsPlan::compile(&spec, space).unwrap();
@@ -115,12 +114,10 @@ fn bench_obs_execute_fixed_10k(c: &mut Criterion) {
 
 /// Benchmark: execute agent-relative extraction for representative batch sizes.
 fn bench_obs_execute_agents(c: &mut Criterion) {
-    let ab = new_action_buffer();
-    let config = reference_profile(42, ab);
-    let space = config.space.as_ref();
+    let space = Square4::new(100, 100, EdgeBehavior::Absorb).unwrap();
 
     let spec = agent_obs_spec();
-    let plan_result = ObsPlan::compile(&spec, space).unwrap();
+    let plan_result = ObsPlan::compile(&spec, &space).unwrap();
     let world = make_world_with_snapshot();
     let plan = plan_result.plan;
     let per_agent_output = plan_result.output_len;
@@ -139,7 +136,7 @@ fn bench_obs_execute_agents(c: &mut Criterion) {
                 b.iter(|| {
                     let snap = world.snapshot();
                     let meta = plan
-                        .execute_agents(&snap, space, centers, None, &mut output, &mut mask)
+                        .execute_agents(&snap, &space, centers, None, &mut output, &mut mask)
                         .unwrap();
                     std::hint::black_box(&meta);
                 });
@@ -151,9 +148,8 @@ fn bench_obs_execute_agents(c: &mut Criterion) {
 
 /// Benchmark: execute simple fixed-region batch extraction.
 fn bench_obs_execute_batch(c: &mut Criterion) {
-    let ab = new_action_buffer();
-    let config = reference_profile(42, ab);
-    let space = config.space.as_ref();
+    let space = Square4::new(100, 100, EdgeBehavior::Absorb).unwrap();
+    let space: &dyn murk_space::Space = &space;
 
     let spec = fixed_obs_spec();
     let plan_result = ObsPlan::compile(&spec, space).unwrap();

@@ -344,6 +344,13 @@ impl Space for ProductSpace {
     /// The neighbour count equals the sum of per-component neighbour counts
     /// (not the product), since only one component varies per edge.
     fn neighbours(&self, coord: &Coord) -> SmallVec<[Coord; 8]> {
+        debug_assert_eq!(
+            coord.len(),
+            self.ndim(),
+            "coord arity {}, expected {}",
+            coord.len(),
+            self.ndim()
+        );
         let parts: Vec<Coord> = (0..self.components.len())
             .map(|i| self.split_coord(coord, i))
             .collect();
@@ -375,6 +382,20 @@ impl Space for ProductSpace {
     /// because the product graph adjacency varies exactly one component per step.
     /// For alternative metrics see [`metric_distance()`](Self::metric_distance).
     fn distance(&self, a: &Coord, b: &Coord) -> f64 {
+        debug_assert_eq!(
+            a.len(),
+            self.ndim(),
+            "coord a arity {}, expected {}",
+            a.len(),
+            self.ndim()
+        );
+        debug_assert_eq!(
+            b.len(),
+            self.ndim(),
+            "coord b arity {}, expected {}",
+            b.len(),
+            self.ndim()
+        );
         (0..self.components.len())
             .map(|i| {
                 let ca = self.split_coord(a, i);

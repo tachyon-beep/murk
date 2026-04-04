@@ -1,14 +1,10 @@
 """Tests for MurkEnv Gymnasium adapter."""
 
 import numpy as np
-import pytest
-
-import gymnasium
 from gymnasium import spaces
 
 from murk._murk import (
     Config,
-    Command,
     EdgeBehavior,
     FieldMutability,
     ObsEntry,

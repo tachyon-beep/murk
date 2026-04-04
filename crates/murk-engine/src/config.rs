@@ -1,9 +1,13 @@
 //! World configuration, validation, and error types.
 //!
-//! [`WorldConfig`] is the builder-input for constructing a simulation world.
-//! [`validate()`](WorldConfig::validate) checks structural invariants at
-//! startup; the actual world constructor (WP-5b) calls `validate_pipeline()`
-//! directly to obtain the [`ReadResolutionPlan`](murk_propagator::ReadResolutionPlan).
+//! [`WorldConfig`] holds validated simulation configuration. Construct
+//! it via [`WorldConfig::builder()`] → [`WorldConfigBuilder::build()`].
+//! The builder runs all validation, so a `WorldConfig` value is always
+//! structurally valid.
+//!
+//! Crate-internal code (e.g., `realtime.rs`) retains `pub(crate)` field
+//! access for reconstruction patterns where the space is replaced with
+//! an `Arc`-wrapped variant. See [`crate::realtime::RealtimeAsyncWorld::new()`] for details.
 
 use std::error::Error;
 use std::fmt;
@@ -113,6 +117,10 @@ pub enum ConfigError {
     },
     /// Ingress queue capacity is zero.
     IngressQueueZero,
+    /// Builder: `space` was not set.
+    MissingSpace,
+    /// Builder: `dt` was not set.
+    MissingDt,
     /// tick_rate_hz is NaN, infinite, zero, or negative.
     InvalidTickRate {
         /// The invalid value.
@@ -172,6 +180,12 @@ impl fmt::Display for ConfigError {
                 write!(f, "ring_buffer_size {configured} is below minimum of 2")
             }
             Self::IngressQueueZero => write!(f, "max_ingress_queue must be at least 1"),
+            Self::MissingSpace => {
+                write!(f, "builder: space not set — call .space() before .build()")
+            }
+            Self::MissingDt => {
+                write!(f, "builder: dt not set — call .dt() before .build()")
+            }
             Self::InvalidTickRate { value } => {
                 write!(f, "tick_rate_hz must be finite and positive, got {value}")
             }
@@ -239,23 +253,23 @@ impl From<ArenaError> for ConfigError {
 /// structural invariants without producing intermediate artifacts.
 pub struct WorldConfig {
     /// Spatial topology for the simulation.
-    pub space: Box<dyn Space>,
+    pub(crate) space: Box<dyn Space>,
     /// Field definitions. `FieldId(n)` corresponds to `fields[n]`.
-    pub fields: Vec<FieldDef>,
+    pub(crate) fields: Vec<FieldDef>,
     /// Propagators executed in pipeline order each tick.
-    pub propagators: Vec<Box<dyn Propagator>>,
+    pub(crate) propagators: Vec<Box<dyn Propagator>>,
     /// Simulation timestep in seconds.
-    pub dt: f64,
+    pub(crate) dt: f64,
     /// RNG seed for deterministic simulation.
-    pub seed: u64,
+    pub(crate) seed: u64,
     /// Number of snapshots retained in the ring buffer. Default: 8. Minimum: 2.
-    pub ring_buffer_size: usize,
+    pub(crate) ring_buffer_size: usize,
     /// Maximum commands buffered in the ingress queue. Default: 1024.
-    pub max_ingress_queue: usize,
+    pub(crate) max_ingress_queue: usize,
     /// Optional target tick rate for realtime-async mode.
-    pub tick_rate_hz: Option<f64>,
+    pub(crate) tick_rate_hz: Option<f64>,
     /// Adaptive backoff configuration.
-    pub backoff: BackoffConfig,
+    pub(crate) backoff: BackoffConfig,
 }
 
 impl WorldConfig {
@@ -342,6 +356,70 @@ impl WorldConfig {
         Ok(())
     }
 
+    // ── Public accessors ──────────────────────────────────────
+
+    /// The spatial topology for the simulation.
+    pub fn space(&self) -> &dyn Space {
+        &*self.space
+    }
+
+    /// The field definitions. `FieldId(n)` corresponds to `fields[n]`.
+    pub fn fields(&self) -> &[FieldDef] {
+        &self.fields
+    }
+
+    /// The propagators executed in pipeline order each tick.
+    pub fn propagators(&self) -> &[Box<dyn Propagator>] {
+        &self.propagators
+    }
+
+    /// The simulation timestep in seconds.
+    pub fn dt(&self) -> f64 {
+        self.dt
+    }
+
+    /// The RNG seed for deterministic simulation.
+    pub fn seed(&self) -> u64 {
+        self.seed
+    }
+
+    /// Number of snapshots retained in the ring buffer.
+    pub fn ring_buffer_size(&self) -> usize {
+        self.ring_buffer_size
+    }
+
+    /// Maximum commands buffered in the ingress queue.
+    pub fn max_ingress_queue(&self) -> usize {
+        self.max_ingress_queue
+    }
+
+    /// Optional target tick rate for realtime-async mode.
+    pub fn tick_rate_hz(&self) -> Option<f64> {
+        self.tick_rate_hz
+    }
+
+    /// The adaptive backoff configuration.
+    pub fn backoff(&self) -> &BackoffConfig {
+        &self.backoff
+    }
+
+    // ── Builder ──────────────────────────────────────────────
+
+    /// Create a new [`WorldConfigBuilder`] with sensible defaults.
+    pub fn builder() -> WorldConfigBuilder {
+        WorldConfigBuilder {
+            space: None,
+            fields: Vec::new(),
+            propagators: Vec::new(),
+            dt: None,
+            seed: 0,
+            ring_buffer_size: 8,
+            max_ingress_queue: 1024,
+            tick_rate_hz: None,
+            backoff: BackoffConfig::default(),
+        }
+    }
+
     /// Build a [`FieldSet`] from the configured field definitions.
     ///
     /// Returns [`ConfigError::FieldCountOverflow`] if the number of
@@ -356,6 +434,122 @@ impl WorldConfig {
                     })
             })
             .collect()
+    }
+}
+
+/// Fluent builder for [`WorldConfig`].
+///
+/// `space` and `dt` are required — calling [`build()`](WorldConfigBuilder::build)
+/// without them returns [`ConfigError::MissingSpace`] or [`ConfigError::MissingDt`].
+/// `fields` and `propagators` default to empty `Vec`s; the existing pipeline
+/// validation in [`WorldConfig::validate()`] catches those cases with
+/// [`ConfigError::NoFields`] and [`ConfigError::Pipeline`] respectively,
+/// so the builder does not duplicate those checks.
+pub struct WorldConfigBuilder {
+    space: Option<Box<dyn Space>>,
+    fields: Vec<FieldDef>,
+    propagators: Vec<Box<dyn Propagator>>,
+    dt: Option<f64>,
+    seed: u64,
+    ring_buffer_size: usize,
+    max_ingress_queue: usize,
+    tick_rate_hz: Option<f64>,
+    backoff: BackoffConfig,
+}
+
+impl WorldConfigBuilder {
+    /// Set the spatial topology. If called multiple times, the last value wins.
+    pub fn space(mut self, space: Box<dyn Space>) -> Self {
+        self.space = Some(space);
+        self
+    }
+
+    /// Set all field definitions at once. If called multiple times, the last value wins.
+    pub fn fields(mut self, fields: Vec<FieldDef>) -> Self {
+        self.fields = fields;
+        self
+    }
+
+    /// Append a single field definition.
+    pub fn field(mut self, field: FieldDef) -> Self {
+        self.fields.push(field);
+        self
+    }
+
+    /// Set all propagators at once. If called multiple times, the last value wins.
+    pub fn propagators(mut self, propagators: Vec<Box<dyn Propagator>>) -> Self {
+        self.propagators = propagators;
+        self
+    }
+
+    /// Append a single propagator to the pipeline.
+    pub fn propagator(mut self, propagator: Box<dyn Propagator>) -> Self {
+        self.propagators.push(propagator);
+        self
+    }
+
+    /// Set the simulation timestep in seconds. If called multiple times, the last value wins.
+    pub fn dt(mut self, dt: f64) -> Self {
+        self.dt = Some(dt);
+        self
+    }
+
+    /// Set the RNG seed. If called multiple times, the last value wins.
+    pub fn seed(mut self, seed: u64) -> Self {
+        self.seed = seed;
+        self
+    }
+
+    /// Set the ring buffer size. If called multiple times, the last value wins.
+    pub fn ring_buffer_size(mut self, ring_buffer_size: usize) -> Self {
+        self.ring_buffer_size = ring_buffer_size;
+        self
+    }
+
+    /// Set the maximum ingress queue capacity. If called multiple times, the last value wins.
+    pub fn max_ingress_queue(mut self, max_ingress_queue: usize) -> Self {
+        self.max_ingress_queue = max_ingress_queue;
+        self
+    }
+
+    /// Set the target tick rate for realtime-async mode. If called multiple times, the last value wins.
+    ///
+    /// The default is `None` (no autonomous ticking / lockstep mode).
+    /// Calling this method sets the rate to `Some(hz)`.
+    pub fn tick_rate_hz(mut self, hz: f64) -> Self {
+        self.tick_rate_hz = Some(hz);
+        self
+    }
+
+    /// Set the adaptive backoff configuration. If called multiple times, the last value wins.
+    pub fn backoff(mut self, backoff: BackoffConfig) -> Self {
+        self.backoff = backoff;
+        self
+    }
+
+    /// Consume the builder and produce a validated [`WorldConfig`].
+    ///
+    /// Returns [`ConfigError::MissingSpace`] if `space` was never set,
+    /// [`ConfigError::MissingDt`] if `dt` was never set, or any error
+    /// from [`WorldConfig::validate()`] if structural invariants fail.
+    pub fn build(self) -> Result<WorldConfig, ConfigError> {
+        let space = self.space.ok_or(ConfigError::MissingSpace)?;
+        let dt = self.dt.ok_or(ConfigError::MissingDt)?;
+
+        let config = WorldConfig {
+            space,
+            fields: self.fields,
+            propagators: self.propagators,
+            dt,
+            seed: self.seed,
+            ring_buffer_size: self.ring_buffer_size,
+            max_ingress_queue: self.max_ingress_queue,
+            tick_rate_hz: self.tick_rate_hz,
+            backoff: self.backoff,
+        };
+
+        config.validate()?;
+        Ok(config)
     }
 }
 
@@ -395,17 +589,18 @@ mod tests {
     }
 
     fn valid_config() -> WorldConfig {
-        WorldConfig {
-            space: Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()),
-            fields: vec![scalar_field("energy")],
-            propagators: vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))],
-            dt: 0.1,
-            seed: 42,
-            ring_buffer_size: 8,
-            max_ingress_queue: 1024,
-            tick_rate_hz: None,
-            backoff: BackoffConfig::default(),
-        }
+        WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
+            .dt(0.1)
+            .seed(42)
+            .build()
+            .unwrap()
     }
 
     #[test]
@@ -710,5 +905,442 @@ mod tests {
         };
         let dbg = format!("{err:?}");
         assert!(dbg.contains("RLIMIT_NPROC"), "Debug output: {dbg}");
+    }
+
+    // ── WorldConfigBuilder tests ────────────────────────────────
+
+    #[test]
+    fn builder_missing_space_fails() {
+        let result = WorldConfig::builder()
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
+            .dt(0.1)
+            .build();
+        match result {
+            Err(ConfigError::MissingSpace) => {}
+            other => panic!("expected MissingSpace, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn builder_missing_dt_fails() {
+        let result = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
+            .build();
+        match result {
+            Err(ConfigError::MissingDt) => {}
+            other => panic!("expected MissingDt, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn builder_with_defaults_succeeds() {
+        let config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
+            .dt(0.1)
+            .build()
+            .expect("builder with defaults should succeed");
+        assert_eq!(config.seed, 0);
+        assert_eq!(config.ring_buffer_size, 8);
+        assert_eq!(config.max_ingress_queue, 1024);
+        assert_eq!(config.tick_rate_hz, None);
+    }
+
+    #[test]
+    fn builder_with_all_options_succeeds() {
+        let config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
+            .dt(0.05)
+            .seed(99)
+            .ring_buffer_size(16)
+            .max_ingress_queue(2048)
+            .tick_rate_hz(60.0)
+            .backoff(BackoffConfig {
+                initial_max_skew: 3,
+                backoff_factor: 2.0,
+                max_skew_cap: 20,
+                decay_rate: 120,
+                rejection_rate_threshold: 0.10,
+            })
+            .build()
+            .expect("builder with all options should succeed");
+        assert_eq!(config.dt, 0.05);
+        assert_eq!(config.seed, 99);
+        assert_eq!(config.ring_buffer_size, 16);
+        assert_eq!(config.max_ingress_queue, 2048);
+        assert_eq!(config.tick_rate_hz, Some(60.0));
+        assert_eq!(config.backoff.initial_max_skew, 3);
+        assert_eq!(config.backoff.backoff_factor, 2.0);
+        assert_eq!(config.backoff.max_skew_cap, 20);
+        assert_eq!(config.backoff.decay_rate, 120);
+        assert!((config.backoff.rejection_rate_threshold - 0.10).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn builder_validates_ring_buffer_too_small() {
+        let result = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
+            .dt(0.1)
+            .ring_buffer_size(1)
+            .build();
+        match result {
+            Err(ConfigError::RingBufferTooSmall { configured: 1 }) => {}
+            other => panic!("expected RingBufferTooSmall{{configured:1}}, got {other:?}"),
+        }
+    }
+
+    // ── Display coverage for remaining error variants ──────
+
+    #[test]
+    fn engine_recovery_failed_display() {
+        let err = ConfigError::EngineRecoveryFailed;
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("engine"),
+            "EngineRecoveryFailed Display should mention 'engine', got: {msg}"
+        );
+    }
+
+    #[test]
+    fn invalid_tick_rate_display() {
+        let err = ConfigError::InvalidTickRate { value: -1.0 };
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("tick_rate_hz") && msg.contains("-1"),
+            "InvalidTickRate Display should mention tick_rate_hz and the value, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn ring_buffer_too_small_display() {
+        let err = ConfigError::RingBufferTooSmall { configured: 1 };
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("ring_buffer_size") && msg.contains("1"),
+            "RingBufferTooSmall Display should mention ring_buffer_size and the value, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn ingress_queue_zero_display() {
+        let err = ConfigError::IngressQueueZero;
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("ingress"),
+            "IngressQueueZero Display should mention ingress, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn invalid_field_display() {
+        let err = ConfigError::InvalidField {
+            reason: "bounds min > max".to_string(),
+        };
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("bounds min > max"),
+            "InvalidField Display should include the reason, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn backoff_skew_exceeds_cap_display() {
+        let err = ConfigError::BackoffSkewExceedsCap {
+            initial: 20,
+            cap: 5,
+        };
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("20") && msg.contains("5"),
+            "BackoffSkewExceedsCap Display should include both values, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn backoff_invalid_factor_display() {
+        let err = ConfigError::BackoffInvalidFactor { value: 0.5 };
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("0.5"),
+            "BackoffInvalidFactor Display should include the value, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn backoff_invalid_threshold_display() {
+        let err = ConfigError::BackoffInvalidThreshold { value: 2.0 };
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("2"),
+            "BackoffInvalidThreshold Display should include the value, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn backoff_zero_decay_rate_display() {
+        let err = ConfigError::BackoffZeroDecayRate;
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("decay_rate"),
+            "BackoffZeroDecayRate Display should mention decay_rate, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn engine_recovery_failed_source_is_none() {
+        use std::error::Error;
+        let err = ConfigError::EngineRecoveryFailed;
+        assert!(err.source().is_none());
+    }
+
+    // ── tick_rate_hz edge cases ──────────────────────────────
+
+    #[test]
+    fn validate_negative_tick_rate_hz_rejected() {
+        let mut cfg = valid_config();
+        cfg.tick_rate_hz = Some(-60.0);
+        match cfg.validate() {
+            Err(ConfigError::InvalidTickRate { .. }) => {}
+            other => panic!("expected InvalidTickRate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_infinite_tick_rate_hz_rejected() {
+        let mut cfg = valid_config();
+        cfg.tick_rate_hz = Some(f64::INFINITY);
+        match cfg.validate() {
+            Err(ConfigError::InvalidTickRate { .. }) => {}
+            other => panic!("expected InvalidTickRate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_nan_tick_rate_hz_rejected() {
+        let mut cfg = valid_config();
+        cfg.tick_rate_hz = Some(f64::NAN);
+        match cfg.validate() {
+            Err(ConfigError::InvalidTickRate { .. }) => {}
+            other => panic!("expected InvalidTickRate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_zero_tick_rate_hz_rejected() {
+        let mut cfg = valid_config();
+        cfg.tick_rate_hz = Some(0.0);
+        match cfg.validate() {
+            Err(ConfigError::InvalidTickRate { .. }) => {}
+            other => panic!("expected InvalidTickRate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_negative_backoff_threshold_rejected() {
+        let mut cfg = valid_config();
+        cfg.backoff.rejection_rate_threshold = -0.1;
+        match cfg.validate() {
+            Err(ConfigError::BackoffInvalidThreshold { .. }) => {}
+            other => panic!("expected BackoffInvalidThreshold, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_nan_backoff_threshold_rejected() {
+        let mut cfg = valid_config();
+        cfg.backoff.rejection_rate_threshold = f64::NAN;
+        match cfg.validate() {
+            Err(ConfigError::BackoffInvalidThreshold { .. }) => {}
+            other => panic!("expected BackoffInvalidThreshold, got {other:?}"),
+        }
+    }
+
+    // ── Builder singular methods ─────────────────────────────
+
+    #[test]
+    fn builder_singular_field_method() {
+        let config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .field(scalar_field("energy"))
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
+            .dt(0.1)
+            .build()
+            .unwrap();
+        assert_eq!(config.fields().len(), 1);
+        assert_eq!(config.fields()[0].name, "energy");
+    }
+
+    #[test]
+    fn builder_singular_propagator_method() {
+        let config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagator(Box::new(ConstPropagator::new("const", FieldId(0), 1.0)))
+            .dt(0.1)
+            .build()
+            .unwrap();
+        assert_eq!(config.propagators().len(), 1);
+    }
+
+    // ── WorldConfig accessor coverage ────────────────────────
+
+    #[test]
+    fn worldconfig_accessors_return_configured_values() {
+        let config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
+            .dt(0.05)
+            .seed(77)
+            .ring_buffer_size(4)
+            .max_ingress_queue(512)
+            .tick_rate_hz(30.0)
+            .build()
+            .unwrap();
+
+        assert_eq!(config.space().cell_count(), 10);
+        assert_eq!(config.fields().len(), 1);
+        assert_eq!(config.propagators().len(), 1);
+        assert_eq!(config.dt(), 0.05);
+        assert_eq!(config.seed(), 77);
+        assert_eq!(config.ring_buffer_size(), 4);
+        assert_eq!(config.max_ingress_queue(), 512);
+        assert_eq!(config.tick_rate_hz(), Some(30.0));
+        assert_eq!(config.backoff().initial_max_skew, 2); // default
+    }
+
+    #[test]
+    fn worldconfig_debug_does_not_panic() {
+        let config = valid_config();
+        let dbg = format!("{config:?}");
+        assert!(dbg.contains("WorldConfig"));
+    }
+
+    #[test]
+    fn builder_invalid_dt_zero_rejected() {
+        let result = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
+            .dt(0.0)
+            .build();
+        match result {
+            Err(ConfigError::Pipeline(PipelineError::InvalidDt { .. })) => {}
+            other => panic!("expected Pipeline(InvalidDt), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn missing_space_display() {
+        let err = ConfigError::MissingSpace;
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("space"),
+            "MissingSpace Display should contain 'space', got: {msg}"
+        );
+    }
+
+    #[test]
+    fn missing_dt_display() {
+        let err = ConfigError::MissingDt;
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("dt"),
+            "MissingDt Display should contain 'dt', got: {msg}"
+        );
+    }
+
+    #[test]
+    fn builder_space_last_value_wins() {
+        let config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(5, EdgeBehavior::Absorb).unwrap()))
+            .space(Box::new(Line1D::new(20, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
+            .dt(0.1)
+            .build()
+            .unwrap();
+        assert_eq!(config.space.cell_count(), 20);
+    }
+
+    #[test]
+    fn builder_ingress_queue_zero_rejected() {
+        let result = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
+            .dt(0.1)
+            .max_ingress_queue(0)
+            .build();
+        match result {
+            Err(ConfigError::IngressQueueZero) => {}
+            other => panic!("expected IngressQueueZero, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn builder_nan_dt_rejected() {
+        let result = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
+            .dt(f64::NAN)
+            .build();
+        match result {
+            Err(ConfigError::Pipeline(PipelineError::InvalidDt { .. })) => {}
+            other => panic!("expected Pipeline(InvalidDt), got {other:?}"),
+        }
     }
 }

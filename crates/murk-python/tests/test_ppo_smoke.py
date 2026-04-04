@@ -183,11 +183,9 @@ def test_grid_nav_env_movement():
     env.reset(seed=42)
 
     ax_before = env._nav.ax
-    ay_before = env._nav.ay
 
     # Move east (action 2): x should increase by 1
     obs, _, _, _, _ = env.step(2)
-    n = env.GRID_SIZE * env.GRID_SIZE
     ax_after = obs[0]
 
     expected_x = min(ax_before + 1, env.GRID_SIZE - 1)

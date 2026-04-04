@@ -13,7 +13,7 @@ use murk_core::{
     BoundaryBehavior, FieldDef, FieldId, FieldMutability, FieldReader, FieldSet, FieldType,
     PropagatorError, SnapshotAccess,
 };
-use murk_engine::{BackoffConfig, LockstepWorld, WorldConfig};
+use murk_engine::{LockstepWorld, WorldConfig};
 use murk_propagator::{Propagator, StepContext, WriteMode};
 use murk_replay::{snapshot_hash, BuildMetadata, InitDescriptor, ReplayReader, ReplayWriter};
 use murk_space::{EdgeBehavior, Square4};
@@ -123,24 +123,21 @@ impl Propagator for DiffusionPropagator {
 fn make_config() -> WorldConfig {
     let space = Square4::new(ROWS, COLS, EdgeBehavior::Absorb).expect("failed to create space");
 
-    WorldConfig {
-        space: Box::new(space),
-        fields: vec![FieldDef {
+    WorldConfig::builder()
+        .space(Box::new(space))
+        .fields(vec![FieldDef {
             name: "heat".into(),
             field_type: FieldType::Scalar,
             mutability: FieldMutability::PerTick,
             units: Some("kelvin".into()),
             bounds: None,
             boundary_behavior: BoundaryBehavior::Clamp,
-        }],
-        propagators: vec![Box::new(DiffusionPropagator)],
-        dt: DT,
-        seed: 42,
-        ring_buffer_size: 8,
-        max_ingress_queue: 1024,
-        tick_rate_hz: None,
-        backoff: BackoffConfig::default(),
-    }
+        }])
+        .propagators(vec![Box::new(DiffusionPropagator)])
+        .dt(DT)
+        .seed(42)
+        .build()
+        .expect("invalid WorldConfig")
 }
 
 /// Replay header metadata (same for all runs in this example).
@@ -176,7 +173,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("--- Phase 1: Record ---\n");
 
     let config = make_config();
-    let cell_count = config.space.cell_count();
+    let cell_count = (ROWS * COLS) as usize;
     let meta = build_metadata();
     let init = init_descriptor(cell_count);
 

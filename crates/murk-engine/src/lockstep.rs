@@ -233,39 +233,37 @@ mod tests {
     }
 
     fn simple_config() -> WorldConfig {
-        WorldConfig {
-            space: Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()),
-            fields: vec![scalar_field("energy")],
-            propagators: vec![Box::new(ConstPropagator::new("const", FieldId(0), 42.0))],
-            dt: 0.1,
-            seed: 42,
-            ring_buffer_size: 8,
-            max_ingress_queue: 1024,
-            tick_rate_hz: None,
-            backoff: crate::config::BackoffConfig::default(),
-        }
+        WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                42.0,
+            ))])
+            .dt(0.1)
+            .seed(42)
+            .build()
+            .unwrap()
     }
 
     /// Two-field pipeline: PropA writes field0=7.0, PropB copies field0→field1.
     fn two_field_config() -> WorldConfig {
-        WorldConfig {
-            space: Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()),
-            fields: vec![scalar_field("field0"), scalar_field("field1")],
-            propagators: vec![
+        WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("field0"), scalar_field("field1")])
+            .propagators(vec![
                 Box::new(ConstPropagator::new("write_f0", FieldId(0), 7.0)),
                 Box::new(IdentityPropagator::new(
                     "copy_f0_to_f1",
                     FieldId(0),
                     FieldId(1),
                 )),
-            ],
-            dt: 0.1,
-            seed: 42,
-            ring_buffer_size: 8,
-            max_ingress_queue: 1024,
-            tick_rate_hz: None,
-            backoff: crate::config::BackoffConfig::default(),
-        }
+            ])
+            .dt(0.1)
+            .seed(42)
+            .build()
+            .unwrap()
     }
 
     /// Square4 10x10 config for M0 integration testing.
@@ -316,14 +314,16 @@ mod tests {
             }
         }
 
-        WorldConfig {
-            space: Box::new(Square4::new(10, 10, EdgeBehavior::Absorb).unwrap()),
-            fields: vec![
+        WorldConfig::builder()
+            .space(Box::new(
+                Square4::new(10, 10, EdgeBehavior::Absorb).unwrap(),
+            ))
+            .fields(vec![
                 scalar_field("field0"),
                 scalar_field("field1"),
                 scalar_field("field2"),
-            ],
-            propagators: vec![
+            ])
+            .propagators(vec![
                 Box::new(ConstPropagator::new("write_f0", FieldId(0), 3.0)),
                 Box::new(IdentityPropagator::new(
                     "copy_f0_to_f1",
@@ -336,14 +336,11 @@ mod tests {
                     FieldId(1),
                     FieldId(2),
                 )),
-            ],
-            dt: 0.016,
-            seed: 12345,
-            ring_buffer_size: 8,
-            max_ingress_queue: 1024,
-            tick_rate_hz: None,
-            backoff: crate::config::BackoffConfig::default(),
-        }
+            ])
+            .dt(0.016)
+            .seed(12345)
+            .build()
+            .unwrap()
     }
 
     fn make_cmd(expires: u64) -> Command {
@@ -403,17 +400,18 @@ mod tests {
 
     #[test]
     fn step_sync_propagator_failure_returns_tick_error() {
-        let config = WorldConfig {
-            space: Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()),
-            fields: vec![scalar_field("energy")],
-            propagators: vec![Box::new(FailingPropagator::new("fail", FieldId(0), 0))],
-            dt: 0.1,
-            seed: 42,
-            ring_buffer_size: 8,
-            max_ingress_queue: 1024,
-            tick_rate_hz: None,
-            backoff: crate::config::BackoffConfig::default(),
-        };
+        let config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(FailingPropagator::new(
+                "fail",
+                FieldId(0),
+                0,
+            ))])
+            .dt(0.1)
+            .seed(42)
+            .build()
+            .unwrap();
         let mut world = LockstepWorld::new(config).unwrap();
         let result = world.step_sync(vec![]);
         assert!(result.is_err());
@@ -594,17 +592,19 @@ mod tests {
     #[test]
     fn step_sync_surfaces_submission_rejections() {
         // Create a world with a tiny ingress queue (capacity=2).
-        let config = WorldConfig {
-            space: Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()),
-            fields: vec![scalar_field("energy")],
-            propagators: vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))],
-            dt: 0.1,
-            seed: 42,
-            ring_buffer_size: 8,
-            max_ingress_queue: 2,
-            tick_rate_hz: None,
-            backoff: crate::config::BackoffConfig::default(),
-        };
+        let config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
+            .dt(0.1)
+            .seed(42)
+            .max_ingress_queue(2)
+            .build()
+            .unwrap();
         let mut world = LockstepWorld::new(config).unwrap();
 
         // Submit 4 commands — only 2 fit in the queue.

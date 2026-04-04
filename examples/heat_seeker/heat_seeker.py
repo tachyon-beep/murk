@@ -264,7 +264,7 @@ def main():
     print()
     print(f"  Grid:        {GRID_W}x{GRID_H} ({CELL_COUNT} cells)")
     print(f"  Heat source: ({SOURCE_X}, {SOURCE_Y})")
-    print(f"  Actions:     5 (stay, N, S, W, E)")
+    print("  Actions:     5 (stay, N, S, W, E)")
     print(f"  Obs size:    {CELL_COUNT * 2} (heat grid + agent position)")
     print(f"  Training:    {TOTAL_TIMESTEPS:,} timesteps")
     print()

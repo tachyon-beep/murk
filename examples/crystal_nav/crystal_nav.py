@@ -427,7 +427,7 @@ def main():
     print(f"  Lattice:     {GRID_W}x{GRID_H}x{GRID_D} FCC12 ({CELL_COUNT} cells)")
     print(f"  Beacon:      ({BEACON_X},{BEACON_Y},{BEACON_Z}), D={BEACON_D}")
     print(f"  Radiation:   ({RADIATION_X},{RADIATION_Y},{RADIATION_Z}), D={RADIATION_D}")
-    print(f"  Actions:     13 (stay + 12 FCC offsets)")
+    print("  Actions:     13 (stay + 12 FCC offsets)")
     print(f"  Obs size:    {CELL_COUNT * 3} (beacon + radiation + agent_pos)")
     print(f"  Warmup:      {WARMUP_TICKS} ticks")
     print(f"  Training:    {TOTAL_TIMESTEPS:,} timesteps")

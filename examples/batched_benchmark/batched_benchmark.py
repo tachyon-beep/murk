@@ -10,8 +10,6 @@ Usage:
 
 from __future__ import annotations
 
-import sys
-import os
 import time
 
 import numpy as np
@@ -20,7 +18,6 @@ import murk
 from murk import (
     BatchedVecEnv,
     BatchedWorld,
-    Command,
     Config,
     EdgeBehavior,
     FieldMutability,
@@ -115,8 +112,6 @@ def bench_batched(num_envs: int, num_steps: int, warmup: int = 10) -> dict:
     """Benchmark BatchedVecEnv. Returns timing stats."""
     env = BenchmarkBatchedEnv(num_envs=num_envs)
     env.reset(seed=0)
-    empty_cmds: list[list] = [[] for _ in range(num_envs)]
-
     # Warmup (not timed).
     for _ in range(warmup):
         env.step(np.zeros(num_envs, dtype=np.int32))
@@ -201,7 +196,7 @@ def main():
     print("=" * 72)
     print()
     print(f"  Grid: {GRID_W}x{GRID_H} ({CELL_COUNT} cells)")
-    print(f"  Propagator: diffusion (numpy, reads_previous + writes)")
+    print("  Propagator: diffusion (numpy, reads_previous + writes)")
     print(f"  Observation: full field ({CELL_COUNT} floats per world)")
     print()
 

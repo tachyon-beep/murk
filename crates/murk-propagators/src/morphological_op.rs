@@ -172,6 +172,17 @@ impl Propagator for MorphologicalOp {
             })?
             .to_vec();
 
+        if prev.len() != cell_count {
+            return Err(PropagatorError::ExecutionFailed {
+                reason: format!(
+                    "input field {:?} length {} != cell_count {}",
+                    self.input_field,
+                    prev.len(),
+                    cell_count,
+                ),
+            });
+        }
+
         // Binarize input
         let binary: Vec<bool> = prev.iter().map(|&v| v > self.threshold).collect();
 
@@ -192,12 +203,10 @@ impl Propagator for MorphologicalOp {
             let mut any_present = false;
 
             while let Some((rank, depth)) = queue.pop_front() {
-                if rank < binary.len() {
-                    if binary[rank] {
-                        any_present = true;
-                    } else {
-                        all_present = false;
-                    }
+                if binary[rank] {
+                    any_present = true;
+                } else {
+                    all_present = false;
                 }
 
                 if depth < self.radius {
@@ -232,6 +241,16 @@ impl Propagator for MorphologicalOp {
                 reason: format!("output field {:?} not writable", self.output_field),
             }
         })?;
+        if out.len() != out_buf.len() {
+            return Err(PropagatorError::ExecutionFailed {
+                reason: format!(
+                    "output field {:?} length {} != cell_count {}",
+                    self.output_field,
+                    out.len(),
+                    out_buf.len(),
+                ),
+            });
+        }
         out.copy_from_slice(&out_buf);
 
         Ok(())
@@ -487,5 +506,78 @@ mod tests {
         assert_eq!(out[4], 1.0, "center above threshold -> dilated");
         assert_eq!(out[1], 1.0, "north neighbor of present cell");
         assert_eq!(out[0], 0.0, "corner: no neighbor above threshold");
+    }
+
+    // ---------------------------------------------------------------
+    // Length-mismatch defense tests
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn short_input_returns_error() {
+        let grid = Square4::new(3, 3, EdgeBehavior::Absorb).unwrap();
+
+        let prop = MorphologicalOp::builder()
+            .input_field(F_IN)
+            .output_field(F_OUT)
+            .op(MorphOp::Erode)
+            .radius(1)
+            .build()
+            .unwrap();
+
+        let mut reader = MockFieldReader::new();
+        reader.set_field(F_IN, vec![1.0; 4]); // 4 < cell_count (9)
+
+        let mut writer = MockFieldWriter::new();
+        writer.add_field(F_OUT, grid.cell_count());
+
+        let mut scratch = ScratchRegion::new(0);
+        let mut ctx = make_ctx(&reader, &mut writer, &mut scratch, &grid);
+        let result = prop.step(&mut ctx);
+        assert!(result.is_err(), "short input must return error");
+        let err = result.unwrap_err();
+        match err {
+            PropagatorError::ExecutionFailed { reason } => {
+                assert!(
+                    reason.contains("length"),
+                    "error should mention length: {reason}"
+                );
+            }
+            other => panic!("expected ExecutionFailed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn mismatched_output_returns_error() {
+        let grid = Square4::new(3, 3, EdgeBehavior::Absorb).unwrap();
+        let n = grid.cell_count();
+
+        let prop = MorphologicalOp::builder()
+            .input_field(F_IN)
+            .output_field(F_OUT)
+            .op(MorphOp::Dilate)
+            .radius(1)
+            .build()
+            .unwrap();
+
+        let mut reader = MockFieldReader::new();
+        reader.set_field(F_IN, vec![0.0; n]);
+
+        let mut writer = MockFieldWriter::new();
+        writer.add_field(F_OUT, n * 2); // mismatch
+
+        let mut scratch = ScratchRegion::new(0);
+        let mut ctx = make_ctx(&reader, &mut writer, &mut scratch, &grid);
+        let result = prop.step(&mut ctx);
+        assert!(result.is_err(), "output length mismatch must return error");
+        let err = result.unwrap_err();
+        match err {
+            PropagatorError::ExecutionFailed { reason } => {
+                assert!(
+                    reason.contains("length"),
+                    "error should mention length: {reason}"
+                );
+            }
+            other => panic!("expected ExecutionFailed, got {other:?}"),
+        }
     }
 }

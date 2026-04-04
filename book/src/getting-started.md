@@ -60,11 +60,13 @@ let fields = vec![FieldDef {
     mutability: FieldMutability::PerTick,
     ..Default::default()
 }];
-let config = WorldConfig {
-    space: Box::new(space), fields,
-    propagators: vec![Box::new(DiffusionPropagator)],
-    dt: 1.0, seed: 42, ..Default::default()
-};
+let config = WorldConfig::builder()
+    .space(Box::new(space))
+    .fields(fields)
+    .propagators(vec![Box::new(DiffusionPropagator)])
+    .dt(1.0)
+    .seed(42)
+    .build()?;
 let mut world = LockstepWorld::new(config)?;
 let result = world.step_sync(vec![])?;
 let heat = result.snapshot.read(FieldId(0)).unwrap();

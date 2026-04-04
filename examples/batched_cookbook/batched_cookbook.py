@@ -157,7 +157,7 @@ def recipe_per_world_commands():
             [Command.set_field(HEAT_FIELD, [1, 0], 200.0)],   # world 1
             [],                                                 # world 2: no cmd
         ]
-        tick_ids = engine.step_and_observe(commands, obs, mask)
+        engine.step_and_observe(commands, obs, mask)
 
         obs_2d = obs.reshape(N, engine.obs_output_len)
         # Cell (1,0) = row 1, col 0 → flat index = GRID_W * 1 + 0 = 8

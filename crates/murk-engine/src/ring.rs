@@ -462,31 +462,32 @@ mod tests {
 
     #[test]
     fn test_producer_consumer_cross_thread() {
-        use crate::config::{BackoffConfig, WorldConfig};
+        use crate::config::WorldConfig;
         use crate::tick::TickEngine;
         use murk_space::{EdgeBehavior, Line1D};
         use murk_test_utils::ConstPropagator;
         use std::sync::atomic::{AtomicBool, Ordering};
         use std::thread;
 
-        let config = WorldConfig {
-            space: Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()),
-            fields: vec![FieldDef {
+        let config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![FieldDef {
                 name: "energy".into(),
                 field_type: FieldType::Scalar,
                 mutability: FieldMutability::PerTick,
                 units: None,
                 bounds: None,
                 boundary_behavior: BoundaryBehavior::Clamp,
-            }],
-            propagators: vec![Box::new(ConstPropagator::new("const", FieldId(0), 42.0))],
-            dt: 0.1,
-            seed: 42,
-            ring_buffer_size: 8,
-            max_ingress_queue: 1024,
-            tick_rate_hz: None,
-            backoff: BackoffConfig::default(),
-        };
+            }])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                42.0,
+            ))])
+            .dt(0.1)
+            .seed(42)
+            .build()
+            .unwrap();
         let mut engine = TickEngine::new(config).unwrap();
 
         let ring = Arc::new(SnapshotRing::new(8));

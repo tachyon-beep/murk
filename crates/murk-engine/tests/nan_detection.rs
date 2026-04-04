@@ -13,7 +13,7 @@ use murk_core::traits::SnapshotAccess;
 use murk_core::{
     BoundaryBehavior, FieldDef, FieldMutability, FieldSet, FieldType, PropagatorError,
 };
-use murk_engine::config::{BackoffConfig, WorldConfig};
+use murk_engine::config::WorldConfig;
 use murk_engine::lockstep::LockstepWorld;
 use murk_propagator::context::StepContext;
 use murk_propagator::propagator::{Propagator, WriteMode};
@@ -85,28 +85,25 @@ impl Propagator for NanOnTickPropagator {
 // ── Helper: build a WorldConfig with the NaN propagator ──────────────
 
 fn nan_config(succeed_count: usize) -> WorldConfig {
-    WorldConfig {
-        space: Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()),
-        fields: vec![FieldDef {
+    WorldConfig::builder()
+        .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+        .fields(vec![FieldDef {
             name: "value".to_string(),
             field_type: FieldType::Scalar,
             mutability: FieldMutability::PerTick,
             units: None,
             bounds: None,
             boundary_behavior: BoundaryBehavior::Clamp,
-        }],
-        propagators: vec![Box::new(NanOnTickPropagator::new(
+        }])
+        .propagators(vec![Box::new(NanOnTickPropagator::new(
             "nan_prop",
             FieldId(0),
             succeed_count,
-        ))],
-        dt: 0.1,
-        seed: 42,
-        ring_buffer_size: 8,
-        max_ingress_queue: 1024,
-        tick_rate_hz: None,
-        backoff: BackoffConfig::default(),
-    }
+        ))])
+        .dt(0.1)
+        .seed(42)
+        .build()
+        .unwrap()
 }
 
 // ── Tests ────────────────────────────────────────────────────────────
