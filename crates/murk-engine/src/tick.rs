@@ -120,7 +120,11 @@ impl TickEngine {
     /// constructs the arena, and pre-computes the base field set.
     /// Consumes the `WorldConfig`.
     pub fn new(config: WorldConfig) -> Result<Self, ConfigError> {
-        // Validate and build read resolution plan.
+        // This validate() call is intentional even though WorldConfigBuilder::build()
+        // also validates. TickEngine::new() may receive configs constructed via
+        // pub(crate) struct literals (e.g., the ArcSpaceWrapper reconstruction in
+        // realtime.rs), which bypass the builder. Defense-in-depth: validate here
+        // regardless of how the config was constructed.
         config.validate()?;
         let defined_fields = config.defined_field_set()?;
         let plan = murk_propagator::validate_pipeline(

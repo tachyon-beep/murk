@@ -1,9 +1,13 @@
 //! World configuration, validation, and error types.
 //!
-//! [`WorldConfig`] is the builder-input for constructing a simulation world.
-//! [`validate()`](WorldConfig::validate) checks structural invariants at
-//! startup; the actual world constructor (WP-5b) calls `validate_pipeline()`
-//! directly to obtain the [`ReadResolutionPlan`](murk_propagator::ReadResolutionPlan).
+//! [`WorldConfig`] holds validated simulation configuration. Construct
+//! it via [`WorldConfig::builder()`] → [`WorldConfigBuilder::build()`].
+//! The builder runs all validation, so a `WorldConfig` value is always
+//! structurally valid.
+//!
+//! Crate-internal code (e.g., `realtime.rs`) retains `pub(crate)` field
+//! access for reconstruction patterns where the space is replaced with
+//! an `Arc`-wrapped variant. See [`RealtimeAsyncWorld::new()`] for details.
 
 use std::error::Error;
 use std::fmt;
