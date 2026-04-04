@@ -113,6 +113,10 @@ pub enum ConfigError {
     },
     /// Ingress queue capacity is zero.
     IngressQueueZero,
+    /// Builder: `space` was not set.
+    MissingSpace,
+    /// Builder: `dt` was not set.
+    MissingDt,
     /// tick_rate_hz is NaN, infinite, zero, or negative.
     InvalidTickRate {
         /// The invalid value.
@@ -172,6 +176,12 @@ impl fmt::Display for ConfigError {
                 write!(f, "ring_buffer_size {configured} is below minimum of 2")
             }
             Self::IngressQueueZero => write!(f, "max_ingress_queue must be at least 1"),
+            Self::MissingSpace => {
+                write!(f, "builder: space not set — call .space() before .build()")
+            }
+            Self::MissingDt => {
+                write!(f, "builder: dt not set — call .dt() before .build()")
+            }
             Self::InvalidTickRate { value } => {
                 write!(f, "tick_rate_hz must be finite and positive, got {value}")
             }
@@ -342,6 +352,21 @@ impl WorldConfig {
         Ok(())
     }
 
+    /// Create a new [`WorldConfigBuilder`] with sensible defaults.
+    pub fn builder() -> WorldConfigBuilder {
+        WorldConfigBuilder {
+            space: None,
+            fields: Vec::new(),
+            propagators: Vec::new(),
+            dt: None,
+            seed: 0,
+            ring_buffer_size: 8,
+            max_ingress_queue: 1024,
+            tick_rate_hz: None,
+            backoff: BackoffConfig::default(),
+        }
+    }
+
     /// Build a [`FieldSet`] from the configured field definitions.
     ///
     /// Returns [`ConfigError::FieldCountOverflow`] if the number of
@@ -356,6 +381,107 @@ impl WorldConfig {
                     })
             })
             .collect()
+    }
+}
+
+/// Fluent builder for [`WorldConfig`].
+///
+/// `space` and `dt` are required — calling [`build()`](WorldConfigBuilder::build)
+/// without them returns [`ConfigError::MissingSpace`] or [`ConfigError::MissingDt`].
+/// `fields` and `propagators` default to empty `Vec`s; the existing pipeline
+/// validation in [`WorldConfig::validate()`] catches those cases with
+/// [`ConfigError::NoFields`] and [`ConfigError::Pipeline`] respectively,
+/// so the builder does not duplicate those checks.
+pub struct WorldConfigBuilder {
+    space: Option<Box<dyn Space>>,
+    fields: Vec<FieldDef>,
+    propagators: Vec<Box<dyn Propagator>>,
+    dt: Option<f64>,
+    seed: u64,
+    ring_buffer_size: usize,
+    max_ingress_queue: usize,
+    tick_rate_hz: Option<f64>,
+    backoff: BackoffConfig,
+}
+
+impl WorldConfigBuilder {
+    /// Set the spatial topology. If called multiple times, the last value wins.
+    pub fn space(mut self, space: Box<dyn Space>) -> Self {
+        self.space = Some(space);
+        self
+    }
+
+    /// Set the field definitions. If called multiple times, the last value wins.
+    pub fn fields(mut self, fields: Vec<FieldDef>) -> Self {
+        self.fields = fields;
+        self
+    }
+
+    /// Set the propagator pipeline. If called multiple times, the last value wins.
+    pub fn propagators(mut self, propagators: Vec<Box<dyn Propagator>>) -> Self {
+        self.propagators = propagators;
+        self
+    }
+
+    /// Set the simulation timestep in seconds. If called multiple times, the last value wins.
+    pub fn dt(mut self, dt: f64) -> Self {
+        self.dt = Some(dt);
+        self
+    }
+
+    /// Set the RNG seed. If called multiple times, the last value wins.
+    pub fn seed(mut self, seed: u64) -> Self {
+        self.seed = seed;
+        self
+    }
+
+    /// Set the ring buffer size. If called multiple times, the last value wins.
+    pub fn ring_buffer_size(mut self, ring_buffer_size: usize) -> Self {
+        self.ring_buffer_size = ring_buffer_size;
+        self
+    }
+
+    /// Set the maximum ingress queue capacity. If called multiple times, the last value wins.
+    pub fn max_ingress_queue(mut self, max_ingress_queue: usize) -> Self {
+        self.max_ingress_queue = max_ingress_queue;
+        self
+    }
+
+    /// Set the target tick rate for realtime-async mode. If called multiple times, the last value wins.
+    pub fn tick_rate_hz(mut self, tick_rate_hz: Option<f64>) -> Self {
+        self.tick_rate_hz = tick_rate_hz;
+        self
+    }
+
+    /// Set the adaptive backoff configuration. If called multiple times, the last value wins.
+    pub fn backoff(mut self, backoff: BackoffConfig) -> Self {
+        self.backoff = backoff;
+        self
+    }
+
+    /// Consume the builder and produce a validated [`WorldConfig`].
+    ///
+    /// Returns [`ConfigError::MissingSpace`] if `space` was never set,
+    /// [`ConfigError::MissingDt`] if `dt` was never set, or any error
+    /// from [`WorldConfig::validate()`] if structural invariants fail.
+    pub fn build(self) -> Result<WorldConfig, ConfigError> {
+        let space = self.space.ok_or(ConfigError::MissingSpace)?;
+        let dt = self.dt.ok_or(ConfigError::MissingDt)?;
+
+        let config = WorldConfig {
+            space,
+            fields: self.fields,
+            propagators: self.propagators,
+            dt,
+            seed: self.seed,
+            ring_buffer_size: self.ring_buffer_size,
+            max_ingress_queue: self.max_ingress_queue,
+            tick_rate_hz: self.tick_rate_hz,
+            backoff: self.backoff,
+        };
+
+        config.validate()?;
+        Ok(config)
     }
 }
 
@@ -710,5 +836,129 @@ mod tests {
         };
         let dbg = format!("{err:?}");
         assert!(dbg.contains("RLIMIT_NPROC"), "Debug output: {dbg}");
+    }
+
+    // ── WorldConfigBuilder tests ────────────────────────────────
+
+    #[test]
+    fn builder_missing_space_fails() {
+        let result = WorldConfig::builder()
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .dt(0.1)
+            .build();
+        match result {
+            Err(ConfigError::MissingSpace) => {}
+            other => panic!("expected MissingSpace, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn builder_missing_dt_fails() {
+        let result = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .build();
+        match result {
+            Err(ConfigError::MissingDt) => {}
+            other => panic!("expected MissingDt, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn builder_with_defaults_succeeds() {
+        let config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .dt(0.1)
+            .build()
+            .expect("builder with defaults should succeed");
+        assert_eq!(config.seed, 0);
+        assert_eq!(config.ring_buffer_size, 8);
+        assert_eq!(config.max_ingress_queue, 1024);
+        assert_eq!(config.tick_rate_hz, None);
+    }
+
+    #[test]
+    fn builder_with_all_options_succeeds() {
+        let config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .dt(0.05)
+            .seed(99)
+            .ring_buffer_size(16)
+            .max_ingress_queue(2048)
+            .tick_rate_hz(Some(60.0))
+            .backoff(BackoffConfig {
+                initial_max_skew: 3,
+                backoff_factor: 2.0,
+                max_skew_cap: 20,
+                decay_rate: 120,
+                rejection_rate_threshold: 0.10,
+            })
+            .build()
+            .expect("builder with all options should succeed");
+        assert_eq!(config.dt, 0.05);
+        assert_eq!(config.seed, 99);
+        assert_eq!(config.ring_buffer_size, 16);
+        assert_eq!(config.max_ingress_queue, 2048);
+        assert_eq!(config.tick_rate_hz, Some(60.0));
+        assert_eq!(config.backoff.initial_max_skew, 3);
+        assert_eq!(config.backoff.backoff_factor, 2.0);
+        assert_eq!(config.backoff.max_skew_cap, 20);
+        assert_eq!(config.backoff.decay_rate, 120);
+        assert!((config.backoff.rejection_rate_threshold - 0.10).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn builder_validates_ring_buffer_too_small() {
+        let result = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .dt(0.1)
+            .ring_buffer_size(1)
+            .build();
+        match result {
+            Err(ConfigError::RingBufferTooSmall { configured: 1 }) => {}
+            other => panic!("expected RingBufferTooSmall{{configured:1}}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn builder_invalid_dt_zero_rejected() {
+        let result = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .dt(0.0)
+            .build();
+        match result {
+            Err(ConfigError::Pipeline(_)) => {}
+            other => panic!("expected Pipeline error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn missing_space_display() {
+        let err = ConfigError::MissingSpace;
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("space"),
+            "MissingSpace Display should contain 'space', got: {msg}"
+        );
+    }
+
+    #[test]
+    fn missing_dt_display() {
+        let err = ConfigError::MissingDt;
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("dt"),
+            "MissingDt Display should contain 'dt', got: {msg}"
+        );
     }
 }
