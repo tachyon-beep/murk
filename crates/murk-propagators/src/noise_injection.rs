@@ -69,8 +69,8 @@ impl NoiseInjection {
     /// Generate a Gaussian sample using Box-Muller transform.
     /// Avoids the `rand_distr` dependency.
     fn box_muller(rng: &mut ChaCha8Rng) -> f64 {
-        let u1: f64 = rng.gen::<f64>().max(1e-300); // avoid ln(0)
-        let u2: f64 = rng.gen();
+        let u1: f64 = rng.random::<f64>().max(1e-300); // avoid ln(0)
+        let u2: f64 = rng.random();
         (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos()
     }
 }
@@ -197,16 +197,16 @@ impl Propagator for NoiseInjection {
             }
             NoiseType::Uniform => {
                 for v in out.iter_mut() {
-                    let u: f64 = rng.gen::<f64>() * 2.0 - 1.0;
+                    let u: f64 = rng.random::<f64>() * 2.0 - 1.0;
                     *v += (self.scale * u) as f32;
                 }
             }
             NoiseType::SaltPepper => {
                 for v in out.iter_mut() {
-                    let p: f64 = rng.gen();
+                    let p: f64 = rng.random();
                     if p < self.scale {
                         // Coin flip for salt (1.0) or pepper (0.0)
-                        *v = if rng.gen::<bool>() { 1.0 } else { 0.0 };
+                        *v = if rng.random::<bool>() { 1.0 } else { 0.0 };
                     }
                 }
             }

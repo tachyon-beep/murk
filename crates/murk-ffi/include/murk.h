@@ -18,136 +18,6 @@
 #include <stdbool.h>
 
 /**
- * Boundary behavior when field values exceed bounds.
- */
-enum MurkBoundaryBehavior {
-  /**
-   * Clamp to nearest bound.
-   */
-  MurkBoundaryBehavior_Clamp = 0,
-  /**
-   * Reflect off the bound.
-   */
-  MurkBoundaryBehavior_Reflect = 1,
-  /**
-   * Absorb at the boundary.
-   */
-  MurkBoundaryBehavior_Absorb = 2,
-  /**
-   * Wrap around to opposite bound.
-   */
-  MurkBoundaryBehavior_Wrap = 3,
-};
-typedef int32_t MurkBoundaryBehavior;
-
-/**
- * Command type discriminator.
- */
-enum MurkCommandType {
-  /**
-   * Set a global scalar parameter.
-   */
-  MurkCommandType_SetParameter = 0,
-  /**
-   * Set a single field value at a coordinate.
-   */
-  MurkCommandType_SetField = 1,
-};
-typedef int32_t MurkCommandType;
-
-/**
- * Edge behavior for 1D/2D lattice spaces.
- */
-enum MurkEdgeBehavior {
-  /**
-   * Absorb: cells at edge have no neighbor beyond.
-   */
-  MurkEdgeBehavior_Absorb = 0,
-  /**
-   * Clamp: beyond-edge neighbors map to edge cell.
-   */
-  MurkEdgeBehavior_Clamp = 1,
-  /**
-   * Wrap: periodic boundary.
-   */
-  MurkEdgeBehavior_Wrap = 2,
-};
-typedef int32_t MurkEdgeBehavior;
-
-/**
- * Field allocation strategy across ticks.
- */
-enum MurkFieldMutability {
-  /**
-   * Generation 0 forever.
-   */
-  MurkFieldMutability_Static = 0,
-  /**
-   * New allocation each tick if modified.
-   */
-  MurkFieldMutability_PerTick = 1,
-  /**
-   * New allocation only when modified.
-   */
-  MurkFieldMutability_Sparse = 2,
-};
-typedef int32_t MurkFieldMutability;
-
-/**
- * Field data type classification.
- */
-enum MurkFieldType {
-  /**
-   * Single f32 per cell.
-   */
-  MurkFieldType_Scalar = 0,
-  /**
-   * Fixed-size f32 vector per cell.
-   */
-  MurkFieldType_Vector = 1,
-  /**
-   * Categorical (discrete) value per cell.
-   */
-  MurkFieldType_Categorical = 2,
-};
-typedef int32_t MurkFieldType;
-
-/**
- * Spatial topology type for `murk_config_set_space`.
- */
-enum MurkSpaceType {
-  /**
-   * 1D line with configurable edge behavior.
-   */
-  MurkSpaceType_Line1D = 0,
-  /**
-   * 1D ring (always-wrap periodic boundary).
-   */
-  MurkSpaceType_Ring1D = 1,
-  /**
-   * 2D grid, 4-connected (N/S/E/W).
-   */
-  MurkSpaceType_Square4 = 2,
-  /**
-   * 2D grid, 8-connected (+ diagonals).
-   */
-  MurkSpaceType_Square8 = 3,
-  /**
-   * 2D hexagonal lattice, 6-connected (pointy-top).
-   */
-  MurkSpaceType_Hex2D = 4,
-  /**
-   * Cartesian product of arbitrary spaces.
-   */
-  MurkSpaceType_ProductSpace = 5,
-  /**
-   * 3D FCC lattice, 12-connected (isotropic).
-   */
-  MurkSpaceType_Fcc12 = 6,
-};
-typedef int32_t MurkSpaceType;
-
-/**
  * C-compatible status code returned by all FFI functions.
  *
  * `Ok` = 0, all errors are negative. Values are ABI-stable.
@@ -254,6 +124,79 @@ enum MurkStatus {
 typedef int32_t MurkStatus;
 
 /**
+ * Spatial topology type for `murk_config_set_space`.
+ */
+enum MurkSpaceType {
+  /**
+   * 1D line with configurable edge behavior.
+   */
+  MurkSpaceType_Line1D = 0,
+  /**
+   * 1D ring (always-wrap periodic boundary).
+   */
+  MurkSpaceType_Ring1D = 1,
+  /**
+   * 2D grid, 4-connected (N/S/E/W).
+   */
+  MurkSpaceType_Square4 = 2,
+  /**
+   * 2D grid, 8-connected (+ diagonals).
+   */
+  MurkSpaceType_Square8 = 3,
+  /**
+   * 2D hexagonal lattice, 6-connected (pointy-top).
+   */
+  MurkSpaceType_Hex2D = 4,
+  /**
+   * Cartesian product of arbitrary spaces.
+   */
+  MurkSpaceType_ProductSpace = 5,
+  /**
+   * 3D FCC lattice, 12-connected (isotropic).
+   */
+  MurkSpaceType_Fcc12 = 6,
+};
+typedef int32_t MurkSpaceType;
+
+/**
+ * Field allocation strategy across ticks.
+ */
+enum MurkFieldMutability {
+  /**
+   * Generation 0 forever.
+   */
+  MurkFieldMutability_Static = 0,
+  /**
+   * New allocation each tick if modified.
+   */
+  MurkFieldMutability_PerTick = 1,
+  /**
+   * New allocation only when modified.
+   */
+  MurkFieldMutability_Sparse = 2,
+};
+typedef int32_t MurkFieldMutability;
+
+/**
+ * Field data type classification.
+ */
+enum MurkFieldType {
+  /**
+   * Single f32 per cell.
+   */
+  MurkFieldType_Scalar = 0,
+  /**
+   * Fixed-size f32 vector per cell.
+   */
+  MurkFieldType_Vector = 1,
+  /**
+   * Categorical (discrete) value per cell.
+   */
+  MurkFieldType_Categorical = 2,
+};
+typedef int32_t MurkFieldType;
+
+/**
  * Write initialization strategy.
  */
 enum MurkWriteMode {
@@ -267,6 +210,63 @@ enum MurkWriteMode {
   MurkWriteMode_Incremental = 1,
 };
 typedef int32_t MurkWriteMode;
+
+/**
+ * Boundary behavior when field values exceed bounds.
+ */
+enum MurkBoundaryBehavior {
+  /**
+   * Clamp to nearest bound.
+   */
+  MurkBoundaryBehavior_Clamp = 0,
+  /**
+   * Reflect off the bound.
+   */
+  MurkBoundaryBehavior_Reflect = 1,
+  /**
+   * Absorb at the boundary.
+   */
+  MurkBoundaryBehavior_Absorb = 2,
+  /**
+   * Wrap around to opposite bound.
+   */
+  MurkBoundaryBehavior_Wrap = 3,
+};
+typedef int32_t MurkBoundaryBehavior;
+
+/**
+ * Edge behavior for 1D/2D lattice spaces.
+ */
+enum MurkEdgeBehavior {
+  /**
+   * Absorb: cells at edge have no neighbor beyond.
+   */
+  MurkEdgeBehavior_Absorb = 0,
+  /**
+   * Clamp: beyond-edge neighbors map to edge cell.
+   */
+  MurkEdgeBehavior_Clamp = 1,
+  /**
+   * Wrap: periodic boundary.
+   */
+  MurkEdgeBehavior_Wrap = 2,
+};
+typedef int32_t MurkEdgeBehavior;
+
+/**
+ * Command type discriminator.
+ */
+enum MurkCommandType {
+  /**
+   * Set a global scalar parameter.
+   */
+  MurkCommandType_SetParameter = 0,
+  /**
+   * Set a single field value at a coordinate.
+   */
+  MurkCommandType_SetField = 1,
+};
+typedef int32_t MurkCommandType;
 
 /**
  * C-compatible observation entry for plan compilation.
