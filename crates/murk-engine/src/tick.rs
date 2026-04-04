@@ -514,10 +514,7 @@ impl TickEngine {
                         return self.handle_rollback(
                             prop_name,
                             murk_core::PropagatorError::ExecutionFailed {
-                                reason: format!(
-                                    "declared read field {:?} not present",
-                                    field_id,
-                                ),
+                                reason: format!("declared read field {:?} not present", field_id,),
                             },
                             receipts,
                             accepted_receipt_start,
@@ -571,9 +568,7 @@ impl TickEngine {
                             murk_core::PropagatorError::ExecutionFailed {
                                 reason: format!(
                                     "write field {:?} buffer length {} != expected {}",
-                                    field_id,
-                                    len,
-                                    expected_len,
+                                    field_id, len, expected_len,
                                 ),
                             },
                             receipts,
@@ -585,10 +580,7 @@ impl TickEngine {
                         return self.handle_rollback(
                             prop_name,
                             murk_core::PropagatorError::ExecutionFailed {
-                                reason: format!(
-                                    "declared write field {:?} not present",
-                                    field_id,
-                                ),
+                                reason: format!("declared write field {:?} not present", field_id,),
                             },
                             receipts,
                             accepted_receipt_start,
@@ -838,7 +830,9 @@ mod tests {
     use murk_core::command::CommandPayload;
     use murk_core::id::{Coord, ParameterKey};
     use murk_core::traits::SnapshotAccess;
-    use murk_core::{BoundaryBehavior, FieldDef, FieldMutability, FieldSet, FieldType, PropagatorError};
+    use murk_core::{
+        BoundaryBehavior, FieldDef, FieldMutability, FieldSet, FieldType, PropagatorError,
+    };
     use murk_propagator::propagator::WriteMode;
     use murk_space::{EdgeBehavior, Line1D};
     use murk_test_utils::{ConstPropagator, FailingPropagator, IdentityPropagator};
@@ -884,7 +878,11 @@ mod tests {
         let config = WorldConfig::builder()
             .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
             .fields(vec![scalar_field("energy")])
-            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 42.0))])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                42.0,
+            ))])
             .dt(0.1)
             .seed(42)
             .build()
@@ -1447,7 +1445,11 @@ mod tests {
         let config = WorldConfig::builder()
             .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
             .fields(vec![scalar_field("energy")])
-            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
             .dt(0.1)
             .seed(42)
             .max_ingress_queue(1)
@@ -1907,9 +1909,15 @@ mod tests {
         assert_eq!(engine.expectations.read_previous[1], vec![(FieldId(0), 10)]);
 
         // Tick 0→1: reads_previous sees initial zeros via base_cache.
-        assert!(engine.execute_tick().is_ok(), "tick 1 should pass validation");
+        assert!(
+            engine.execute_tick().is_ok(),
+            "tick 1 should pass validation"
+        );
         // Tick 1→2: reads_previous sees published tick 1 data.
-        assert!(engine.execute_tick().is_ok(), "tick 2 should pass validation");
+        assert!(
+            engine.execute_tick().is_ok(),
+            "tick 2 should pass validation"
+        );
     }
 
     #[test]

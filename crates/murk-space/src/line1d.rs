@@ -262,8 +262,11 @@ impl Space for Line1D {
 
     fn neighbours(&self, coord: &Coord) -> SmallVec<[Coord; 8]> {
         debug_assert_eq!(
-            coord.len(), self.ndim(),
-            "coord arity {}, expected {}", coord.len(), self.ndim()
+            coord.len(),
+            self.ndim(),
+            "coord arity {}, expected {}",
+            coord.len(),
+            self.ndim()
         );
         let i = coord[0];
         let n = self.len as i32;
@@ -300,12 +303,18 @@ impl Space for Line1D {
 
     fn distance(&self, a: &Coord, b: &Coord) -> f64 {
         debug_assert_eq!(
-            a.len(), self.ndim(),
-            "coord a arity {}, expected {}", a.len(), self.ndim()
+            a.len(),
+            self.ndim(),
+            "coord a arity {}, expected {}",
+            a.len(),
+            self.ndim()
         );
         debug_assert_eq!(
-            b.len(), self.ndim(),
-            "coord b arity {}, expected {}", b.len(), self.ndim()
+            b.len(),
+            self.ndim(),
+            "coord b arity {}, expected {}",
+            b.len(),
+            self.ndim()
         );
         let ai = a[0];
         let bi = b[0];

@@ -20,7 +20,9 @@ fn small_config(rows: u32, cols: u32, seed: u64) -> (WorldConfig, murk_propagato
     let initial_positions = vec![(0, cell_count / 2)]; // one agent at center
 
     let config = WorldConfig::builder()
-        .space(Box::new(Square4::new(rows, cols, EdgeBehavior::Absorb).unwrap()))
+        .space(Box::new(
+            Square4::new(rows, cols, EdgeBehavior::Absorb).unwrap(),
+        ))
         .fields(murk_propagators::reference_fields())
         .propagators(vec![
             Box::new(DiffusionPropagator::new(0.1)),
@@ -133,7 +135,9 @@ fn diffusion_convergence() {
     // converge towards uniform heat over many ticks.
     let ab = new_action_buffer();
     let config = WorldConfig::builder()
-        .space(Box::new(Square4::new(10, 10, EdgeBehavior::Absorb).unwrap()))
+        .space(Box::new(
+            Square4::new(10, 10, EdgeBehavior::Absorb).unwrap(),
+        ))
         .fields(murk_propagators::reference_fields())
         .propagators(vec![
             Box::new(DiffusionPropagator::new(0.1)),

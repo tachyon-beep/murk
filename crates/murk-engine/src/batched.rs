@@ -391,7 +391,11 @@ mod tests {
         WorldConfig::builder()
             .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
             .fields(vec![scalar_field("energy")])
-            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), value))])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                value,
+            ))])
             .dt(0.1)
             .seed(seed)
             .build()
@@ -402,7 +406,11 @@ mod tests {
         WorldConfig::builder()
             .space(Box::new(Square4::new(4, 4, EdgeBehavior::Absorb).unwrap()))
             .fields(vec![scalar_field("energy")])
-            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), value))])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                value,
+            ))])
             .dt(0.1)
             .seed(seed)
             .build()
@@ -616,7 +624,11 @@ mod tests {
         let line_config = WorldConfig::builder()
             .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
             .fields(vec![scalar_field("energy")])
-            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
             .dt(0.1)
             .seed(1)
             .build()
@@ -624,7 +636,11 @@ mod tests {
         let ring_config = WorldConfig::builder()
             .space(Box::new(Ring1D::new(10).unwrap()))
             .fields(vec![scalar_field("energy")])
-            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
             .dt(0.1)
             .seed(2)
             .build()
@@ -647,7 +663,11 @@ mod tests {
         let absorb_config = WorldConfig::builder()
             .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
             .fields(vec![scalar_field("energy")])
-            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
             .dt(0.1)
             .seed(1)
             .build()
@@ -655,7 +675,11 @@ mod tests {
         let wrap_config = WorldConfig::builder()
             .space(Box::new(Line1D::new(10, EdgeBehavior::Wrap).unwrap()))
             .fields(vec![scalar_field("energy")])
-            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
             .dt(0.1)
             .seed(2)
             .build()
@@ -829,7 +853,11 @@ mod tests {
         let config_two_fields = WorldConfig::builder()
             .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
             .fields(vec![scalar_field("energy"), scalar_field("temp")])
-            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
             .dt(0.1)
             .seed(1)
             .build()
@@ -839,7 +867,11 @@ mod tests {
         let config_one_field = WorldConfig::builder()
             .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
             .fields(vec![scalar_field("energy")])
-            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
             .dt(0.1)
             .seed(2)
             .build()

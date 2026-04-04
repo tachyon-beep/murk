@@ -219,8 +219,11 @@ impl Space for Hex2D {
 
     fn neighbours(&self, coord: &Coord) -> SmallVec<[Coord; 8]> {
         debug_assert_eq!(
-            coord.len(), self.ndim(),
-            "coord arity {}, expected {}", coord.len(), self.ndim()
+            coord.len(),
+            self.ndim(),
+            "coord arity {}, expected {}",
+            coord.len(),
+            self.ndim()
         );
         let q = coord[0];
         let r = coord[1];
@@ -243,12 +246,18 @@ impl Space for Hex2D {
 
     fn distance(&self, a: &Coord, b: &Coord) -> f64 {
         debug_assert_eq!(
-            a.len(), self.ndim(),
-            "coord a arity {}, expected {}", a.len(), self.ndim()
+            a.len(),
+            self.ndim(),
+            "coord a arity {}, expected {}",
+            a.len(),
+            self.ndim()
         );
         debug_assert_eq!(
-            b.len(), self.ndim(),
-            "coord b arity {}, expected {}", b.len(), self.ndim()
+            b.len(),
+            self.ndim(),
+            "coord b arity {}, expected {}",
+            b.len(),
+            self.ndim()
         );
         Self::cube_distance(a[0], a[1], b[0], b[1]) as f64
     }

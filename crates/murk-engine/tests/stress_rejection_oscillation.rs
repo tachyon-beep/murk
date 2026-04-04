@@ -60,11 +60,11 @@ fn stress_rejection_oscillation_stability() {
     // constrained ingress queue and custom adaptive backoff. The queue
     // holds fewer commands than we submit per tick, guaranteeing a
     // baseline rejection rate from QueueFull.
+    use murk_engine::WorldConfig;
     use murk_propagators::fields::{HEAT, HEAT_GRADIENT, VELOCITY};
     use murk_propagators::{
         AgentMovementPropagator, GradientCompute, RewardPropagator, ScalarDiffusion,
     };
-    use murk_engine::WorldConfig;
     use murk_space::{EdgeBehavior, Square4};
 
     let action_buffer = new_action_buffer();
@@ -72,7 +72,9 @@ fn stress_rejection_oscillation_stability() {
     let initial_positions = murk_bench::init_agent_positions(cell_count, 4, 42);
 
     let config = WorldConfig::builder()
-        .space(Box::new(Square4::new(100, 100, EdgeBehavior::Absorb).unwrap()))
+        .space(Box::new(
+            Square4::new(100, 100, EdgeBehavior::Absorb).unwrap(),
+        ))
         .fields(murk_propagators::reference_fields())
         .propagators(vec![
             Box::new(

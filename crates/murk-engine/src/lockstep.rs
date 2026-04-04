@@ -236,7 +236,11 @@ mod tests {
         WorldConfig::builder()
             .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
             .fields(vec![scalar_field("energy")])
-            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 42.0))])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                42.0,
+            ))])
             .dt(0.1)
             .seed(42)
             .build()
@@ -311,7 +315,9 @@ mod tests {
         }
 
         WorldConfig::builder()
-            .space(Box::new(Square4::new(10, 10, EdgeBehavior::Absorb).unwrap()))
+            .space(Box::new(
+                Square4::new(10, 10, EdgeBehavior::Absorb).unwrap(),
+            ))
             .fields(vec![
                 scalar_field("field0"),
                 scalar_field("field1"),
@@ -397,7 +403,11 @@ mod tests {
         let config = WorldConfig::builder()
             .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
             .fields(vec![scalar_field("energy")])
-            .propagators(vec![Box::new(FailingPropagator::new("fail", FieldId(0), 0))])
+            .propagators(vec![Box::new(FailingPropagator::new(
+                "fail",
+                FieldId(0),
+                0,
+            ))])
             .dt(0.1)
             .seed(42)
             .build()
@@ -585,7 +595,11 @@ mod tests {
         let config = WorldConfig::builder()
             .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
             .fields(vec![scalar_field("energy")])
-            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
             .dt(0.1)
             .seed(42)
             .max_ingress_queue(2)

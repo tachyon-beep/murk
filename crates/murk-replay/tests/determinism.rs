@@ -107,7 +107,9 @@ fn reference_config(seed: u64, action_buffer: ActionBuffer) -> WorldConfig {
     let initial_positions = murk_bench::init_agent_positions(cell_count, 4, seed);
 
     WorldConfig::builder()
-        .space(Box::new(Square4::new(10, 10, EdgeBehavior::Absorb).unwrap()))
+        .space(Box::new(
+            Square4::new(10, 10, EdgeBehavior::Absorb).unwrap(),
+        ))
         .fields(reference_fields())
         .propagators(vec![
             Box::new(DiffusionPropagator::new(0.1)),
@@ -175,14 +177,22 @@ fn determinism_multi_source_ordering() {
     let ticks = 1000;
     let field_count = 1;
 
-    let make_config = || WorldConfig::builder()
-        .space(Box::new(Square4::new(10, 10, EdgeBehavior::Absorb).unwrap()))
-        .fields(vec![scalar_field("energy")])
-        .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
-        .dt(0.1)
-        .seed(seed)
-        .build()
-        .unwrap();
+    let make_config = || {
+        WorldConfig::builder()
+            .space(Box::new(
+                Square4::new(10, 10, EdgeBehavior::Absorb).unwrap(),
+            ))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
+            .dt(0.1)
+            .seed(seed)
+            .build()
+            .unwrap()
+    };
 
     // Generate commands for each tick: 3 sources with varying priorities
     let commands_for_tick = |tick: u64| -> Vec<Command> {
@@ -360,17 +370,21 @@ fn determinism_sparse_field() {
     let ticks = 1000;
     let field_count = 2; // const field + sparse field
 
-    let make_config = || WorldConfig::builder()
-        .space(Box::new(Square4::new(10, 10, EdgeBehavior::Absorb).unwrap()))
-        .fields(vec![scalar_field("energy"), sparse_field("marker")])
-        .propagators(vec![
-            Box::new(ConstPropagator::new("const_energy", FieldId(0), 1.0)),
-            Box::new(ConstPropagator::new("const_marker", FieldId(1), 0.0)),
-        ])
-        .dt(0.1)
-        .seed(seed)
-        .build()
-        .unwrap();
+    let make_config = || {
+        WorldConfig::builder()
+            .space(Box::new(
+                Square4::new(10, 10, EdgeBehavior::Absorb).unwrap(),
+            ))
+            .fields(vec![scalar_field("energy"), sparse_field("marker")])
+            .propagators(vec![
+                Box::new(ConstPropagator::new("const_energy", FieldId(0), 1.0)),
+                Box::new(ConstPropagator::new("const_marker", FieldId(1), 0.0)),
+            ])
+            .dt(0.1)
+            .seed(seed)
+            .build()
+            .unwrap()
+    };
 
     // SetField commands every 10 ticks
     let commands_for_tick = |tick: u64| -> Vec<Command> {
@@ -435,14 +449,20 @@ fn determinism_rollback_recovery() {
     // FailingPropagator(succeed_count=49) succeeds ticks 1-49, fails at tick 50
     let field_count = 1;
 
-    let make_config = || WorldConfig::builder()
-        .space(Box::new(Square4::new(5, 5, EdgeBehavior::Absorb).unwrap()))
-        .fields(vec![scalar_field("energy")])
-        .propagators(vec![Box::new(FailingPropagator::new("failer", FieldId(0), 49))])
-        .dt(0.1)
-        .seed(seed)
-        .build()
-        .unwrap();
+    let make_config = || {
+        WorldConfig::builder()
+            .space(Box::new(Square4::new(5, 5, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(FailingPropagator::new(
+                "failer",
+                FieldId(0),
+                49,
+            ))])
+            .dt(0.1)
+            .seed(seed)
+            .build()
+            .unwrap()
+    };
 
     // Record: step through failure and recovery
     let meta = test_metadata();
@@ -520,14 +540,22 @@ fn determinism_global_parameter() {
     let ticks = 1000;
     let field_count = 1;
 
-    let make_config = || WorldConfig::builder()
-        .space(Box::new(Square4::new(10, 10, EdgeBehavior::Absorb).unwrap()))
-        .fields(vec![scalar_field("energy")])
-        .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
-        .dt(0.1)
-        .seed(seed)
-        .build()
-        .unwrap();
+    let make_config = || {
+        WorldConfig::builder()
+            .space(Box::new(
+                Square4::new(10, 10, EdgeBehavior::Absorb).unwrap(),
+            ))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
+            .dt(0.1)
+            .seed(seed)
+            .build()
+            .unwrap()
+    };
 
     let commands_for_tick = |tick: u64| -> Vec<Command> {
         let mut cmds = Vec::new();
@@ -625,7 +653,9 @@ fn determinism_large_pipeline() {
         }
 
         WorldConfig::builder()
-            .space(Box::new(Square4::new(10, 10, EdgeBehavior::Absorb).unwrap()))
+            .space(Box::new(
+                Square4::new(10, 10, EdgeBehavior::Absorb).unwrap(),
+            ))
             .fields(fields)
             .propagators(propagators)
             .dt(0.1)

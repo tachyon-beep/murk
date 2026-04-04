@@ -537,7 +537,10 @@ mod tests {
         let err = result.unwrap_err();
         match err {
             PropagatorError::ExecutionFailed { reason } => {
-                assert!(reason.contains("length"), "error should mention length: {reason}");
+                assert!(
+                    reason.contains("length"),
+                    "error should mention length: {reason}"
+                );
             }
             other => panic!("expected ExecutionFailed, got {other:?}"),
         }
@@ -569,7 +572,10 @@ mod tests {
         let err = result.unwrap_err();
         match err {
             PropagatorError::ExecutionFailed { reason } => {
-                assert!(reason.contains("length"), "error should mention length: {reason}");
+                assert!(
+                    reason.contains("length"),
+                    "error should mention length: {reason}"
+                );
             }
             other => panic!("expected ExecutionFailed, got {other:?}"),
         }
