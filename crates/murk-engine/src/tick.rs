@@ -191,18 +191,54 @@ impl TickEngine {
                 let reads: Vec<(FieldId, usize)> = prop
                     .reads()
                     .iter()
-                    .filter_map(|fid| field_total_lens.get(&fid).map(|&len| (fid, len)))
-                    .collect();
+                    .map(|fid| {
+                        field_total_lens
+                            .get(&fid)
+                            .map(|&len| (fid, len))
+                            .ok_or_else(|| {
+                                ConfigError::Pipeline(
+                                    murk_propagator::PipelineError::UndefinedField {
+                                        propagator: prop.name().to_string(),
+                                        field_id: fid,
+                                    },
+                                )
+                            })
+                    })
+                    .collect::<Result<_, _>>()?;
                 let reads_prev: Vec<(FieldId, usize)> = prop
                     .reads_previous()
                     .iter()
-                    .filter_map(|fid| field_total_lens.get(&fid).map(|&len| (fid, len)))
-                    .collect();
+                    .map(|fid| {
+                        field_total_lens
+                            .get(&fid)
+                            .map(|&len| (fid, len))
+                            .ok_or_else(|| {
+                                ConfigError::Pipeline(
+                                    murk_propagator::PipelineError::UndefinedField {
+                                        propagator: prop.name().to_string(),
+                                        field_id: fid,
+                                    },
+                                )
+                            })
+                    })
+                    .collect::<Result<_, _>>()?;
                 let writes: Vec<(FieldId, usize)> = prop
                     .writes()
                     .iter()
-                    .filter_map(|(fid, _mode)| field_total_lens.get(fid).map(|&len| (*fid, len)))
-                    .collect();
+                    .map(|(fid, _mode)| {
+                        field_total_lens
+                            .get(fid)
+                            .map(|&len| (*fid, len))
+                            .ok_or_else(|| {
+                                ConfigError::Pipeline(
+                                    murk_propagator::PipelineError::UndefinedField {
+                                        propagator: prop.name().to_string(),
+                                        field_id: *fid,
+                                    },
+                                )
+                            })
+                    })
+                    .collect::<Result<_, _>>()?;
                 read_exp.push(reads);
                 read_prev_exp.push(reads_prev);
                 write_exp.push(writes);
@@ -467,7 +503,7 @@ impl TickEngine {
                             accepted_receipt_start,
                         );
                     }
-                    _ => {}
+                    Some(_) => {} // length matches — validation passed
                 }
             }
             for &(field_id, expected_len) in &self.expectations.read_previous[i] {
@@ -502,7 +538,7 @@ impl TickEngine {
                             accepted_receipt_start,
                         );
                     }
-                    _ => {}
+                    Some(_) => {} // length matches — validation passed
                 }
             }
             for &(field_id, expected_len) in &self.expectations.write[i] {
@@ -538,7 +574,7 @@ impl TickEngine {
                             accepted_receipt_start,
                         );
                     }
-                    _ => {}
+                    Some(_) => {} // length matches — validation passed
                 }
             }
 
@@ -1727,6 +1763,13 @@ mod tests {
     }
 
     // ── Buffer validation tests ───────────────────────────────
+    //
+    // These are positive tests only (correctly configured engines pass).
+    // The engine's buffer validation is defense-in-depth: the arena
+    // allocates buffers from the same FieldDef that expectations are
+    // computed from, so length mismatches cannot occur through the
+    // public API. Negative tests would require corrupting internal
+    // arena state, which is not possible through the public API.
 
     fn vector_field(name: &str, dims: u32) -> FieldDef {
         FieldDef {

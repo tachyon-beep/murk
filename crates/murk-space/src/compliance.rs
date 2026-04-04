@@ -181,12 +181,22 @@ pub fn assert_neighbours_rejects_wrong_arity(space: &dyn Space) {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         space.neighbours(&wrong_coord)
     }));
-    assert!(
-        result.is_err(),
-        "neighbours() with {}-arity coord should panic for {}-dim space",
-        wrong_coord.len(),
-        space.ndim(),
-    );
+    match result {
+        Err(payload) => {
+            // Verify it's the arity assert, not an accidental index-OOB panic.
+            if let Some(msg) = payload.downcast_ref::<String>() {
+                assert!(
+                    msg.contains("coord arity") || msg.contains("assertion"),
+                    "unexpected panic in neighbours(): {msg}",
+                );
+            }
+        }
+        Ok(_) => panic!(
+            "neighbours() with {}-arity coord should panic for {}-dim space",
+            wrong_coord.len(),
+            space.ndim(),
+        ),
+    }
 }
 
 /// Assert that `distance()` panics on wrong-arity coords (debug builds only).
@@ -205,18 +215,32 @@ pub fn assert_distance_rejects_wrong_arity(space: &dyn Space) {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         space.distance(&wrong_coord, good_coord)
     }));
-    assert!(
-        result.is_err(),
-        "distance(wrong, good) should panic for wrong-arity coord",
-    );
+    match result {
+        Err(payload) => {
+            if let Some(msg) = payload.downcast_ref::<String>() {
+                assert!(
+                    msg.contains("coord a arity") || msg.contains("assertion"),
+                    "unexpected panic in distance(wrong, good): {msg}",
+                );
+            }
+        }
+        Ok(_) => panic!("distance(wrong, good) should panic for wrong-arity coord"),
+    }
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         space.distance(good_coord, &wrong_coord)
     }));
-    assert!(
-        result.is_err(),
-        "distance(good, wrong) should panic for wrong-arity coord",
-    );
+    match result {
+        Err(payload) => {
+            if let Some(msg) = payload.downcast_ref::<String>() {
+                assert!(
+                    msg.contains("coord b arity") || msg.contains("assertion"),
+                    "unexpected panic in distance(good, wrong): {msg}",
+                );
+            }
+        }
+        Ok(_) => panic!("distance(good, wrong) should panic for wrong-arity coord"),
+    }
 }
 
 /// Run all compliance checks on a space.
