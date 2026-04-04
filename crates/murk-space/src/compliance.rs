@@ -184,9 +184,13 @@ pub fn assert_neighbours_rejects_wrong_arity(space: &dyn Space) {
     match result {
         Err(payload) => {
             // Verify it's the arity assert, not an accidental index-OOB panic.
-            if let Some(msg) = payload.downcast_ref::<String>() {
+            let msg = payload
+                .downcast_ref::<String>()
+                .map(|s| s.as_str())
+                .or_else(|| payload.downcast_ref::<&str>().copied());
+            if let Some(msg) = msg {
                 assert!(
-                    msg.contains("coord arity") || msg.contains("assertion"),
+                    msg.contains("coord arity"),
                     "unexpected panic in neighbours(): {msg}",
                 );
             }
@@ -217,9 +221,13 @@ pub fn assert_distance_rejects_wrong_arity(space: &dyn Space) {
     }));
     match result {
         Err(payload) => {
-            if let Some(msg) = payload.downcast_ref::<String>() {
+            let msg = payload
+                .downcast_ref::<String>()
+                .map(|s| s.as_str())
+                .or_else(|| payload.downcast_ref::<&str>().copied());
+            if let Some(msg) = msg {
                 assert!(
-                    msg.contains("coord a arity") || msg.contains("assertion"),
+                    msg.contains("coord a arity"),
                     "unexpected panic in distance(wrong, good): {msg}",
                 );
             }
@@ -232,9 +240,13 @@ pub fn assert_distance_rejects_wrong_arity(space: &dyn Space) {
     }));
     match result {
         Err(payload) => {
-            if let Some(msg) = payload.downcast_ref::<String>() {
+            let msg = payload
+                .downcast_ref::<String>()
+                .map(|s| s.as_str())
+                .or_else(|| payload.downcast_ref::<&str>().copied());
+            if let Some(msg) = msg {
                 assert!(
-                    msg.contains("coord b arity") || msg.contains("assertion"),
+                    msg.contains("coord b arity"),
                     "unexpected panic in distance(good, wrong): {msg}",
                 );
             }

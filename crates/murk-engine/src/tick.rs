@@ -453,18 +453,38 @@ impl TickEngine {
                 let write_buf = match guard.writer.write(field) {
                     Some(buf) => buf,
                     None => {
-                        debug_assert!(
-                            false,
-                            "incremental field {:?} declared in plan but writer returned None \
-                             for propagator '{}'",
-                            field,
-                            prop.name(),
+                        let prop_name = prop.name().to_string();
+                        return self.handle_rollback(
+                            prop_name,
+                            murk_core::PropagatorError::ExecutionFailed {
+                                reason: format!(
+                                    "incremental field {:?} declared in plan but writer \
+                                     returned None",
+                                    field,
+                                ),
+                            },
+                            receipts,
+                            accepted_receipt_start,
                         );
-                        continue;
                     }
                 };
-                let copy_len = prev.len().min(write_buf.len());
-                write_buf[..copy_len].copy_from_slice(&prev[..copy_len]);
+                let prev_len = prev.len();
+                let buf_len = write_buf.len();
+                if prev_len != buf_len {
+                    let prop_name = prop.name().to_string();
+                    return self.handle_rollback(
+                        prop_name,
+                        murk_core::PropagatorError::ExecutionFailed {
+                            reason: format!(
+                                "incremental seed for field {:?}: prev len {} != write buf len {}",
+                                field, prev_len, buf_len,
+                            ),
+                        },
+                        receipts,
+                        accepted_receipt_start,
+                    );
+                }
+                write_buf.copy_from_slice(&prev);
             }
 
             // 4d. Reset propagator scratch.
@@ -818,7 +838,7 @@ mod tests {
     use murk_core::command::CommandPayload;
     use murk_core::id::{Coord, ParameterKey};
     use murk_core::traits::SnapshotAccess;
-    use murk_core::{BoundaryBehavior, FieldDef, FieldMutability, FieldType};
+    use murk_core::{BoundaryBehavior, FieldDef, FieldMutability, FieldSet, FieldType, PropagatorError};
     use murk_propagator::propagator::WriteMode;
     use murk_space::{EdgeBehavior, Line1D};
     use murk_test_utils::{ConstPropagator, FailingPropagator, IdentityPropagator};
@@ -1839,17 +1859,57 @@ mod tests {
 
     #[test]
     fn buffer_validation_passes_reads_previous_on_tick_1() {
-        let mut engine = two_field_engine();
-        // Tick 0→1: reads_previous sees initial zeros.
+        // Use a propagator that declares reads_previous() to actually exercise
+        // the read_previous validation path (expectations.read_previous[i]).
+        struct ReadsPrevWriter;
+        impl Propagator for ReadsPrevWriter {
+            fn name(&self) -> &str {
+                "reads_prev_writer"
+            }
+            fn reads(&self) -> FieldSet {
+                FieldSet::empty()
+            }
+            fn reads_previous(&self) -> FieldSet {
+                [FieldId(0)].into_iter().collect()
+            }
+            fn writes(&self) -> Vec<(FieldId, WriteMode)> {
+                vec![(FieldId(1), WriteMode::Full)]
+            }
+            fn step(
+                &self,
+                ctx: &mut murk_propagator::StepContext<'_>,
+            ) -> Result<(), PropagatorError> {
+                let prev = ctx.reads_previous().read(FieldId(0)).unwrap().to_vec();
+                let out = ctx.writes().write(FieldId(1)).unwrap();
+                out.copy_from_slice(&prev);
+                Ok(())
+            }
+        }
+
+        let config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("source"), scalar_field("dest")])
+            .propagators(vec![
+                Box::new(ConstPropagator::new("seed", FieldId(0), 5.0)),
+                Box::new(ReadsPrevWriter),
+            ])
+            .dt(0.1)
+            .seed(42)
+            .build()
+            .unwrap();
+        let mut engine = TickEngine::new(config).unwrap();
+
+        // Verify read_previous expectations are actually populated.
         assert!(
-            engine.execute_tick().is_ok(),
-            "tick 1 should pass validation"
+            !engine.expectations.read_previous[1].is_empty(),
+            "ReadsPrevWriter should have read_previous expectations"
         );
+        assert_eq!(engine.expectations.read_previous[1], vec![(FieldId(0), 10)]);
+
+        // Tick 0→1: reads_previous sees initial zeros via base_cache.
+        assert!(engine.execute_tick().is_ok(), "tick 1 should pass validation");
         // Tick 1→2: reads_previous sees published tick 1 data.
-        assert!(
-            engine.execute_tick().is_ok(),
-            "tick 2 should pass validation with reads_previous"
-        );
+        assert!(engine.execute_tick().is_ok(), "tick 2 should pass validation");
     }
 
     #[test]
@@ -1869,21 +1929,33 @@ mod tests {
 
     #[test]
     fn field_expectations_computes_correct_lengths() {
+        // IdentityPropagator: reads() = FieldId(0), writes() = FieldId(1).
+        // FieldId(0) is scalar (10*1=10), FieldId(1) is vector(3) (10*3=30).
         let config = WorldConfig::builder()
             .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
             .fields(vec![scalar_field("scalar_f"), vector_field("vector_f", 3)])
-            .propagators(vec![Box::new(ConstPropagator::new(
-                "write_scalar",
+            .propagators(vec![Box::new(IdentityPropagator::new(
+                "copy_scalar_to_vector",
                 FieldId(0),
-                1.0,
+                FieldId(1),
             ))])
             .dt(0.1)
             .seed(42)
             .build()
             .unwrap();
         let engine = TickEngine::new(config).unwrap();
-        // ConstPropagator writes FieldId(0) which is scalar: 10 cells * 1 component = 10.
-        assert_eq!(engine.expectations.write[0], vec![(FieldId(0), 10)]);
+        // IdentityPropagator reads FieldId(0) (scalar: 10*1=10).
+        assert_eq!(
+            engine.expectations.read[0],
+            vec![(FieldId(0), 10)],
+            "scalar read should expect cell_count * 1"
+        );
+        // IdentityPropagator writes FieldId(1) (vector(3): 10*3=30).
+        assert_eq!(
+            engine.expectations.write[0],
+            vec![(FieldId(1), 30)],
+            "vector write should expect cell_count * 3"
+        );
     }
 
     /// BUG-106: Unchecked u32 * u32 for static field length panics on overflow.
