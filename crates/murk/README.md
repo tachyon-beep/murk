@@ -15,6 +15,7 @@ Add this single dependency to access the full Murk API:
 ```rust
 use murk::prelude::*;
 use murk::space::Square4;
+use murk::propagators::IdentityCopy;
 
 let space = Square4::new(16, 16, EdgeBehavior::Absorb).unwrap();
 let config = WorldConfig::builder()
@@ -27,7 +28,7 @@ let config = WorldConfig::builder()
         bounds: None,
         boundary_behavior: BoundaryBehavior::Clamp,
     }])
-    .propagators(vec![])
+    .propagators(vec![Box::new(IdentityCopy::new(FieldId(0)))])
     .dt(0.1)
     .seed(42)
     .build()

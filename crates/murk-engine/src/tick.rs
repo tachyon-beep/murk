@@ -1958,6 +1958,37 @@ mod tests {
         );
     }
 
+    #[test]
+    fn buffer_validation_rejects_corrupted_expectation() {
+        // Mutate expectations to inject a wrong expected length, verifying
+        // the validation loop fires and triggers rollback before step().
+        let mut engine = simple_engine();
+        // First tick succeeds normally.
+        assert!(engine.execute_tick().is_ok());
+
+        // Corrupt the write expectation: change expected length from 10 to 999.
+        assert!(!engine.expectations.write[0].is_empty());
+        engine.expectations.write[0][0].1 = 999;
+
+        // Next tick should fail with a buffer length mismatch.
+        let result = engine.execute_tick();
+        match result {
+            Err(TickError {
+                kind: StepError::PropagatorFailed { reason, .. },
+                ..
+            }) => match reason {
+                PropagatorError::ExecutionFailed { reason } => {
+                    assert!(
+                        reason.contains("buffer length"),
+                        "error should mention buffer length: {reason}"
+                    );
+                }
+                other => panic!("expected ExecutionFailed, got {other:?}"),
+            },
+            other => panic!("expected PropagatorFailed, got {other:?}"),
+        }
+    }
+
     /// BUG-106: Unchecked u32 * u32 for static field length panics on overflow.
     #[test]
     fn static_field_overflow_returns_error() {

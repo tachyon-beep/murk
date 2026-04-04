@@ -25,7 +25,8 @@ which re-exports this as `murk::engine`.
 
 ```rust
 use murk_engine::{LockstepWorld, WorldConfig};
-use murk_core::{FieldDef, FieldType, FieldMutability, BoundaryBehavior};
+use murk_core::{FieldDef, FieldId, FieldType, FieldMutability, BoundaryBehavior};
+use murk_propagators::IdentityCopy;
 use murk_space::{Square4, EdgeBehavior};
 
 let space = Square4::new(16, 16, EdgeBehavior::Absorb).unwrap();
@@ -39,7 +40,7 @@ let config = WorldConfig::builder()
         bounds: None,
         boundary_behavior: BoundaryBehavior::Clamp,
     }])
-    .propagators(vec![])
+    .propagators(vec![Box::new(IdentityCopy::new(FieldId(0)))])
     .dt(0.1)
     .seed(42)
     .build()
