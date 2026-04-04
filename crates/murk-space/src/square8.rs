@@ -116,6 +116,10 @@ impl Space for Square8 {
     }
 
     fn neighbours(&self, coord: &Coord) -> SmallVec<[Coord; 8]> {
+        debug_assert_eq!(
+            coord.len(), self.ndim(),
+            "coord arity {}, expected {}", coord.len(), self.ndim()
+        );
         let r = coord[0];
         let c = coord[1];
         self.neighbours_rc(r, c)
@@ -144,6 +148,14 @@ impl Space for Square8 {
     }
 
     fn distance(&self, a: &Coord, b: &Coord) -> f64 {
+        debug_assert_eq!(
+            a.len(), self.ndim(),
+            "coord a arity {}, expected {}", a.len(), self.ndim()
+        );
+        debug_assert_eq!(
+            b.len(), self.ndim(),
+            "coord b arity {}, expected {}", b.len(), self.ndim()
+        );
         // Chebyshev (L-inf) distance — matches graph geodesic for 8-connected.
         let dr = grid2d::axis_distance(a[0], b[0], self.rows, self.edge);
         let dc = grid2d::axis_distance(a[1], b[1], self.cols, self.edge);
