@@ -150,5 +150,6 @@ pub mod prelude {
     // Engine
     pub use murk_engine::{
         AsyncConfig, LockstepWorld, RealtimeAsyncWorld, StepMetrics, StepResult, WorldConfig,
+        WorldConfigBuilder,
     };
 }
