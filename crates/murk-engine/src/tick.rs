@@ -1989,6 +1989,158 @@ mod tests {
         }
     }
 
+    #[test]
+    fn buffer_validation_rejects_corrupted_read_expectation() {
+        // Corrupt the read expectation length for propagator 1 (IdentityPropagator
+        // reads field0). After corruption, the validation loop should fire before
+        // step() and trigger rollback.
+        let mut engine = two_field_engine();
+        // First tick succeeds normally to publish a snapshot.
+        assert!(engine.execute_tick().is_ok());
+
+        // Corrupt read expectation: change expected read length to a wrong value.
+        assert!(!engine.expectations.read[1].is_empty());
+        engine.expectations.read[1][0].1 = 777;
+
+        let result = engine.execute_tick();
+        match result {
+            Err(TickError {
+                kind: StepError::PropagatorFailed { reason, .. },
+                ..
+            }) => match reason {
+                PropagatorError::ExecutionFailed { reason } => {
+                    assert!(
+                        reason.contains("buffer length"),
+                        "error should mention buffer length: {reason}"
+                    );
+                }
+                other => panic!("expected ExecutionFailed, got {other:?}"),
+            },
+            other => panic!("expected PropagatorFailed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn buffer_validation_rejects_corrupted_read_previous_expectation() {
+        // Use a propagator with reads_previous, then corrupt the expectation.
+        struct ReadsPrevConst;
+        impl Propagator for ReadsPrevConst {
+            fn name(&self) -> &str {
+                "reads_prev_const"
+            }
+            fn reads(&self) -> FieldSet {
+                FieldSet::empty()
+            }
+            fn reads_previous(&self) -> FieldSet {
+                [FieldId(0)].into_iter().collect()
+            }
+            fn writes(&self) -> Vec<(FieldId, WriteMode)> {
+                vec![(FieldId(1), WriteMode::Full)]
+            }
+            fn step(
+                &self,
+                ctx: &mut murk_propagator::StepContext<'_>,
+            ) -> Result<(), PropagatorError> {
+                let out = ctx.writes().write(FieldId(1)).unwrap();
+                out.fill(1.0);
+                Ok(())
+            }
+        }
+
+        let config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("source"), scalar_field("dest")])
+            .propagators(vec![
+                Box::new(ConstPropagator::new("seed", FieldId(0), 5.0)),
+                Box::new(ReadsPrevConst),
+            ])
+            .dt(0.1)
+            .seed(42)
+            .build()
+            .unwrap();
+        let mut engine = TickEngine::new(config).unwrap();
+
+        // First tick to publish a snapshot (so base_cache is populated).
+        assert!(engine.execute_tick().is_ok());
+
+        // Corrupt read_previous expectation for propagator 1.
+        assert!(!engine.expectations.read_previous[1].is_empty());
+        engine.expectations.read_previous[1][0].1 = 888;
+
+        let result = engine.execute_tick();
+        match result {
+            Err(TickError {
+                kind: StepError::PropagatorFailed { reason, .. },
+                ..
+            }) => match reason {
+                PropagatorError::ExecutionFailed { reason } => {
+                    assert!(
+                        reason.contains("buffer length"),
+                        "error should mention buffer length: {reason}"
+                    );
+                }
+                other => panic!("expected ExecutionFailed, got {other:?}"),
+            },
+            other => panic!("expected PropagatorFailed, got {other:?}"),
+        }
+    }
+
+    // ── TickError Display and Error impl coverage ────────────
+
+    #[test]
+    fn tick_error_display_delegates_to_kind() {
+        let err = TickError {
+            kind: StepError::TickDisabled,
+            receipts: vec![],
+        };
+        let msg = format!("{err}");
+        assert!(!msg.is_empty(), "TickError Display should produce output");
+    }
+
+    #[test]
+    fn tick_error_source_returns_kind() {
+        use std::error::Error;
+        let err = TickError {
+            kind: StepError::TickDisabled,
+            receipts: vec![],
+        };
+        assert!(
+            err.source().is_some(),
+            "TickError::source() should return the underlying StepError"
+        );
+    }
+
+    // ── Accessor coverage ────────────────────────────────────
+
+    #[test]
+    fn owned_snapshot_returns_data() {
+        let mut engine = simple_engine();
+        engine.execute_tick().unwrap();
+        let owned = engine.owned_snapshot();
+        let data = owned.read(FieldId(0)).unwrap();
+        assert!(data.iter().all(|&v| v == 42.0));
+    }
+
+    #[test]
+    fn ingress_queue_depth_and_capacity() {
+        let mut engine = simple_engine();
+        assert_eq!(engine.ingress_queue_depth(), 0);
+        assert!(engine.ingress_queue_capacity() > 0);
+
+        engine.submit_commands(vec![make_cmd(100)]);
+        assert_eq!(engine.ingress_queue_depth(), 1);
+
+        engine.execute_tick().unwrap();
+        assert_eq!(engine.ingress_queue_depth(), 0);
+    }
+
+    #[test]
+    fn space_accessor_returns_correct_topology() {
+        let engine = simple_engine();
+        assert_eq!(engine.space().cell_count(), 10);
+        assert_eq!(engine.space().ndim(), 1);
+    }
+
     /// BUG-106: Unchecked u32 * u32 for static field length panics on overflow.
     #[test]
     fn static_field_overflow_returns_error() {

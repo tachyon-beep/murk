@@ -993,6 +993,233 @@ mod tests {
         }
     }
 
+    // ── Display coverage for remaining error variants ──────
+
+    #[test]
+    fn engine_recovery_failed_display() {
+        let err = ConfigError::EngineRecoveryFailed;
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("engine"),
+            "EngineRecoveryFailed Display should mention 'engine', got: {msg}"
+        );
+    }
+
+    #[test]
+    fn invalid_tick_rate_display() {
+        let err = ConfigError::InvalidTickRate { value: -1.0 };
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("tick_rate_hz") && msg.contains("-1"),
+            "InvalidTickRate Display should mention tick_rate_hz and the value, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn ring_buffer_too_small_display() {
+        let err = ConfigError::RingBufferTooSmall { configured: 1 };
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("ring_buffer_size") && msg.contains("1"),
+            "RingBufferTooSmall Display should mention ring_buffer_size and the value, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn ingress_queue_zero_display() {
+        let err = ConfigError::IngressQueueZero;
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("ingress"),
+            "IngressQueueZero Display should mention ingress, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn invalid_field_display() {
+        let err = ConfigError::InvalidField {
+            reason: "bounds min > max".to_string(),
+        };
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("bounds min > max"),
+            "InvalidField Display should include the reason, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn backoff_skew_exceeds_cap_display() {
+        let err = ConfigError::BackoffSkewExceedsCap {
+            initial: 20,
+            cap: 5,
+        };
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("20") && msg.contains("5"),
+            "BackoffSkewExceedsCap Display should include both values, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn backoff_invalid_factor_display() {
+        let err = ConfigError::BackoffInvalidFactor { value: 0.5 };
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("0.5"),
+            "BackoffInvalidFactor Display should include the value, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn backoff_invalid_threshold_display() {
+        let err = ConfigError::BackoffInvalidThreshold { value: 2.0 };
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("2"),
+            "BackoffInvalidThreshold Display should include the value, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn backoff_zero_decay_rate_display() {
+        let err = ConfigError::BackoffZeroDecayRate;
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("decay_rate"),
+            "BackoffZeroDecayRate Display should mention decay_rate, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn engine_recovery_failed_source_is_none() {
+        use std::error::Error;
+        let err = ConfigError::EngineRecoveryFailed;
+        assert!(err.source().is_none());
+    }
+
+    // ── tick_rate_hz edge cases ──────────────────────────────
+
+    #[test]
+    fn validate_negative_tick_rate_hz_rejected() {
+        let mut cfg = valid_config();
+        cfg.tick_rate_hz = Some(-60.0);
+        match cfg.validate() {
+            Err(ConfigError::InvalidTickRate { .. }) => {}
+            other => panic!("expected InvalidTickRate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_infinite_tick_rate_hz_rejected() {
+        let mut cfg = valid_config();
+        cfg.tick_rate_hz = Some(f64::INFINITY);
+        match cfg.validate() {
+            Err(ConfigError::InvalidTickRate { .. }) => {}
+            other => panic!("expected InvalidTickRate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_nan_tick_rate_hz_rejected() {
+        let mut cfg = valid_config();
+        cfg.tick_rate_hz = Some(f64::NAN);
+        match cfg.validate() {
+            Err(ConfigError::InvalidTickRate { .. }) => {}
+            other => panic!("expected InvalidTickRate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_zero_tick_rate_hz_rejected() {
+        let mut cfg = valid_config();
+        cfg.tick_rate_hz = Some(0.0);
+        match cfg.validate() {
+            Err(ConfigError::InvalidTickRate { .. }) => {}
+            other => panic!("expected InvalidTickRate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_negative_backoff_threshold_rejected() {
+        let mut cfg = valid_config();
+        cfg.backoff.rejection_rate_threshold = -0.1;
+        match cfg.validate() {
+            Err(ConfigError::BackoffInvalidThreshold { .. }) => {}
+            other => panic!("expected BackoffInvalidThreshold, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_nan_backoff_threshold_rejected() {
+        let mut cfg = valid_config();
+        cfg.backoff.rejection_rate_threshold = f64::NAN;
+        match cfg.validate() {
+            Err(ConfigError::BackoffInvalidThreshold { .. }) => {}
+            other => panic!("expected BackoffInvalidThreshold, got {other:?}"),
+        }
+    }
+
+    // ── Builder singular methods ─────────────────────────────
+
+    #[test]
+    fn builder_singular_field_method() {
+        let config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .field(scalar_field("energy"))
+            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .dt(0.1)
+            .build()
+            .unwrap();
+        assert_eq!(config.fields().len(), 1);
+        assert_eq!(config.fields()[0].name, "energy");
+    }
+
+    #[test]
+    fn builder_singular_propagator_method() {
+        let config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagator(Box::new(ConstPropagator::new("const", FieldId(0), 1.0)))
+            .dt(0.1)
+            .build()
+            .unwrap();
+        assert_eq!(config.propagators().len(), 1);
+    }
+
+    // ── WorldConfig accessor coverage ────────────────────────
+
+    #[test]
+    fn worldconfig_accessors_return_configured_values() {
+        let config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .dt(0.05)
+            .seed(77)
+            .ring_buffer_size(4)
+            .max_ingress_queue(512)
+            .tick_rate_hz(30.0)
+            .build()
+            .unwrap();
+
+        assert_eq!(config.space().cell_count(), 10);
+        assert_eq!(config.fields().len(), 1);
+        assert_eq!(config.propagators().len(), 1);
+        assert_eq!(config.dt(), 0.05);
+        assert_eq!(config.seed(), 77);
+        assert_eq!(config.ring_buffer_size(), 4);
+        assert_eq!(config.max_ingress_queue(), 512);
+        assert_eq!(config.tick_rate_hz(), Some(30.0));
+        assert_eq!(config.backoff().initial_max_skew, 2); // default
+    }
+
+    #[test]
+    fn worldconfig_debug_does_not_panic() {
+        let config = valid_config();
+        let dbg = format!("{config:?}");
+        assert!(dbg.contains("WorldConfig"));
+    }
+
     #[test]
     fn builder_invalid_dt_zero_rejected() {
         let result = WorldConfig::builder()
