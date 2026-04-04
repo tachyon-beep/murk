@@ -95,8 +95,11 @@ struct CumulativeCounters {
 /// `reads()`/`writes()` per-tick (those return heap-allocated collections).
 struct FieldExpectations {
     /// `read[propagator_index]` = Vec of (FieldId, expected_len).
-    /// Covers both `reads()` and `reads_previous()` fields.
+    /// Covers `reads()` fields only (validated against overlay).
     read: Vec<Vec<(FieldId, usize)>>,
+    /// `read_previous[propagator_index]` = Vec of (FieldId, expected_len).
+    /// Covers `reads_previous()` fields (validated against base_cache).
+    read_previous: Vec<Vec<(FieldId, usize)>>,
     /// `write[propagator_index]` = Vec of (FieldId, expected_len).
     write: Vec<Vec<(FieldId, usize)>>,
 }
@@ -182,12 +185,17 @@ impl TickEngine {
         // reads()/writes() are called once here, not per-tick.
         let expectations = {
             let mut read_exp = Vec::with_capacity(config.propagators.len());
+            let mut read_prev_exp = Vec::with_capacity(config.propagators.len());
             let mut write_exp = Vec::with_capacity(config.propagators.len());
             for prop in &config.propagators {
                 let reads: Vec<(FieldId, usize)> = prop
                     .reads()
                     .iter()
-                    .chain(prop.reads_previous().iter())
+                    .filter_map(|fid| field_total_lens.get(&fid).map(|&len| (fid, len)))
+                    .collect();
+                let reads_prev: Vec<(FieldId, usize)> = prop
+                    .reads_previous()
+                    .iter()
                     .filter_map(|fid| field_total_lens.get(&fid).map(|&len| (fid, len)))
                     .collect();
                 let writes: Vec<(FieldId, usize)> = prop
@@ -196,10 +204,12 @@ impl TickEngine {
                     .filter_map(|(fid, _mode)| field_total_lens.get(fid).map(|&len| (*fid, len)))
                     .collect();
                 read_exp.push(reads);
+                read_prev_exp.push(reads_prev);
                 write_exp.push(writes);
             }
             FieldExpectations {
                 read: read_exp,
+                read_previous: read_prev_exp,
                 write: write_exp,
             }
         };
@@ -423,6 +433,114 @@ impl TickEngine {
 
             // 4d. Reset propagator scratch.
             self.propagator_scratch.reset();
+
+            // 4dx. Validate field buffer lengths before dispatch.
+            for &(field_id, expected_len) in &self.expectations.read[i] {
+                match overlay.read(field_id) {
+                    Some(buf) if buf.len() != expected_len => {
+                        let prop_name = prop.name().to_string();
+                        return self.handle_rollback(
+                            prop_name,
+                            murk_core::PropagatorError::ExecutionFailed {
+                                reason: format!(
+                                    "read field {:?} buffer length {} != expected {}",
+                                    field_id,
+                                    buf.len(),
+                                    expected_len,
+                                ),
+                            },
+                            receipts,
+                            accepted_receipt_start,
+                        );
+                    }
+                    None => {
+                        let prop_name = prop.name().to_string();
+                        return self.handle_rollback(
+                            prop_name,
+                            murk_core::PropagatorError::ExecutionFailed {
+                                reason: format!(
+                                    "declared read field {:?} not present",
+                                    field_id,
+                                ),
+                            },
+                            receipts,
+                            accepted_receipt_start,
+                        );
+                    }
+                    _ => {}
+                }
+            }
+            for &(field_id, expected_len) in &self.expectations.read_previous[i] {
+                match self.base_cache.read(field_id) {
+                    Some(buf) if buf.len() != expected_len => {
+                        let prop_name = prop.name().to_string();
+                        return self.handle_rollback(
+                            prop_name,
+                            murk_core::PropagatorError::ExecutionFailed {
+                                reason: format!(
+                                    "read_previous field {:?} buffer length {} != expected {}",
+                                    field_id,
+                                    buf.len(),
+                                    expected_len,
+                                ),
+                            },
+                            receipts,
+                            accepted_receipt_start,
+                        );
+                    }
+                    None => {
+                        let prop_name = prop.name().to_string();
+                        return self.handle_rollback(
+                            prop_name,
+                            murk_core::PropagatorError::ExecutionFailed {
+                                reason: format!(
+                                    "declared read_previous field {:?} not present",
+                                    field_id,
+                                ),
+                            },
+                            receipts,
+                            accepted_receipt_start,
+                        );
+                    }
+                    _ => {}
+                }
+            }
+            for &(field_id, expected_len) in &self.expectations.write[i] {
+                let actual_len = guard.writer.read(field_id).map(|b| b.len());
+                match actual_len {
+                    Some(len) if len != expected_len => {
+                        let prop_name = prop.name().to_string();
+                        return self.handle_rollback(
+                            prop_name,
+                            murk_core::PropagatorError::ExecutionFailed {
+                                reason: format!(
+                                    "write field {:?} buffer length {} != expected {}",
+                                    field_id,
+                                    len,
+                                    expected_len,
+                                ),
+                            },
+                            receipts,
+                            accepted_receipt_start,
+                        );
+                    }
+                    None => {
+                        let prop_name = prop.name().to_string();
+                        return self.handle_rollback(
+                            prop_name,
+                            murk_core::PropagatorError::ExecutionFailed {
+                                reason: format!(
+                                    "declared write field {:?} not present",
+                                    field_id,
+                                ),
+                            },
+                            receipts,
+                            accepted_receipt_start,
+                        );
+                    }
+                    _ => {}
+                }
+            }
 
             // 4e. Construct StepContext and call step().
             {
