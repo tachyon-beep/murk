@@ -132,3 +132,14 @@ context needed to pick up where the previous session left off.
 - P3: Low
 - P4: Backlog
 <!-- /filigree:instructions -->
+
+## Python Tooling
+
+Use `uv` for all Python package management and tool execution. Do NOT use `pip`, `pipx`, or install into system Python.
+
+```bash
+uv run ruff check .                    # Run ruff linter
+uv run pytest                          # Run tests
+uv tool run <tool>                     # One-shot tool execution
+uv sync                                # Sync dependencies from pyproject.toml
+```

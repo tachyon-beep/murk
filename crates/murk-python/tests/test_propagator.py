@@ -1,14 +1,11 @@
 """Tests for Python propagator trampoline."""
 
 import numpy as np
-import pytest
 
 from murk._murk import (
     Config,
     EdgeBehavior,
     FieldMutability,
-    ObsEntry,
-    ObsPlan,
     PropagatorDef,
     World,
     WriteMode,

@@ -1,13 +1,9 @@
 """Shared fixtures for murk Python tests."""
 
-import numpy as np
-import pytest
-
 from murk._murk import (
     Config,
     EdgeBehavior,
     FieldMutability,
-    FieldType,
     ObsEntry,
     ObsPlan,
     PropagatorDef,

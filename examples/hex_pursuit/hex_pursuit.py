@@ -103,9 +103,9 @@ def main():
     print("=" * 60)
     print()
     print(f"  Grid:        {COLS}x{ROWS} Hex2D ({CELL_COUNT} cells)")
-    print(f"  Agents:      predator + prey")
+    print("  Agents:      predator + prey")
     print(f"  Perception:  AgentDisk radius={PERCEPTION_RADIUS}")
-    print(f"  Actions:     6 (hex directions) + 1 (stay) = 7")
+    print("  Actions:     6 (hex directions) + 1 (stay) = 7")
     print()
 
     # ── Build world ───────────────────────────────────────────
@@ -190,10 +190,6 @@ def main():
                 dtype=np.int32,
             )
             plan.execute_agents(world, agent_centers, obs_buf, mask_buf)
-
-            # obs_buf layout: [pred_obs (obs_per_agent floats), prey_obs (obs_per_agent floats)]
-            pred_obs = obs_buf[:obs_per_agent]
-            prey_obs = obs_buf[obs_per_agent:]
 
             # ── Decide actions (random policy) ────────────────
             # 0-5 = hex directions, 6 = stay

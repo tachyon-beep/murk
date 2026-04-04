@@ -1,7 +1,6 @@
 """Tests for MurkVecEnv vectorized environment."""
 
 import numpy as np
-import pytest
 
 from murk._murk import (
     Config,

@@ -226,8 +226,6 @@ class TestBatchedVecEnv:
 
     def test_auto_reset_on_termination(self):
         """Auto-reset stores final_observation when terminated."""
-        step_count = [0]
-
         class TerminatingEnv(BatchedVecEnv):
             def _check_terminated(self, obs, tick_ids):
                 # Terminate after 3 steps.
