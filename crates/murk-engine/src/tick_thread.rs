@@ -446,7 +446,7 @@ mod tests {
             .seed(1)
             .ring_buffer_size(2)
             .max_ingress_queue(8)
-            .tick_rate_hz(Some(60.0))
+            .tick_rate_hz(60.0)
             .build()
             .unwrap();
         let engine = TickEngine::new(config).unwrap();

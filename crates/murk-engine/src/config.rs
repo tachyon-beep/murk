@@ -356,6 +356,55 @@ impl WorldConfig {
         Ok(())
     }
 
+    // ── Public accessors ──────────────────────────────────────
+
+    /// The spatial topology for the simulation.
+    pub fn space(&self) -> &dyn Space {
+        &*self.space
+    }
+
+    /// The field definitions. `FieldId(n)` corresponds to `fields[n]`.
+    pub fn fields(&self) -> &[FieldDef] {
+        &self.fields
+    }
+
+    /// The propagators executed in pipeline order each tick.
+    pub fn propagators(&self) -> &[Box<dyn Propagator>] {
+        &self.propagators
+    }
+
+    /// The simulation timestep in seconds.
+    pub fn dt(&self) -> f64 {
+        self.dt
+    }
+
+    /// The RNG seed for deterministic simulation.
+    pub fn seed(&self) -> u64 {
+        self.seed
+    }
+
+    /// Number of snapshots retained in the ring buffer.
+    pub fn ring_buffer_size(&self) -> usize {
+        self.ring_buffer_size
+    }
+
+    /// Maximum commands buffered in the ingress queue.
+    pub fn max_ingress_queue(&self) -> usize {
+        self.max_ingress_queue
+    }
+
+    /// Optional target tick rate for realtime-async mode.
+    pub fn tick_rate_hz(&self) -> Option<f64> {
+        self.tick_rate_hz
+    }
+
+    /// The adaptive backoff configuration.
+    pub fn backoff(&self) -> &BackoffConfig {
+        &self.backoff
+    }
+
+    // ── Builder ──────────────────────────────────────────────
+
     /// Create a new [`WorldConfigBuilder`] with sensible defaults.
     pub fn builder() -> WorldConfigBuilder {
         WorldConfigBuilder {
@@ -415,15 +464,27 @@ impl WorldConfigBuilder {
         self
     }
 
-    /// Set the field definitions. If called multiple times, the last value wins.
+    /// Set all field definitions at once. If called multiple times, the last value wins.
     pub fn fields(mut self, fields: Vec<FieldDef>) -> Self {
         self.fields = fields;
         self
     }
 
-    /// Set the propagator pipeline. If called multiple times, the last value wins.
+    /// Append a single field definition.
+    pub fn field(mut self, field: FieldDef) -> Self {
+        self.fields.push(field);
+        self
+    }
+
+    /// Set all propagators at once. If called multiple times, the last value wins.
     pub fn propagators(mut self, propagators: Vec<Box<dyn Propagator>>) -> Self {
         self.propagators = propagators;
+        self
+    }
+
+    /// Append a single propagator to the pipeline.
+    pub fn propagator(mut self, propagator: Box<dyn Propagator>) -> Self {
+        self.propagators.push(propagator);
         self
     }
 
@@ -452,8 +513,11 @@ impl WorldConfigBuilder {
     }
 
     /// Set the target tick rate for realtime-async mode. If called multiple times, the last value wins.
-    pub fn tick_rate_hz(mut self, tick_rate_hz: Option<f64>) -> Self {
-        self.tick_rate_hz = tick_rate_hz;
+    ///
+    /// The default is `None` (no autonomous ticking / lockstep mode).
+    /// Calling this method sets the rate to `Some(hz)`.
+    pub fn tick_rate_hz(mut self, hz: f64) -> Self {
+        self.tick_rate_hz = Some(hz);
         self
     }
 
@@ -892,7 +956,7 @@ mod tests {
             .seed(99)
             .ring_buffer_size(16)
             .max_ingress_queue(2048)
-            .tick_rate_hz(Some(60.0))
+            .tick_rate_hz(60.0)
             .backoff(BackoffConfig {
                 initial_max_skew: 3,
                 backoff_factor: 2.0,
@@ -938,8 +1002,8 @@ mod tests {
             .dt(0.0)
             .build();
         match result {
-            Err(ConfigError::Pipeline(_)) => {}
-            other => panic!("expected Pipeline error, got {other:?}"),
+            Err(ConfigError::Pipeline(PipelineError::InvalidDt { .. })) => {}
+            other => panic!("expected Pipeline(InvalidDt), got {other:?}"),
         }
     }
 

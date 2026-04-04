@@ -857,7 +857,7 @@ mod tests {
             .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 42.0))])
             .dt(0.1)
             .seed(42)
-            .tick_rate_hz(Some(60.0))
+            .tick_rate_hz(60.0)
             .build()
             .unwrap()
     }
@@ -1040,7 +1040,7 @@ mod tests {
             .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
             .dt(0.1)
             .seed(42)
-            .tick_rate_hz(Some(0.5)) // 2-second tick budget
+            .tick_rate_hz(0.5) // 2-second tick budget
             .build()
             .unwrap();
         let mut world = RealtimeAsyncWorld::new(config, AsyncConfig::default()).unwrap();
@@ -1125,7 +1125,7 @@ mod tests {
             .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
             .dt(0.1)
             .seed(42)
-            .tick_rate_hz(Some(0.5))
+            .tick_rate_hz(0.5)
             .build()
             .unwrap();
         let mut world = RealtimeAsyncWorld::new(config, AsyncConfig::default()).unwrap();

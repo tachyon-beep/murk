@@ -172,7 +172,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .propagators(vec![Box::new(DiffusionPropagator)])
         .dt(DT)
         .seed(42)
-        .tick_rate_hz(Some(30.0)) // 30 Hz — tick thread sleeps ~33ms between ticks
+        .tick_rate_hz(30.0) // 30 Hz — tick thread sleeps ~33ms between ticks
         .build()
         .expect("invalid WorldConfig");
 

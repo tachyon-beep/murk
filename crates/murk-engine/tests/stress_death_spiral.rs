@@ -105,7 +105,7 @@ fn death_spiral_config(seed: u64) -> (WorldConfig, murk_propagators::ActionBuffe
         ])
         .dt(0.1)
         .seed(seed)
-        .tick_rate_hz(Some(TICK_RATE_HZ))
+        .tick_rate_hz(TICK_RATE_HZ)
         .build()
         .unwrap();
 
