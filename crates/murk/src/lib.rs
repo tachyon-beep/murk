@@ -34,17 +34,14 @@
 //!     bounds: None,
 //!     boundary_behavior: BoundaryBehavior::Clamp,
 //! }];
-//! let config = WorldConfig {
-//!     space: Box::new(space),
-//!     fields,
-//!     propagators: vec![Box::new(ZeroFill)],
-//!     dt: 0.1,
-//!     seed: 42,
-//!     ring_buffer_size: 8,
-//!     max_ingress_queue: 64,
-//!     tick_rate_hz: None,
-//!     backoff: Default::default(),
-//! };
+//! let config = WorldConfig::builder()
+//!     .space(Box::new(space))
+//!     .fields(fields)
+//!     .propagators(vec![Box::new(ZeroFill)])
+//!     .dt(0.1)
+//!     .seed(42)
+//!     .build()
+//!     .unwrap();
 //! let mut world = LockstepWorld::new(config).unwrap();
 //! let result = world.step_sync(vec![]).unwrap();
 //! assert_eq!(result.snapshot.tick_id(), murk::types::TickId(1));

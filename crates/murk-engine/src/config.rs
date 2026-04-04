@@ -249,23 +249,23 @@ impl From<ArenaError> for ConfigError {
 /// structural invariants without producing intermediate artifacts.
 pub struct WorldConfig {
     /// Spatial topology for the simulation.
-    pub space: Box<dyn Space>,
+    pub(crate) space: Box<dyn Space>,
     /// Field definitions. `FieldId(n)` corresponds to `fields[n]`.
-    pub fields: Vec<FieldDef>,
+    pub(crate) fields: Vec<FieldDef>,
     /// Propagators executed in pipeline order each tick.
-    pub propagators: Vec<Box<dyn Propagator>>,
+    pub(crate) propagators: Vec<Box<dyn Propagator>>,
     /// Simulation timestep in seconds.
-    pub dt: f64,
+    pub(crate) dt: f64,
     /// RNG seed for deterministic simulation.
-    pub seed: u64,
+    pub(crate) seed: u64,
     /// Number of snapshots retained in the ring buffer. Default: 8. Minimum: 2.
-    pub ring_buffer_size: usize,
+    pub(crate) ring_buffer_size: usize,
     /// Maximum commands buffered in the ingress queue. Default: 1024.
-    pub max_ingress_queue: usize,
+    pub(crate) max_ingress_queue: usize,
     /// Optional target tick rate for realtime-async mode.
-    pub tick_rate_hz: Option<f64>,
+    pub(crate) tick_rate_hz: Option<f64>,
     /// Adaptive backoff configuration.
-    pub backoff: BackoffConfig,
+    pub(crate) backoff: BackoffConfig,
 }
 
 impl WorldConfig {
@@ -521,17 +521,14 @@ mod tests {
     }
 
     fn valid_config() -> WorldConfig {
-        WorldConfig {
-            space: Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()),
-            fields: vec![scalar_field("energy")],
-            propagators: vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))],
-            dt: 0.1,
-            seed: 42,
-            ring_buffer_size: 8,
-            max_ingress_queue: 1024,
-            tick_rate_hz: None,
-            backoff: BackoffConfig::default(),
-        }
+        WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .dt(0.1)
+            .seed(42)
+            .build()
+            .unwrap()
     }
 
     #[test]

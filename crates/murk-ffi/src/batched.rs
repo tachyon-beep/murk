@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use murk_core::command::Command;
 use murk_engine::batched::BatchedEngine;
-use murk_engine::config::{BackoffConfig, WorldConfig};
+use murk_engine::config::WorldConfig;
 use murk_obs::spec::ObsSpec;
 
 use crate::command::{convert_command, MurkCommand};
@@ -86,27 +86,28 @@ pub extern "C" fn murk_batched_create(
             return MurkStatus::InvalidHandle as i32;
         }
 
-        // Build WorldConfigs from builders.
+        // Build WorldConfigs from builders via WorldConfigBuilder::build(),
+        // which validates all fields (space, fields, propagators, dt).
         let mut world_configs = Vec::with_capacity(n_worlds);
         for builder in builders {
-            let space = match builder.space {
-                Some(s) => s,
-                None => return MurkStatus::ConfigError as i32,
-            };
-            if builder.fields.is_empty() || builder.propagators.is_empty() {
-                return MurkStatus::ConfigError as i32;
+            let mut wcb = WorldConfig::builder()
+                .dt(builder.dt)
+                .seed(builder.seed)
+                .ring_buffer_size(builder.ring_buffer_size)
+                .max_ingress_queue(builder.max_ingress_queue);
+            if let Some(s) = builder.space {
+                wcb = wcb.space(s);
             }
-            world_configs.push(WorldConfig {
-                space,
-                fields: builder.fields,
-                propagators: builder.propagators,
-                dt: builder.dt,
-                seed: builder.seed,
-                ring_buffer_size: builder.ring_buffer_size,
-                max_ingress_queue: builder.max_ingress_queue,
-                tick_rate_hz: None,
-                backoff: BackoffConfig::default(),
-            });
+            if !builder.fields.is_empty() {
+                wcb = wcb.fields(builder.fields);
+            }
+            if !builder.propagators.is_empty() {
+                wcb = wcb.propagators(builder.propagators);
+            }
+            match wcb.build() {
+                Ok(c) => world_configs.push(c),
+                Err(_) => return MurkStatus::ConfigError as i32,
+            }
         }
 
         // Convert obs entries to ObsSpec (if any).

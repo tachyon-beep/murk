@@ -183,9 +183,12 @@ impl RealtimeAsyncWorld {
         // Share the space for agent-relative observations.
         let space: Arc<dyn Space> = Arc::from(config.space);
 
-        // Reconstruct WorldConfig with the Arc'd space (Box from Arc).
-        // We clone the space Arc for our own reference, and give
-        // TickEngine a Box wrapper.
+        // Direct struct construction is intentional here: we replace `space`
+        // with an ArcSpaceWrapper so TickEngine and this world share the same
+        // spatial topology via Arc. The original config was validated by the
+        // caller (either via WorldConfigBuilder::build() or direct validate()).
+        // TickEngine::new() calls validate_pipeline() internally, so the
+        // reconstructed config is re-validated before use.
         let engine_space: Box<dyn Space> = Box::new(ArcSpaceWrapper(Arc::clone(&space)));
         let engine_config = WorldConfig {
             space: engine_space,
@@ -848,17 +851,15 @@ mod tests {
     }
 
     fn test_config() -> WorldConfig {
-        WorldConfig {
-            space: Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()),
-            fields: vec![scalar_field("energy")],
-            propagators: vec![Box::new(ConstPropagator::new("const", FieldId(0), 42.0))],
-            dt: 0.1,
-            seed: 42,
-            ring_buffer_size: 8,
-            max_ingress_queue: 1024,
-            tick_rate_hz: Some(60.0),
-            backoff: crate::config::BackoffConfig::default(),
-        }
+        WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 42.0))])
+            .dt(0.1)
+            .seed(42)
+            .tick_rate_hz(Some(60.0))
+            .build()
+            .unwrap()
     }
 
     #[test]
@@ -1033,10 +1034,15 @@ mod tests {
     /// shutdown flag, causing shutdown to block for the full tick budget.
     #[test]
     fn shutdown_fast_with_slow_tick_rate() {
-        let config = WorldConfig {
-            tick_rate_hz: Some(0.5), // 2-second tick budget
-            ..test_config()
-        };
+        let config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .dt(0.1)
+            .seed(42)
+            .tick_rate_hz(Some(0.5)) // 2-second tick budget
+            .build()
+            .unwrap();
         let mut world = RealtimeAsyncWorld::new(config, AsyncConfig::default()).unwrap();
 
         // Wait for at least one tick to complete so the ring is non-empty
@@ -1113,10 +1119,15 @@ mod tests {
 
     #[test]
     fn preflight_observes_ingress_backlog() {
-        let config = WorldConfig {
-            tick_rate_hz: Some(0.5),
-            ..test_config()
-        };
+        let config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .dt(0.1)
+            .seed(42)
+            .tick_rate_hz(Some(0.5))
+            .build()
+            .unwrap();
         let mut world = RealtimeAsyncWorld::new(config, AsyncConfig::default()).unwrap();
 
         // Wait for the first publish so the tick thread enters budget sleep.

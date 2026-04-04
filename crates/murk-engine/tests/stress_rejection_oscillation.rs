@@ -8,7 +8,8 @@
 //!
 //! Pass criterion: CV < 0.3 across 10 one-second (60-tick) windows.
 
-use murk_bench::reference_profile;
+#![allow(deprecated)] // Uses the old reference pipeline intentionally.
+
 use murk_core::command::{Command, CommandPayload};
 use murk_core::id::{ParameterKey, TickId};
 use murk_engine::{BackoffConfig, LockstepWorld};
@@ -55,25 +56,66 @@ fn count_rejections(receipts: &[murk_core::command::Receipt]) -> u64 {
 #[test]
 #[ignore] // stress test — run with `cargo test --release -- --ignored`
 fn stress_rejection_oscillation_stability() {
-    // Build a reference profile (100x100 grid) with a constrained ingress
-    // queue. The queue holds fewer commands than we submit per tick,
-    // guaranteeing a baseline rejection rate from QueueFull.
-    let action_buffer = new_action_buffer();
-    let mut config = reference_profile(42, action_buffer);
-
-    // Constrain the ingress queue to force rejections.
-    // We submit 100 commands per tick; a queue of 64 means ~36 are
-    // rejected per tick at the QueueFull boundary.
-    config.max_ingress_queue = 64;
-
-    // Configure adaptive backoff to be active during the test.
-    config.backoff = BackoffConfig {
-        initial_max_skew: 2,
-        backoff_factor: 1.5,
-        max_skew_cap: 10,
-        decay_rate: 60,
-        rejection_rate_threshold: 0.20,
+    // Build a reference-profile-equivalent config (100x100 grid) with a
+    // constrained ingress queue and custom adaptive backoff. The queue
+    // holds fewer commands than we submit per tick, guaranteeing a
+    // baseline rejection rate from QueueFull.
+    use murk_propagators::fields::{HEAT, HEAT_GRADIENT, VELOCITY};
+    use murk_propagators::{
+        AgentMovementPropagator, GradientCompute, RewardPropagator, ScalarDiffusion,
     };
+    use murk_engine::WorldConfig;
+    use murk_space::{EdgeBehavior, Square4};
+
+    let action_buffer = new_action_buffer();
+    let cell_count = 100 * 100;
+    let initial_positions = murk_bench::init_agent_positions(cell_count, 4, 42);
+
+    let config = WorldConfig::builder()
+        .space(Box::new(Square4::new(100, 100, EdgeBehavior::Absorb).unwrap()))
+        .fields(murk_propagators::reference_fields())
+        .propagators(vec![
+            Box::new(
+                ScalarDiffusion::builder()
+                    .input_field(HEAT)
+                    .output_field(HEAT)
+                    .coefficient(0.1)
+                    .build()
+                    .unwrap(),
+            ),
+            Box::new(
+                ScalarDiffusion::builder()
+                    .input_field(VELOCITY)
+                    .output_field(VELOCITY)
+                    .coefficient(0.1)
+                    .build()
+                    .unwrap(),
+            ),
+            Box::new(
+                GradientCompute::builder()
+                    .input_field(HEAT)
+                    .output_field(HEAT_GRADIENT)
+                    .build()
+                    .unwrap(),
+            ),
+            Box::new(AgentMovementPropagator::new(
+                action_buffer,
+                initial_positions,
+            )),
+            Box::new(RewardPropagator::new(1.0, -0.01)),
+        ])
+        .dt(0.1)
+        .seed(42)
+        .max_ingress_queue(64)
+        .backoff(BackoffConfig {
+            initial_max_skew: 2,
+            backoff_factor: 1.5,
+            max_skew_cap: 10,
+            decay_rate: 60,
+            rejection_rate_threshold: 0.20,
+        })
+        .build()
+        .expect("failed to build config");
 
     let mut world = LockstepWorld::new(config).expect("failed to create world");
 

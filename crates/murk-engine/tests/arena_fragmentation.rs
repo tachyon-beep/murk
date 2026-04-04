@@ -10,7 +10,7 @@ use murk_core::id::{FieldId, TickId};
 use murk_core::{
     BoundaryBehavior, FieldDef, FieldMutability, FieldSet, FieldType, PropagatorError,
 };
-use murk_engine::config::{BackoffConfig, WorldConfig};
+use murk_engine::config::WorldConfig;
 use murk_engine::lockstep::LockstepWorld;
 use murk_propagator::context::StepContext;
 use murk_propagator::propagator::{Propagator, WriteMode};
@@ -84,21 +84,18 @@ fn sparse_churn_config() -> WorldConfig {
         },
     ];
 
-    WorldConfig {
-        space: Box::new(murk_space::Line1D::new(100, murk_space::EdgeBehavior::Absorb).unwrap()),
-        fields,
-        propagators: vec![Box::new(FillPropagator::new(
+    WorldConfig::builder()
+        .space(Box::new(murk_space::Line1D::new(100, murk_space::EdgeBehavior::Absorb).unwrap()))
+        .fields(fields)
+        .propagators(vec![Box::new(FillPropagator::new(
             "fill_energy",
             FieldId(0),
             1.0,
-        ))],
-        dt: 0.1,
-        seed: 42,
-        ring_buffer_size: 8,
-        max_ingress_queue: 1024,
-        tick_rate_hz: None,
-        backoff: BackoffConfig::default(),
-    }
+        ))])
+        .dt(0.1)
+        .seed(42)
+        .build()
+        .unwrap()
 }
 
 /// Create a SetField command targeting the sparse field at a given cell.

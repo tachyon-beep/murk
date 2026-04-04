@@ -5,7 +5,7 @@
 //! and morphological mask computation.
 
 use murk_core::{BoundaryBehavior, FieldDef, FieldId, FieldMutability, FieldReader, FieldType};
-use murk_engine::{BackoffConfig, LockstepWorld, WorldConfig};
+use murk_engine::{LockstepWorld, WorldConfig};
 use murk_propagators::{
     AgentEmission, EmissionMode, FlowField, IdentityCopy, MorphOp, MorphologicalOp, NoiseInjection,
     NoiseType, RegrowthModel, ResourceField, ScalarDiffusion, WavePropagation,
@@ -49,15 +49,15 @@ fn vector2_field(name: &str) -> FieldDef {
 /// pheromone-trail pipeline. Verify all fields remain finite.
 #[test]
 fn emission_diffusion_flow_pipeline() {
-    let config = WorldConfig {
-        space: Box::new(Square4::new(10, 10, EdgeBehavior::Absorb).unwrap()),
-        fields: vec![
+    let config = WorldConfig::builder()
+        .space(Box::new(Square4::new(10, 10, EdgeBehavior::Absorb).unwrap()))
+        .fields(vec![
             scalar_field("presence"), // 0 = PRESENCE
             scalar_field("emission"), // 1 = EMISSION
             scalar_field("heat"),     // 2 = HEAT
             vector2_field("flow"),    // 3 = FLOW
-        ],
-        propagators: vec![
+        ])
+        .propagators(vec![
             Box::new(IdentityCopy::new(PRESENCE)),
             Box::new(
                 AgentEmission::builder()
@@ -84,14 +84,11 @@ fn emission_diffusion_flow_pipeline() {
                     .build()
                     .unwrap(),
             ),
-        ],
-        dt: 0.1,
-        seed: 42,
-        ring_buffer_size: 8,
-        max_ingress_queue: 1024,
-        tick_rate_hz: None,
-        backoff: BackoffConfig::default(),
-    };
+        ])
+        .dt(0.1)
+        .seed(42)
+        .build()
+        .unwrap();
 
     let mut world = LockstepWorld::new(config).unwrap();
 
@@ -111,13 +108,13 @@ fn emission_diffusion_flow_pipeline() {
 
 #[test]
 fn resource_consumption_and_regrowth() {
-    let config = WorldConfig {
-        space: Box::new(Square4::new(5, 5, EdgeBehavior::Absorb).unwrap()),
-        fields: vec![
+    let config = WorldConfig::builder()
+        .space(Box::new(Square4::new(5, 5, EdgeBehavior::Absorb).unwrap()))
+        .fields(vec![
             scalar_field("presence"), // 0
             scalar_field("resource"), // 1
-        ],
-        propagators: vec![
+        ])
+        .propagators(vec![
             Box::new(IdentityCopy::new(PRESENCE)),
             Box::new(
                 ResourceField::builder()
@@ -130,14 +127,11 @@ fn resource_consumption_and_regrowth() {
                     .build()
                     .unwrap(),
             ),
-        ],
-        dt: 0.1,
-        seed: 42,
-        ring_buffer_size: 8,
-        max_ingress_queue: 1024,
-        tick_rate_hz: None,
-        backoff: BackoffConfig::default(),
-    };
+        ])
+        .dt(0.1)
+        .seed(42)
+        .build()
+        .unwrap();
 
     let mut world = LockstepWorld::new(config).unwrap();
 
@@ -158,13 +152,13 @@ fn resource_consumption_and_regrowth() {
 
 #[test]
 fn wave_stability_500_ticks() {
-    let config = WorldConfig {
-        space: Box::new(Square4::new(10, 10, EdgeBehavior::Absorb).unwrap()),
-        fields: vec![
+    let config = WorldConfig::builder()
+        .space(Box::new(Square4::new(10, 10, EdgeBehavior::Absorb).unwrap()))
+        .fields(vec![
             scalar_field("displacement"), // 0
             scalar_field("velocity"),     // 1
-        ],
-        propagators: vec![Box::new(
+        ])
+        .propagators(vec![Box::new(
             WavePropagation::builder()
                 .displacement_field(FieldId(0))
                 .velocity_field(FieldId(1))
@@ -172,14 +166,11 @@ fn wave_stability_500_ticks() {
                 .damping(0.01)
                 .build()
                 .unwrap(),
-        )],
-        dt: 0.05,
-        seed: 42,
-        ring_buffer_size: 8,
-        max_ingress_queue: 1024,
-        tick_rate_hz: None,
-        backoff: BackoffConfig::default(),
-    };
+        )])
+        .dt(0.05)
+        .seed(42)
+        .build()
+        .unwrap();
 
     let mut world = LockstepWorld::new(config).unwrap();
 
@@ -200,10 +191,10 @@ fn wave_stability_500_ticks() {
 
 #[test]
 fn noise_determinism() {
-    let make_config = |seed: u64| WorldConfig {
-        space: Box::new(Square4::new(5, 5, EdgeBehavior::Absorb).unwrap()),
-        fields: vec![scalar_field("noisy")],
-        propagators: vec![Box::new(
+    let make_config = |seed: u64| WorldConfig::builder()
+        .space(Box::new(Square4::new(5, 5, EdgeBehavior::Absorb).unwrap()))
+        .fields(vec![scalar_field("noisy")])
+        .propagators(vec![Box::new(
             NoiseInjection::builder()
                 .field(FieldId(0))
                 .noise_type(NoiseType::Gaussian)
@@ -211,14 +202,11 @@ fn noise_determinism() {
                 .seed_offset(seed)
                 .build()
                 .unwrap(),
-        )],
-        dt: 0.1,
-        seed: 42,
-        ring_buffer_size: 8,
-        max_ingress_queue: 1024,
-        tick_rate_hz: None,
-        backoff: BackoffConfig::default(),
-    };
+        )])
+        .dt(0.1)
+        .seed(42)
+        .build()
+        .unwrap();
 
     let run = |seed: u64| -> Vec<f32> {
         let mut world = LockstepWorld::new(make_config(seed)).unwrap();
@@ -238,13 +226,13 @@ fn noise_determinism() {
 
 #[test]
 fn morphological_dilate_through_engine() {
-    let config = WorldConfig {
-        space: Box::new(Square4::new(5, 5, EdgeBehavior::Absorb).unwrap()),
-        fields: vec![
+    let config = WorldConfig::builder()
+        .space(Box::new(Square4::new(5, 5, EdgeBehavior::Absorb).unwrap()))
+        .fields(vec![
             scalar_field("mask_in"),  // 0
             scalar_field("mask_out"), // 1
-        ],
-        propagators: vec![
+        ])
+        .propagators(vec![
             Box::new(IdentityCopy::new(FieldId(0))),
             Box::new(
                 MorphologicalOp::builder()
@@ -256,14 +244,11 @@ fn morphological_dilate_through_engine() {
                     .build()
                     .unwrap(),
             ),
-        ],
-        dt: 0.1,
-        seed: 42,
-        ring_buffer_size: 8,
-        max_ingress_queue: 1024,
-        tick_rate_hz: None,
-        backoff: BackoffConfig::default(),
-    };
+        ])
+        .dt(0.1)
+        .seed(42)
+        .build()
+        .unwrap();
 
     let mut world = LockstepWorld::new(config).unwrap();
 

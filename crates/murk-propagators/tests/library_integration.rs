@@ -6,7 +6,7 @@
 //! and snapshot publication.
 
 use murk_core::{BoundaryBehavior, FieldDef, FieldId, FieldMutability, FieldReader, FieldType};
-use murk_engine::{BackoffConfig, LockstepWorld, WorldConfig};
+use murk_engine::{LockstepWorld, WorldConfig};
 use murk_propagators::{
     FlowField, GradientCompute, IdentityCopy, ScalarDiffusion, WavePropagation,
 };
@@ -53,10 +53,10 @@ fn thousand_tick_stability_scalar_diffusion() {
     // With absorb boundaries + decay, energy leaks out. The fixed source
     // re-injects 100.0 each tick at cell 55. The system should reach a
     // bounded steady state.
-    let config = WorldConfig {
-        space: Box::new(Square4::new(10, 10, EdgeBehavior::Absorb).unwrap()),
-        fields: vec![scalar_field("heat")],
-        propagators: vec![Box::new(
+    let config = WorldConfig::builder()
+        .space(Box::new(Square4::new(10, 10, EdgeBehavior::Absorb).unwrap()))
+        .fields(vec![scalar_field("heat")])
+        .propagators(vec![Box::new(
             ScalarDiffusion::builder()
                 .input_field(HEAT)
                 .output_field(HEAT)
@@ -66,14 +66,11 @@ fn thousand_tick_stability_scalar_diffusion() {
                 .sources(vec![(55, 100.0)])
                 .build()
                 .unwrap(),
-        )],
-        dt: 0.1,
-        seed: 42,
-        ring_buffer_size: 8,
-        max_ingress_queue: 1024,
-        tick_rate_hz: None,
-        backoff: BackoffConfig::default(),
-    };
+        )])
+        .dt(0.1)
+        .seed(42)
+        .build()
+        .unwrap();
 
     let mut world = LockstepWorld::new(config).unwrap();
 
@@ -121,10 +118,10 @@ fn thousand_tick_stability_scalar_diffusion() {
 /// Assert bit-identical output field arrays.
 #[test]
 fn determinism_same_seed_same_output() {
-    let make_config = |seed: u64| WorldConfig {
-        space: Box::new(Square4::new(10, 10, EdgeBehavior::Absorb).unwrap()),
-        fields: vec![scalar_field("heat")],
-        propagators: vec![Box::new(
+    let make_config = |seed: u64| WorldConfig::builder()
+        .space(Box::new(Square4::new(10, 10, EdgeBehavior::Absorb).unwrap()))
+        .fields(vec![scalar_field("heat")])
+        .propagators(vec![Box::new(
             ScalarDiffusion::builder()
                 .input_field(HEAT)
                 .output_field(HEAT)
@@ -134,14 +131,11 @@ fn determinism_same_seed_same_output() {
                 .sources(vec![(55, 100.0)])
                 .build()
                 .unwrap(),
-        )],
-        dt: 0.1,
-        seed,
-        ring_buffer_size: 8,
-        max_ingress_queue: 1024,
-        tick_rate_hz: None,
-        backoff: BackoffConfig::default(),
-    };
+        )])
+        .dt(0.1)
+        .seed(seed)
+        .build()
+        .unwrap();
 
     let run = |seed: u64| -> Vec<f32> {
         let mut world = LockstepWorld::new(make_config(seed)).unwrap();
@@ -172,10 +166,10 @@ fn gradient_compute_with_diffusion() {
     // ScalarDiffusion writes heat, GradientCompute reads previous-tick heat
     // and writes gradient. Note: GradientCompute uses reads_previous, so the
     // gradient at tick N is computed from the heat field at tick N-1.
-    let config = WorldConfig {
-        space: Box::new(Square4::new(10, 10, EdgeBehavior::Absorb).unwrap()),
-        fields: vec![scalar_field("heat"), vector2_field("gradient")],
-        propagators: vec![
+    let config = WorldConfig::builder()
+        .space(Box::new(Square4::new(10, 10, EdgeBehavior::Absorb).unwrap()))
+        .fields(vec![scalar_field("heat"), vector2_field("gradient")])
+        .propagators(vec![
             Box::new(
                 ScalarDiffusion::builder()
                     .input_field(HEAT)
@@ -192,14 +186,11 @@ fn gradient_compute_with_diffusion() {
                     .build()
                     .unwrap(),
             ),
-        ],
-        dt: 0.1,
-        seed: 42,
-        ring_buffer_size: 8,
-        max_ingress_queue: 1024,
-        tick_rate_hz: None,
-        backoff: BackoffConfig::default(),
-    };
+        ])
+        .dt(0.1)
+        .seed(42)
+        .build()
+        .unwrap();
 
     let mut world = LockstepWorld::new(config).unwrap();
 
@@ -275,17 +266,14 @@ fn identity_copy_preserves_values() {
     // for all ticks. This exercises the full WriteMode::Full pipeline through
     // the engine — any corruption in arena allocation, overlay resolution, or
     // snapshot publishing would show up as non-zero values.
-    let config = WorldConfig {
-        space: Box::new(Square4::new(10, 10, EdgeBehavior::Absorb).unwrap()),
-        fields: vec![scalar_field("data")],
-        propagators: vec![Box::new(IdentityCopy::new(FieldId(0)))],
-        dt: 0.1,
-        seed: 42,
-        ring_buffer_size: 8,
-        max_ingress_queue: 1024,
-        tick_rate_hz: None,
-        backoff: BackoffConfig::default(),
-    };
+    let config = WorldConfig::builder()
+        .space(Box::new(Square4::new(10, 10, EdgeBehavior::Absorb).unwrap()))
+        .fields(vec![scalar_field("data")])
+        .propagators(vec![Box::new(IdentityCopy::new(FieldId(0)))])
+        .dt(0.1)
+        .seed(42)
+        .build()
+        .unwrap();
 
     let mut world = LockstepWorld::new(config).unwrap();
 
@@ -335,14 +323,14 @@ fn identity_copy_preserves_values() {
 /// IdentityCopy preserves a separate marker field.
 #[test]
 fn combined_pipeline_three_propagators() {
-    let config = WorldConfig {
-        space: Box::new(Square4::new(10, 10, EdgeBehavior::Absorb).unwrap()),
-        fields: vec![
+    let config = WorldConfig::builder()
+        .space(Box::new(Square4::new(10, 10, EdgeBehavior::Absorb).unwrap()))
+        .fields(vec![
             scalar_field("heat"),      // FieldId(0) = HEAT
             vector2_field("gradient"), // FieldId(1) = GRADIENT
             scalar_field("marker"),    // FieldId(2) = MARKER
-        ],
-        propagators: vec![
+        ])
+        .propagators(vec![
             Box::new(
                 ScalarDiffusion::builder()
                     .input_field(HEAT)
@@ -360,14 +348,11 @@ fn combined_pipeline_three_propagators() {
                     .unwrap(),
             ),
             Box::new(IdentityCopy::new(MARKER)),
-        ],
-        dt: 0.1,
-        seed: 42,
-        ring_buffer_size: 8,
-        max_ingress_queue: 1024,
-        tick_rate_hz: None,
-        backoff: BackoffConfig::default(),
-    };
+        ])
+        .dt(0.1)
+        .seed(42)
+        .build()
+        .unwrap();
 
     let mut world = LockstepWorld::new(config).unwrap();
 
@@ -433,10 +418,10 @@ fn combined_pipeline_three_propagators() {
 fn scalar_diffusion_generic_ring1d() {
     let cell_count = 20;
     let source_cell = 0;
-    let config = WorldConfig {
-        space: Box::new(Ring1D::new(cell_count).unwrap()),
-        fields: vec![scalar_field("heat")],
-        propagators: vec![Box::new(
+    let config = WorldConfig::builder()
+        .space(Box::new(Ring1D::new(cell_count).unwrap()))
+        .fields(vec![scalar_field("heat")])
+        .propagators(vec![Box::new(
             ScalarDiffusion::builder()
                 .input_field(HEAT)
                 .output_field(HEAT)
@@ -444,14 +429,11 @@ fn scalar_diffusion_generic_ring1d() {
                 .sources(vec![(source_cell, 50.0)])
                 .build()
                 .unwrap(),
-        )],
-        dt: 0.1,
-        seed: 42,
-        ring_buffer_size: 8,
-        max_ingress_queue: 1024,
-        tick_rate_hz: None,
-        backoff: BackoffConfig::default(),
-    };
+        )])
+        .dt(0.1)
+        .seed(42)
+        .build()
+        .unwrap();
 
     let mut world = LockstepWorld::new(config).unwrap();
 
@@ -493,10 +475,10 @@ fn scalar_diffusion_generic_ring1d() {
 #[test]
 fn wave_propagation_generic_ring1d() {
     let cell_count = 20;
-    let config = WorldConfig {
-        space: Box::new(Ring1D::new(cell_count).unwrap()),
-        fields: vec![scalar_field("displacement"), scalar_field("velocity")],
-        propagators: vec![Box::new(
+    let config = WorldConfig::builder()
+        .space(Box::new(Ring1D::new(cell_count).unwrap()))
+        .fields(vec![scalar_field("displacement"), scalar_field("velocity")])
+        .propagators(vec![Box::new(
             WavePropagation::builder()
                 .displacement_field(HEAT) // FieldId(0)
                 .velocity_field(GRADIENT) // FieldId(1) — reusing const, just an ID
@@ -504,14 +486,11 @@ fn wave_propagation_generic_ring1d() {
                 .damping(0.05)
                 .build()
                 .unwrap(),
-        )],
-        dt: 0.05,
-        seed: 42,
-        ring_buffer_size: 8,
-        max_ingress_queue: 1024,
-        tick_rate_hz: None,
-        backoff: BackoffConfig::default(),
-    };
+        )])
+        .dt(0.05)
+        .seed(42)
+        .build()
+        .unwrap();
 
     let mut world = LockstepWorld::new(config).unwrap();
 
@@ -552,10 +531,10 @@ fn diffusion_and_gradient_generic_hex2d() {
     let hex = Hex2D::new(5, 5).unwrap();
     let cell_count = hex.cell_count();
 
-    let config = WorldConfig {
-        space: Box::new(hex),
-        fields: vec![scalar_field("heat"), vector2_field("gradient")],
-        propagators: vec![
+    let config = WorldConfig::builder()
+        .space(Box::new(hex))
+        .fields(vec![scalar_field("heat"), vector2_field("gradient")])
+        .propagators(vec![
             Box::new(
                 ScalarDiffusion::builder()
                     .input_field(HEAT)
@@ -572,14 +551,11 @@ fn diffusion_and_gradient_generic_hex2d() {
                     .build()
                     .unwrap(),
             ),
-        ],
-        dt: 0.1,
-        seed: 42,
-        ring_buffer_size: 8,
-        max_ingress_queue: 1024,
-        tick_rate_hz: None,
-        backoff: BackoffConfig::default(),
-    };
+        ])
+        .dt(0.1)
+        .seed(42)
+        .build()
+        .unwrap();
 
     let mut world = LockstepWorld::new(config).unwrap();
 
@@ -632,10 +608,10 @@ fn flow_field_generic_hex2d() {
     let hex = Hex2D::new(5, 5).unwrap();
     let cell_count = hex.cell_count();
 
-    let config = WorldConfig {
-        space: Box::new(hex),
-        fields: vec![scalar_field("potential"), vector2_field("flow")],
-        propagators: vec![
+    let config = WorldConfig::builder()
+        .space(Box::new(hex))
+        .fields(vec![scalar_field("potential"), vector2_field("flow")])
+        .propagators(vec![
             // First diffuse to create a smooth potential field.
             Box::new(
                 ScalarDiffusion::builder()
@@ -655,14 +631,11 @@ fn flow_field_generic_hex2d() {
                     .build()
                     .unwrap(),
             ),
-        ],
-        dt: 0.1,
-        seed: 42,
-        ring_buffer_size: 8,
-        max_ingress_queue: 1024,
-        tick_rate_hz: None,
-        backoff: BackoffConfig::default(),
-    };
+        ])
+        .dt(0.1)
+        .seed(42)
+        .build()
+        .unwrap();
 
     let mut world = LockstepWorld::new(config).unwrap();
 

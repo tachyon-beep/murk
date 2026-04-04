@@ -20,7 +20,7 @@ use murk_core::{
     BoundaryBehavior, Command, CommandPayload, FieldDef, FieldId, FieldMutability, FieldReader,
     FieldSet, FieldType, PropagatorError, SnapshotAccess, TickId,
 };
-use murk_engine::{BackoffConfig, LockstepWorld, WorldConfig};
+use murk_engine::{LockstepWorld, WorldConfig};
 use murk_propagator::{Propagator, StepContext, WriteMode};
 use murk_space::{EdgeBehavior, Space, Square4};
 use smallvec::smallvec;
@@ -199,17 +199,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Fields: heat (PerTick), heat_source (PerTick, command-only)");
 
     // 3. Build config.
-    let config = WorldConfig {
-        space: Box::new(space),
-        fields,
-        propagators: vec![Box::new(DiffusionPropagator)],
-        dt: DT,
-        seed: 42,
-        ring_buffer_size: 8,
-        max_ingress_queue: 1024,
-        tick_rate_hz: None,
-        backoff: BackoffConfig::default(),
-    };
+    let config = WorldConfig::builder()
+        .space(Box::new(space))
+        .fields(fields)
+        .propagators(vec![Box::new(DiffusionPropagator)])
+        .dt(DT)
+        .seed(42)
+        .build()
+        .expect("invalid WorldConfig");
 
     // 4. Create world.
     let mut world = LockstepWorld::new(config)?;

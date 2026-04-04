@@ -26,7 +26,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use murk_core::FieldId;
-use murk_engine::{AsyncConfig, BackoffConfig, RealtimeAsyncWorld, WorldConfig};
+use murk_engine::{AsyncConfig, RealtimeAsyncWorld, WorldConfig};
 use murk_obs::spec::{ObsDtype, ObsRegion, ObsTransform};
 use murk_obs::{ObsEntry, ObsPlan, ObsSpec};
 use murk_propagators::agent_movement::new_action_buffer;
@@ -92,24 +92,22 @@ fn death_spiral_config(seed: u64) -> (WorldConfig, murk_propagators::ActionBuffe
     let action_buffer = new_action_buffer();
     let initial_positions = init_agent_positions_safe(cell_count, NUM_AGENTS, seed);
 
-    let config = WorldConfig {
-        space: Box::new(Square4::new(100, 100, EdgeBehavior::Absorb).unwrap()),
-        fields: murk_propagators::reference_fields(),
-        propagators: vec![
+    let config = WorldConfig::builder()
+        .space(Box::new(Square4::new(100, 100, EdgeBehavior::Absorb).unwrap()))
+        .fields(murk_propagators::reference_fields())
+        .propagators(vec![
             Box::new(DiffusionPropagator::new(0.1)),
             Box::new(AgentMovementPropagator::new(
                 action_buffer.clone(),
                 initial_positions,
             )),
             Box::new(RewardPropagator::new(1.0, -0.01)),
-        ],
-        dt: 0.1,
-        seed,
-        ring_buffer_size: 8,
-        max_ingress_queue: 1024,
-        tick_rate_hz: Some(TICK_RATE_HZ),
-        backoff: BackoffConfig::default(),
-    };
+        ])
+        .dt(0.1)
+        .seed(seed)
+        .tick_rate_hz(Some(TICK_RATE_HZ))
+        .build()
+        .unwrap();
 
     (config, action_buffer)
 }

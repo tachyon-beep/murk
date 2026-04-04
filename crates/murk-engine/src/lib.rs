@@ -26,7 +26,7 @@ pub mod tick;
 pub(crate) mod tick_thread;
 
 pub use batched::{BatchError, BatchResult, BatchedEngine};
-pub use config::{AsyncConfig, BackoffConfig, ConfigError, WorldConfig};
+pub use config::{AsyncConfig, BackoffConfig, ConfigError, WorldConfig, WorldConfigBuilder};
 pub use epoch::{EpochCounter, WorkerEpoch, EPOCH_UNPINNED};
 pub use ingress::{DrainResult, DrainedCommand, IngressQueue};
 pub use lockstep::{LockstepWorld, StepResult};

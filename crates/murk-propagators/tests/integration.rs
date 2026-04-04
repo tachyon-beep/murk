@@ -6,7 +6,7 @@
 #![allow(deprecated)] // Tests use the old hardcoded field constants intentionally.
 
 use murk_core::FieldReader;
-use murk_engine::{BackoffConfig, LockstepWorld, WorldConfig};
+use murk_engine::{LockstepWorld, WorldConfig};
 use murk_propagators::agent_movement::{new_action_buffer, AgentAction, Direction};
 #[allow(deprecated)]
 use murk_propagators::fields::{AGENT_PRESENCE, HEAT, HEAT_GRADIENT, REWARD, VELOCITY};
@@ -19,21 +19,18 @@ fn small_config(rows: u32, cols: u32, seed: u64) -> (WorldConfig, murk_propagato
     let cell_count = (rows * cols) as usize;
     let initial_positions = vec![(0, cell_count / 2)]; // one agent at center
 
-    let config = WorldConfig {
-        space: Box::new(Square4::new(rows, cols, EdgeBehavior::Absorb).unwrap()),
-        fields: murk_propagators::reference_fields(),
-        propagators: vec![
+    let config = WorldConfig::builder()
+        .space(Box::new(Square4::new(rows, cols, EdgeBehavior::Absorb).unwrap()))
+        .fields(murk_propagators::reference_fields())
+        .propagators(vec![
             Box::new(DiffusionPropagator::new(0.1)),
             Box::new(AgentMovementPropagator::new(ab.clone(), initial_positions)),
             Box::new(RewardPropagator::new(1.0, -0.01)),
-        ],
-        dt: 0.1,
-        seed,
-        ring_buffer_size: 8,
-        max_ingress_queue: 1024,
-        tick_rate_hz: None,
-        backoff: BackoffConfig::default(),
-    };
+        ])
+        .dt(0.1)
+        .seed(seed)
+        .build()
+        .unwrap();
 
     (config, ab)
 }
@@ -135,21 +132,18 @@ fn diffusion_convergence() {
     // With no agents and initial heat at center, diffusion should
     // converge towards uniform heat over many ticks.
     let ab = new_action_buffer();
-    let config = WorldConfig {
-        space: Box::new(Square4::new(10, 10, EdgeBehavior::Absorb).unwrap()),
-        fields: murk_propagators::reference_fields(),
-        propagators: vec![
+    let config = WorldConfig::builder()
+        .space(Box::new(Square4::new(10, 10, EdgeBehavior::Absorb).unwrap()))
+        .fields(murk_propagators::reference_fields())
+        .propagators(vec![
             Box::new(DiffusionPropagator::new(0.1)),
             Box::new(AgentMovementPropagator::new(ab, vec![])), // no agents
             Box::new(RewardPropagator::new(1.0, -0.01)),
-        ],
-        dt: 0.1,
-        seed: 42,
-        ring_buffer_size: 8,
-        max_ingress_queue: 1024,
-        tick_rate_hz: None,
-        backoff: BackoffConfig::default(),
-    };
+        ])
+        .dt(0.1)
+        .seed(42)
+        .build()
+        .unwrap();
     let mut world = LockstepWorld::new(config).unwrap();
 
     // Run 1000 ticks — starting from all zeros, should stay all zeros

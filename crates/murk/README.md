@@ -17,24 +17,21 @@ use murk::prelude::*;
 use murk::space::Square4;
 
 let space = Square4::new(16, 16, EdgeBehavior::Absorb).unwrap();
-let config = WorldConfig {
-    space: Box::new(space),
-    fields: vec![FieldDef {
+let config = WorldConfig::builder()
+    .space(Box::new(space))
+    .fields(vec![FieldDef {
         name: "heat".into(),
         field_type: FieldType::Scalar,
         mutability: FieldMutability::PerTick,
         units: None,
         bounds: None,
         boundary_behavior: BoundaryBehavior::Clamp,
-    }],
-    propagators: vec![],
-    dt: 0.1,
-    seed: 42,
-    ring_buffer_size: 8,
-    max_ingress_queue: 64,
-    tick_rate_hz: None,
-    backoff: Default::default(),
-};
+    }])
+    .propagators(vec![])
+    .dt(0.1)
+    .seed(42)
+    .build()
+    .unwrap();
 let mut world = LockstepWorld::new(config).unwrap();
 ```
 

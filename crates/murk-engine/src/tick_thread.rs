@@ -427,28 +427,28 @@ mod tests {
         use murk_core::{BoundaryBehavior, FieldDef, FieldMutability, FieldType};
         use murk_space::{EdgeBehavior, Line1D};
 
-        let config = crate::config::WorldConfig {
-            space: Box::new(Line1D::new(4, EdgeBehavior::Absorb).unwrap()),
-            fields: vec![FieldDef {
+        let config = crate::config::WorldConfig::builder()
+            .space(Box::new(Line1D::new(4, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![FieldDef {
                 name: "f".to_string(),
                 field_type: FieldType::Scalar,
                 mutability: FieldMutability::PerTick,
                 units: None,
                 bounds: None,
                 boundary_behavior: BoundaryBehavior::Clamp,
-            }],
-            propagators: vec![Box::new(murk_test_utils::ConstPropagator::new(
+            }])
+            .propagators(vec![Box::new(murk_test_utils::ConstPropagator::new(
                 "c",
                 FieldId(0),
                 1.0,
-            ))],
-            dt: 0.1,
-            seed: 1,
-            ring_buffer_size: 2,
-            max_ingress_queue: 8,
-            tick_rate_hz: Some(60.0),
-            backoff: BackoffConfig::default(),
-        };
+            ))])
+            .dt(0.1)
+            .seed(1)
+            .ring_buffer_size(2)
+            .max_ingress_queue(8)
+            .tick_rate_hz(Some(60.0))
+            .build()
+            .unwrap();
         let engine = TickEngine::new(config).unwrap();
         let ring = Arc::new(SnapshotRing::new(2));
         let epoch = Arc::new(EpochCounter::new());

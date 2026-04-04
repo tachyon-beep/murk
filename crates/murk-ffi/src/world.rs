@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use murk_core::id::FieldId;
 use murk_core::traits::SnapshotAccess;
-use murk_engine::config::{BackoffConfig, WorldConfig};
+use murk_engine::config::WorldConfig;
 use murk_engine::LockstepWorld;
 
 use crate::command::{convert_command, convert_receipt, MurkCommand, MurkReceipt};
@@ -86,28 +86,32 @@ pub extern "C" fn murk_lockstep_create(config_handle: u64, world_out: *mut u64) 
             return MurkStatus::InvalidArgument as i32;
         }
 
-        // Validate: space and fields must be set.
-        let space = match builder.space {
-            Some(s) => s,
-            None => return MurkStatus::ConfigError as i32,
-        };
-        if builder.fields.is_empty() {
-            return MurkStatus::ConfigError as i32;
+        // The murk-ffi ConfigBuilder (murk-ffi/src/config.rs) is intentionally
+        // unvalidated — C callers cannot receive Rust Result values during
+        // incremental builder calls. All validation happens here at world-
+        // creation time via WorldConfigBuilder::build().
+        //
+        // Note: the FFI ConfigBuilder defaults dt to 0.016 (60Hz). This is a
+        // convenience default for C/Python callers. The Rust-level
+        // WorldConfigBuilder requires dt to be set explicitly.
+        let mut wcb = WorldConfig::builder()
+            .dt(builder.dt)
+            .seed(builder.seed)
+            .ring_buffer_size(builder.ring_buffer_size)
+            .max_ingress_queue(builder.max_ingress_queue);
+        if let Some(s) = builder.space {
+            wcb = wcb.space(s);
         }
-        if builder.propagators.is_empty() {
-            return MurkStatus::ConfigError as i32;
+        if !builder.fields.is_empty() {
+            wcb = wcb.fields(builder.fields);
+        }
+        if !builder.propagators.is_empty() {
+            wcb = wcb.propagators(builder.propagators);
         }
 
-        let config = WorldConfig {
-            space,
-            fields: builder.fields,
-            propagators: builder.propagators,
-            dt: builder.dt,
-            seed: builder.seed,
-            ring_buffer_size: builder.ring_buffer_size,
-            max_ingress_queue: builder.max_ingress_queue,
-            tick_rate_hz: None,
-            backoff: BackoffConfig::default(),
+        let config = match wcb.build() {
+            Ok(c) => c,
+            Err(e) => return MurkStatus::from(&e) as i32,
         };
 
         let world = match LockstepWorld::new(config) {

@@ -651,39 +651,33 @@ mod tests {
     }
 
     fn simple_engine() -> TickEngine {
-        let config = WorldConfig {
-            space: Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()),
-            fields: vec![scalar_field("energy")],
-            propagators: vec![Box::new(ConstPropagator::new("const", FieldId(0), 42.0))],
-            dt: 0.1,
-            seed: 42,
-            ring_buffer_size: 8,
-            max_ingress_queue: 1024,
-            tick_rate_hz: None,
-            backoff: crate::config::BackoffConfig::default(),
-        };
+        let config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 42.0))])
+            .dt(0.1)
+            .seed(42)
+            .build()
+            .unwrap();
         TickEngine::new(config).unwrap()
     }
 
     fn two_field_engine() -> TickEngine {
-        let config = WorldConfig {
-            space: Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()),
-            fields: vec![scalar_field("field0"), scalar_field("field1")],
-            propagators: vec![
+        let config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("field0"), scalar_field("field1")])
+            .propagators(vec![
                 Box::new(ConstPropagator::new("write_f0", FieldId(0), 7.0)),
                 Box::new(IdentityPropagator::new(
                     "copy_f0_to_f1",
                     FieldId(0),
                     FieldId(1),
                 )),
-            ],
-            dt: 0.1,
-            seed: 42,
-            ring_buffer_size: 8,
-            max_ingress_queue: 1024,
-            tick_rate_hz: None,
-            backoff: crate::config::BackoffConfig::default(),
-        };
+            ])
+            .dt(0.1)
+            .seed(42)
+            .build()
+            .unwrap();
         TickEngine::new(config).unwrap()
     }
 
@@ -733,14 +727,14 @@ mod tests {
             }
         }
 
-        let config = WorldConfig {
-            space: Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()),
-            fields: vec![
+        let config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![
                 scalar_field("field0"),
                 scalar_field("field1"),
                 scalar_field("field2"),
-            ],
-            propagators: vec![
+            ])
+            .propagators(vec![
                 Box::new(ConstPropagator::new("write_f0", FieldId(0), 7.0)),
                 Box::new(IdentityPropagator::new(
                     "copy_f0_to_f1",
@@ -753,52 +747,43 @@ mod tests {
                     FieldId(1),
                     FieldId(2),
                 )),
-            ],
-            dt: 0.1,
-            seed: 42,
-            ring_buffer_size: 8,
-            max_ingress_queue: 1024,
-            tick_rate_hz: None,
-            backoff: crate::config::BackoffConfig::default(),
-        };
+            ])
+            .dt(0.1)
+            .seed(42)
+            .build()
+            .unwrap();
         TickEngine::new(config).unwrap()
     }
 
     fn failing_engine(succeed_count: usize) -> TickEngine {
-        let config = WorldConfig {
-            space: Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()),
-            fields: vec![scalar_field("energy")],
-            propagators: vec![Box::new(FailingPropagator::new(
+        let config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(FailingPropagator::new(
                 "fail",
                 FieldId(0),
                 succeed_count,
-            ))],
-            dt: 0.1,
-            seed: 42,
-            ring_buffer_size: 8,
-            max_ingress_queue: 1024,
-            tick_rate_hz: None,
-            backoff: crate::config::BackoffConfig::default(),
-        };
+            ))])
+            .dt(0.1)
+            .seed(42)
+            .build()
+            .unwrap();
         TickEngine::new(config).unwrap()
     }
 
     fn partial_failure_engine() -> TickEngine {
         // PropA succeeds always, PropB fails immediately.
-        let config = WorldConfig {
-            space: Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()),
-            fields: vec![scalar_field("field0"), scalar_field("field1")],
-            propagators: vec![
+        let config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("field0"), scalar_field("field1")])
+            .propagators(vec![
                 Box::new(ConstPropagator::new("ok_prop", FieldId(0), 1.0)),
                 Box::new(FailingPropagator::new("fail_prop", FieldId(1), 0)),
-            ],
-            dt: 0.1,
-            seed: 42,
-            ring_buffer_size: 8,
-            max_ingress_queue: 1024,
-            tick_rate_hz: None,
-            backoff: crate::config::BackoffConfig::default(),
-        };
+            ])
+            .dt(0.1)
+            .seed(42)
+            .build()
+            .unwrap();
         TickEngine::new(config).unwrap()
     }
 
@@ -845,20 +830,17 @@ mod tests {
             }
         }
 
-        let config = WorldConfig {
-            space: Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()),
-            fields: vec![scalar_field("field0"), scalar_field("field1")],
-            propagators: vec![
+        let config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("field0"), scalar_field("field1")])
+            .propagators(vec![
                 Box::new(ConstPropagator::new("write_f0", FieldId(0), 99.0)),
                 Box::new(ReadsPrevPropagator),
-            ],
-            dt: 0.1,
-            seed: 42,
-            ring_buffer_size: 8,
-            max_ingress_queue: 1024,
-            tick_rate_hz: None,
-            backoff: crate::config::BackoffConfig::default(),
-        };
+            ])
+            .dt(0.1)
+            .seed(42)
+            .build()
+            .unwrap();
         let mut engine = TickEngine::new(config).unwrap();
 
         // Tick 1: PropA writes 99.0 to field0. ReadsPrev reads field0
@@ -1232,17 +1214,15 @@ mod tests {
 
     #[test]
     fn queue_full_rejections_are_counted_in_metrics() {
-        let config = WorldConfig {
-            space: Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()),
-            fields: vec![scalar_field("energy")],
-            propagators: vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))],
-            dt: 0.1,
-            seed: 42,
-            ring_buffer_size: 8,
-            max_ingress_queue: 1,
-            tick_rate_hz: None,
-            backoff: crate::config::BackoffConfig::default(),
-        };
+        let config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .dt(0.1)
+            .seed(42)
+            .max_ingress_queue(1)
+            .build()
+            .unwrap();
         let mut engine = TickEngine::new(config).unwrap();
 
         let submit_receipts =
@@ -1334,20 +1314,17 @@ mod tests {
         }
 
         fn sparse_engine(fail_on_call: Option<usize>) -> TickEngine {
-            let config = WorldConfig {
-                space: Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()),
-                fields: vec![sparse_scalar_field("sparse0"), scalar_field("field1")],
-                propagators: vec![
+            let config = WorldConfig::builder()
+                .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+                .fields(vec![sparse_scalar_field("sparse0"), scalar_field("field1")])
+                .propagators(vec![
                     Box::new(ConstPropagator::new("write_sparse", FieldId(0), 3.0)),
                     Box::new(MaybeFailPropagator::new(FieldId(1), fail_on_call)),
-                ],
-                dt: 0.1,
-                seed: 42,
-                ring_buffer_size: 8,
-                max_ingress_queue: 1024,
-                tick_rate_hz: None,
-                backoff: crate::config::BackoffConfig::default(),
-            };
+                ])
+                .dt(0.1)
+                .seed(42)
+                .build()
+                .unwrap();
             let mut engine = TickEngine::new(config).unwrap();
             engine.arena.reset_sparse_reuse_counters();
             engine
@@ -1536,17 +1513,14 @@ mod tests {
             }
         }
 
-        let config = WorldConfig {
-            space: Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()),
-            fields: vec![scalar_field("state")],
-            propagators: vec![Box::new(IncrementalOnce::new())],
-            dt: 0.1,
-            seed: 42,
-            ring_buffer_size: 8,
-            max_ingress_queue: 1024,
-            tick_rate_hz: None,
-            backoff: crate::config::BackoffConfig::default(),
-        };
+        let config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("state")])
+            .propagators(vec![Box::new(IncrementalOnce::new())])
+            .dt(0.1)
+            .seed(42)
+            .build()
+            .unwrap();
         let mut engine = TickEngine::new(config).unwrap();
 
         // Tick 1: propagator writes 42.0 and 99.0.
@@ -1581,9 +1555,9 @@ mod tests {
     /// BUG-106: Unchecked u32 * u32 for static field length panics on overflow.
     #[test]
     fn static_field_overflow_returns_error() {
-        let config = WorldConfig {
-            space: Box::new(Line1D::new(3, EdgeBehavior::Absorb).unwrap()),
-            fields: vec![FieldDef {
+        let config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(3, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![FieldDef {
                 name: "huge_vec".to_string(),
                 field_type: FieldType::Vector {
                     dims: u32::MAX / 2, // 3 * (u32::MAX/2) overflows u32
@@ -1592,15 +1566,12 @@ mod tests {
                 units: None,
                 bounds: None,
                 boundary_behavior: BoundaryBehavior::Clamp,
-            }],
-            propagators: vec![Box::new(ConstPropagator::new("c", FieldId(0), 1.0))],
-            dt: 0.1,
-            seed: 42,
-            ring_buffer_size: 8,
-            max_ingress_queue: 1024,
-            tick_rate_hz: None,
-            backoff: crate::config::BackoffConfig::default(),
-        };
+            }])
+            .propagators(vec![Box::new(ConstPropagator::new("c", FieldId(0), 1.0))])
+            .dt(0.1)
+            .seed(42)
+            .build()
+            .unwrap();
         match TickEngine::new(config) {
             Err(crate::config::ConfigError::CellCountOverflow { .. }) => {}
             Ok(_) => panic!("expected CellCountOverflow, got Ok"),

@@ -376,8 +376,6 @@ mod tests {
     use murk_space::{EdgeBehavior, Line1D, RegionSpec, Square4};
     use murk_test_utils::ConstPropagator;
 
-    use crate::config::BackoffConfig;
-
     fn scalar_field(name: &str) -> murk_core::FieldDef {
         murk_core::FieldDef {
             name: name.to_string(),
@@ -390,31 +388,25 @@ mod tests {
     }
 
     fn make_config(seed: u64, value: f32) -> WorldConfig {
-        WorldConfig {
-            space: Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()),
-            fields: vec![scalar_field("energy")],
-            propagators: vec![Box::new(ConstPropagator::new("const", FieldId(0), value))],
-            dt: 0.1,
-            seed,
-            ring_buffer_size: 8,
-            max_ingress_queue: 1024,
-            tick_rate_hz: None,
-            backoff: BackoffConfig::default(),
-        }
+        WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), value))])
+            .dt(0.1)
+            .seed(seed)
+            .build()
+            .unwrap()
     }
 
     fn make_grid_config(seed: u64, value: f32) -> WorldConfig {
-        WorldConfig {
-            space: Box::new(Square4::new(4, 4, EdgeBehavior::Absorb).unwrap()),
-            fields: vec![scalar_field("energy")],
-            propagators: vec![Box::new(ConstPropagator::new("const", FieldId(0), value))],
-            dt: 0.1,
-            seed,
-            ring_buffer_size: 8,
-            max_ingress_queue: 1024,
-            tick_rate_hz: None,
-            backoff: BackoffConfig::default(),
-        }
+        WorldConfig::builder()
+            .space(Box::new(Square4::new(4, 4, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), value))])
+            .dt(0.1)
+            .seed(seed)
+            .build()
+            .unwrap()
     }
 
     fn obs_spec_all_field0() -> ObsSpec {
@@ -621,28 +613,22 @@ mod tests {
         use murk_space::Ring1D;
 
         // Line1D(10) and Ring1D(10): same ndim, same cell_count, different type.
-        let line_config = WorldConfig {
-            space: Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()),
-            fields: vec![scalar_field("energy")],
-            propagators: vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))],
-            dt: 0.1,
-            seed: 1,
-            ring_buffer_size: 8,
-            max_ingress_queue: 1024,
-            tick_rate_hz: None,
-            backoff: BackoffConfig::default(),
-        };
-        let ring_config = WorldConfig {
-            space: Box::new(Ring1D::new(10).unwrap()),
-            fields: vec![scalar_field("energy")],
-            propagators: vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))],
-            dt: 0.1,
-            seed: 2,
-            ring_buffer_size: 8,
-            max_ingress_queue: 1024,
-            tick_rate_hz: None,
-            backoff: BackoffConfig::default(),
-        };
+        let line_config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .dt(0.1)
+            .seed(1)
+            .build()
+            .unwrap();
+        let ring_config = WorldConfig::builder()
+            .space(Box::new(Ring1D::new(10).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .dt(0.1)
+            .seed(2)
+            .build()
+            .unwrap();
 
         let result = BatchedEngine::new(vec![line_config, ring_config], None);
         match result {
@@ -658,28 +644,22 @@ mod tests {
     fn mixed_edge_behaviors_rejected() {
         // Line1D(10, Absorb) and Line1D(10, Wrap): same TypeId, ndim, cell_count,
         // but different edge behavior — must be rejected.
-        let absorb_config = WorldConfig {
-            space: Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()),
-            fields: vec![scalar_field("energy")],
-            propagators: vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))],
-            dt: 0.1,
-            seed: 1,
-            ring_buffer_size: 8,
-            max_ingress_queue: 1024,
-            tick_rate_hz: None,
-            backoff: BackoffConfig::default(),
-        };
-        let wrap_config = WorldConfig {
-            space: Box::new(Line1D::new(10, EdgeBehavior::Wrap).unwrap()),
-            fields: vec![scalar_field("energy")],
-            propagators: vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))],
-            dt: 0.1,
-            seed: 2,
-            ring_buffer_size: 8,
-            max_ingress_queue: 1024,
-            tick_rate_hz: None,
-            backoff: BackoffConfig::default(),
-        };
+        let absorb_config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .dt(0.1)
+            .seed(1)
+            .build()
+            .unwrap();
+        let wrap_config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Wrap).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .dt(0.1)
+            .seed(2)
+            .build()
+            .unwrap();
 
         let result = BatchedEngine::new(vec![absorb_config, wrap_config], None);
         assert!(result.is_err(), "expected error for mixed edge behaviors");
@@ -846,30 +826,24 @@ mod tests {
         };
 
         // World 0: has 2 fields (FieldId(0) and FieldId(1))
-        let config_two_fields = WorldConfig {
-            space: Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()),
-            fields: vec![scalar_field("energy"), scalar_field("temp")],
-            propagators: vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))],
-            dt: 0.1,
-            seed: 1,
-            ring_buffer_size: 8,
-            max_ingress_queue: 1024,
-            tick_rate_hz: None,
-            backoff: BackoffConfig::default(),
-        };
+        let config_two_fields = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy"), scalar_field("temp")])
+            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .dt(0.1)
+            .seed(1)
+            .build()
+            .unwrap();
 
         // World 1: has only 1 field (FieldId(0)), missing FieldId(1)
-        let config_one_field = WorldConfig {
-            space: Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()),
-            fields: vec![scalar_field("energy")],
-            propagators: vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))],
-            dt: 0.1,
-            seed: 2,
-            ring_buffer_size: 8,
-            max_ingress_queue: 1024,
-            tick_rate_hz: None,
-            backoff: BackoffConfig::default(),
-        };
+        let config_one_field = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .dt(0.1)
+            .seed(2)
+            .build()
+            .unwrap();
 
         let result = BatchedEngine::new(vec![config_two_fields, config_one_field], Some(&spec));
         match result {
