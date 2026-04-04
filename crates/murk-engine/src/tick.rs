@@ -1726,6 +1726,123 @@ mod tests {
         assert_eq!(snap.read(FieldId(0)).unwrap()[1], 99.0);
     }
 
+    // ── Buffer validation tests ───────────────────────────────
+
+    fn vector_field(name: &str, dims: u32) -> FieldDef {
+        FieldDef {
+            name: name.to_string(),
+            field_type: FieldType::Vector { dims },
+            mutability: FieldMutability::PerTick,
+            units: None,
+            bounds: None,
+            boundary_behavior: BoundaryBehavior::Clamp,
+        }
+    }
+
+    #[test]
+    fn buffer_validation_passes_scalar_engine() {
+        let mut engine = simple_engine();
+        assert!(
+            engine.execute_tick().is_ok(),
+            "scalar engine should pass buffer validation"
+        );
+    }
+
+    #[test]
+    fn buffer_validation_passes_vector_field() {
+        struct VectorWriter;
+        impl Propagator for VectorWriter {
+            fn name(&self) -> &str {
+                "vec_writer"
+            }
+            fn reads(&self) -> murk_core::FieldSet {
+                murk_core::FieldSet::empty()
+            }
+            fn writes(&self) -> Vec<(FieldId, WriteMode)> {
+                vec![(FieldId(0), WriteMode::Full)]
+            }
+            fn step(
+                &self,
+                ctx: &mut murk_propagator::StepContext<'_>,
+            ) -> Result<(), murk_core::PropagatorError> {
+                let out = ctx.writes().write(FieldId(0)).unwrap();
+                out.fill(0.0);
+                Ok(())
+            }
+        }
+        let config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![vector_field("velocity", 2)])
+            .propagators(vec![Box::new(VectorWriter)])
+            .dt(0.1)
+            .seed(42)
+            .build()
+            .unwrap();
+        let mut engine = TickEngine::new(config).unwrap();
+        assert!(
+            engine.execute_tick().is_ok(),
+            "vector field should pass validation"
+        );
+    }
+
+    #[test]
+    fn buffer_validation_passes_multi_propagator() {
+        let mut engine = three_field_engine();
+        assert!(
+            engine.execute_tick().is_ok(),
+            "multi-propagator engine should pass buffer validation"
+        );
+    }
+
+    #[test]
+    fn buffer_validation_passes_reads_previous_on_tick_1() {
+        let mut engine = two_field_engine();
+        // Tick 0→1: reads_previous sees initial zeros.
+        assert!(
+            engine.execute_tick().is_ok(),
+            "tick 1 should pass validation"
+        );
+        // Tick 1→2: reads_previous sees published tick 1 data.
+        assert!(
+            engine.execute_tick().is_ok(),
+            "tick 2 should pass validation with reads_previous"
+        );
+    }
+
+    #[test]
+    fn rollback_still_works_with_validation() {
+        let mut engine = failing_engine(0);
+        let result = engine.execute_tick();
+        match result {
+            Err(TickError {
+                kind: StepError::PropagatorFailed { name, .. },
+                ..
+            }) => {
+                assert_eq!(name, "fail", "error should name the failing propagator");
+            }
+            other => panic!("expected PropagatorFailed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn field_expectations_computes_correct_lengths() {
+        let config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("scalar_f"), vector_field("vector_f", 3)])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "write_scalar",
+                FieldId(0),
+                1.0,
+            ))])
+            .dt(0.1)
+            .seed(42)
+            .build()
+            .unwrap();
+        let engine = TickEngine::new(config).unwrap();
+        // ConstPropagator writes FieldId(0) which is scalar: 10 cells * 1 component = 10.
+        assert_eq!(engine.expectations.write[0], vec![(FieldId(0), 10)]);
+    }
+
     /// BUG-106: Unchecked u32 * u32 for static field length panics on overflow.
     #[test]
     fn static_field_overflow_returns_error() {
