@@ -88,6 +88,19 @@ struct CumulativeCounters {
     ring_skew_retry_events: u64,
 }
 
+/// Per-propagator expected field buffer lengths, computed once at construction.
+///
+/// Built from `FieldDef::field_type.components()` and `cell_count`. Used by
+/// the pre-dispatch validation loop to check buffer sizes without calling
+/// `reads()`/`writes()` per-tick (those return heap-allocated collections).
+struct FieldExpectations {
+    /// `read[propagator_index]` = Vec of (FieldId, expected_len).
+    /// Covers both `reads()` and `reads_previous()` fields.
+    read: Vec<Vec<(FieldId, usize)>>,
+    /// `write[propagator_index]` = Vec of (FieldId, expected_len).
+    write: Vec<Vec<(FieldId, usize)>>,
+}
+
 /// Single-threaded tick engine for Lockstep mode.
 ///
 /// Owns all simulation state and executes ticks synchronously. Each
@@ -97,6 +110,7 @@ pub struct TickEngine {
     arena: PingPongArena,
     propagators: Vec<Box<dyn Propagator>>,
     plan: ReadResolutionPlan,
+    expectations: FieldExpectations,
     ingress: IngressQueue,
     space: Box<dyn murk_space::Space>,
     dt: f64,
@@ -153,6 +167,43 @@ impl TickEngine {
                 value: config.space.cell_count(),
             }
         })?;
+
+        // Build field_id -> expected total_len lookup from FieldDefs.
+        // Single source of truth: cell_count * components (same formula the arena uses).
+        let field_total_lens: std::collections::HashMap<FieldId, usize> = arena_field_defs
+            .iter()
+            .map(|(id, def)| {
+                let total = cell_count as usize * def.field_type.components() as usize;
+                (*id, total)
+            })
+            .collect();
+
+        // Build per-propagator expected buffer lengths.
+        // reads()/writes() are called once here, not per-tick.
+        let expectations = {
+            let mut read_exp = Vec::with_capacity(config.propagators.len());
+            let mut write_exp = Vec::with_capacity(config.propagators.len());
+            for prop in &config.propagators {
+                let reads: Vec<(FieldId, usize)> = prop
+                    .reads()
+                    .iter()
+                    .chain(prop.reads_previous().iter())
+                    .filter_map(|fid| field_total_lens.get(&fid).map(|&len| (fid, len)))
+                    .collect();
+                let writes: Vec<(FieldId, usize)> = prop
+                    .writes()
+                    .iter()
+                    .filter_map(|(fid, _mode)| field_total_lens.get(fid).map(|&len| (*fid, len)))
+                    .collect();
+                read_exp.push(reads);
+                write_exp.push(writes);
+            }
+            FieldExpectations {
+                read: read_exp,
+                write: write_exp,
+            }
+        };
+
         let arena_config = ArenaConfig::new(cell_count);
 
         // Build static arena for any Static fields.
@@ -190,6 +241,7 @@ impl TickEngine {
             arena,
             propagators: config.propagators,
             plan,
+            expectations,
             ingress,
             space: config.space,
             dt: config.dt,
