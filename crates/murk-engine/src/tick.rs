@@ -377,6 +377,7 @@ impl TickEngine {
                 applied_tick_id: None,
                 reason_code: None,
                 command_index: dc.command_index,
+                spawned_entity_id: None,
             });
         }
         // 3b. Apply commands to the staging writer.
@@ -744,6 +745,11 @@ impl TickEngine {
         self.counters = CumulativeCounters::default();
         self.last_metrics = StepMetrics::default();
         Ok(())
+    }
+
+    /// Current entity snapshot. `None` until entity support is configured.
+    pub fn entity_snapshot(&self) -> Option<murk_entity::EntitySnapshot<'_>> {
+        None
     }
 
     pub(crate) fn record_worker_stall_events(&mut self, count: u64) {

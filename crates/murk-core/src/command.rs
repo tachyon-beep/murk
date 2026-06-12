@@ -147,6 +147,7 @@ pub enum CommandPayload {
 ///     applied_tick_id: Some(TickId(5)),
 ///     reason_code: None,
 ///     command_index: 0,
+///     spawned_entity_id: None,
 /// };
 ///
 /// assert!(receipt.accepted);
@@ -162,6 +163,8 @@ pub struct Receipt {
     pub reason_code: Option<IngressError>,
     /// Index of this command within the submitted batch.
     pub command_index: usize,
+    /// Entity ID allocated by a spawn command.
+    pub spawned_entity_id: Option<EntityId>,
 }
 
 #[cfg(test)]
@@ -206,5 +209,19 @@ mod entity_command_tests {
             }
             _ => panic!("expected spawn"),
         }
+    }
+
+    #[test]
+    fn receipt_can_carry_spawned_entity_id() {
+        let id = EntityId::new(2, 1);
+        let receipt = Receipt {
+            accepted: true,
+            applied_tick_id: Some(TickId(4)),
+            reason_code: None,
+            command_index: 0,
+            spawned_entity_id: Some(id),
+        };
+
+        assert_eq!(receipt.spawned_entity_id, Some(id));
     }
 }

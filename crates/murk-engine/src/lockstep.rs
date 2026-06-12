@@ -46,6 +46,8 @@ const _: () = {
 pub struct StepResult<'w> {
     /// Read-only snapshot of world state after this tick.
     pub snapshot: Snapshot<'w>,
+    /// Entity snapshot after this tick. `None` when entities are disabled.
+    pub entity_snapshot: Option<murk_entity::EntitySnapshot<'w>>,
     /// Per-command receipts from both submission and tick execution.
     ///
     /// Includes submission-rejected receipts (e.g. `QueueFull`, `TickDisabled`)
@@ -124,6 +126,7 @@ impl LockstepWorld {
                 receipts.extend(tick_result.receipts);
                 Ok(StepResult {
                     snapshot: self.engine.snapshot(),
+                    entity_snapshot: self.engine.entity_snapshot(),
                     receipts,
                     metrics: tick_result.metrics,
                 })
@@ -156,6 +159,11 @@ impl LockstepWorld {
     /// Get a read-only snapshot of the current published generation.
     pub fn snapshot(&self) -> Snapshot<'_> {
         self.engine.snapshot()
+    }
+
+    /// Get a read-only entity snapshot when entity support is enabled.
+    pub fn entity_snapshot(&self) -> Option<murk_entity::EntitySnapshot<'_>> {
+        self.engine.entity_snapshot()
     }
 
     /// Current tick ID (0 after construction or reset).
@@ -367,6 +375,7 @@ mod tests {
         let mut world = LockstepWorld::new(simple_config()).unwrap();
         let result = world.step_sync(vec![]).unwrap();
         assert_eq!(result.snapshot.tick_id(), TickId(1));
+        assert!(result.entity_snapshot.is_none());
         assert_eq!(world.current_tick(), TickId(1));
     }
 
