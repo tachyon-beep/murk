@@ -127,6 +127,8 @@ pub struct TickEngine {
     base_field_set: BaseFieldSet,
     base_cache: BaseFieldCache,
     staged_cache: StagedFieldCache,
+    entity_store: Option<murk_entity::EntityStore>,
+    entity_staging: Option<murk_entity::PropertyStaging>,
     last_metrics: StepMetrics,
 }
 
@@ -282,6 +284,13 @@ impl TickEngine {
         let propagator_scratch = PropagatorScratch::with_byte_capacity(max_scratch);
 
         let ingress = IngressQueue::new(config.max_ingress_queue);
+        let entity_store = config
+            .entity_manifest
+            .clone()
+            .map(|manifest| murk_entity::EntityStore::new(config.max_entities, manifest));
+        let entity_staging = config.entity_manifest.as_ref().map(|manifest| {
+            murk_entity::PropertyStaging::new(config.max_entities, manifest.property_count() as u32)
+        });
 
         Ok(Self {
             arena,
@@ -301,6 +310,8 @@ impl TickEngine {
             base_field_set,
             base_cache: BaseFieldCache::new(),
             staged_cache: StagedFieldCache::new(),
+            entity_store,
+            entity_staging,
             last_metrics: StepMetrics::default(),
         })
     }
@@ -411,11 +422,33 @@ impl TickEngine {
                 CommandPayload::SetParameter { .. }
                 | CommandPayload::SetParameterBatch { .. }
                 | CommandPayload::Move { .. }
-                | CommandPayload::Spawn { .. }
                 | CommandPayload::Despawn { .. }
                 | CommandPayload::Custom { .. } => {
                     receipt.accepted = false;
                     receipt.reason_code = Some(IngressError::UnsupportedCommand);
+                }
+                CommandPayload::Spawn {
+                    coord,
+                    entity_type,
+                    property_overrides,
+                } => {
+                    let result = if self.space.canonical_rank(coord).is_some() {
+                        self.entity_store
+                            .as_mut()
+                            .ok_or(IngressError::UnsupportedCommand)
+                            .and_then(|store| {
+                                store.spawn(coord.clone(), *entity_type, property_overrides)
+                            })
+                    } else {
+                        Err(IngressError::NotApplied)
+                    };
+                    match result {
+                        Ok(entity_id) => receipt.spawned_entity_id = Some(entity_id),
+                        Err(err) => {
+                            receipt.accepted = false;
+                            receipt.reason_code = Some(err);
+                        }
+                    }
                 }
             }
         }
@@ -743,13 +776,22 @@ impl TickEngine {
         self.tick_disabled = false;
         self.consecutive_rollback_count = 0;
         self.counters = CumulativeCounters::default();
+        if let Some(store) = &self.entity_store {
+            self.entity_store =
+                Some(murk_entity::EntityStore::new(store.capacity(), store.manifest().clone()));
+        }
+        if let Some(staging) = &mut self.entity_staging {
+            staging.reset();
+        }
         self.last_metrics = StepMetrics::default();
         Ok(())
     }
 
     /// Current entity snapshot. `None` until entity support is configured.
     pub fn entity_snapshot(&self) -> Option<murk_entity::EntitySnapshot<'_>> {
-        None
+        self.entity_store
+            .as_ref()
+            .map(murk_entity::EntityStore::snapshot)
     }
 
     pub(crate) fn record_worker_stall_events(&mut self, count: u64) {

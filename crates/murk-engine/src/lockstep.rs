@@ -223,7 +223,9 @@ mod tests {
     use murk_core::command::CommandPayload;
     use murk_core::id::{Coord, FieldId};
     use murk_core::traits::{FieldReader, SnapshotAccess};
-    use murk_core::{BoundaryBehavior, FieldDef, FieldMutability, FieldType};
+    use murk_core::{
+        BoundaryBehavior, EntityManifest, FieldDef, FieldMutability, FieldType, PropertyIndex,
+    };
     use murk_propagator::propagator::WriteMode;
     use murk_propagator::Propagator;
     use murk_space::{EdgeBehavior, Line1D, Square4};
@@ -247,6 +249,26 @@ mod tests {
             .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 42.0))])
             .dt(0.1)
             .seed(42)
+            .build()
+            .unwrap()
+    }
+
+    fn entity_manifest() -> EntityManifest {
+        EntityManifest {
+            property_names: vec!["alive".into(), "hp".into()],
+            property_defaults: vec![1.0, 100.0],
+            alive_property: PropertyIndex(0),
+        }
+    }
+
+    fn entity_config(max_entities: u32) -> WorldConfig {
+        WorldConfig::builder()
+            .space(Box::new(Line1D::new(4, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .dt(0.1)
+            .max_entities(max_entities)
+            .entity_manifest(entity_manifest())
             .build()
             .unwrap()
     }
@@ -399,6 +421,30 @@ mod tests {
             .collect();
         assert_eq!(applied.len(), 2);
         assert!(applied.iter().all(|r| r.applied_tick_id == Some(TickId(1))));
+    }
+
+    #[test]
+    fn entity_spawn_receipt_and_snapshot_are_returned() {
+        let mut world = LockstepWorld::new(entity_config(4)).unwrap();
+        let result = world
+            .step_sync(vec![Command {
+                payload: CommandPayload::Spawn {
+                    coord: vec![1].into(),
+                    entity_type: 7,
+                    property_overrides: vec![(PropertyIndex(1), 50.0)],
+                },
+                expires_after_tick: TickId(10),
+                source_id: None,
+                source_seq: None,
+                priority_class: 0,
+                arrival_seq: 0,
+            }])
+            .unwrap();
+
+        let spawned = result.receipts[0].spawned_entity_id.unwrap();
+        let entities = result.entity_snapshot.unwrap();
+        assert_eq!(entities.get(spawned).unwrap().entity_type, 7);
+        assert_eq!(entities.property(spawned, PropertyIndex(1)), Some(50.0));
     }
 
     #[test]
