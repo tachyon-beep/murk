@@ -14,7 +14,7 @@ description = "Deterministic replay and action logging for Murk simulations"
 readme = "README.md"
 
 [dependencies]
-murk-core = { path = "../murk-core", version = "0.1.9" }
+murk-core = { path = "../murk-core", version = "0.2.0" }
 
 [dev-dependencies]
 murk-engine = { path = "../murk-engine" }

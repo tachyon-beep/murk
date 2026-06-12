@@ -1,7 +1,7 @@
 //! Command, command payload, and receipt types for the ingress pipeline.
 
 use crate::error::IngressError;
-use crate::id::{Coord, FieldId, ParameterKey, TickId};
+use crate::id::{Coord, EntityId, FieldId, ParameterKey, PropertyIndex, TickId};
 
 /// A command submitted to the simulation via the ingress pipeline.
 ///
@@ -81,21 +81,23 @@ pub enum CommandPayload {
     /// Rejected if `entity_id` is unknown or `target_coord` is out of bounds.
     Move {
         /// The entity to move.
-        entity_id: u64,
+        entity_id: EntityId,
         /// The destination coordinate.
         target_coord: Coord,
     },
-    /// Spawn a new entity at a coordinate with initial field values.
+    /// Spawn a new entity at a coordinate with initial property values.
     Spawn {
         /// The spawn location.
         coord: Coord,
-        /// Initial field values for the new entity.
-        field_values: Vec<(FieldId, f32)>,
+        /// User-defined entity type tag.
+        entity_type: u32,
+        /// Initial property overrides for the new entity.
+        property_overrides: Vec<(PropertyIndex, f32)>,
     },
-    /// Remove an entity. Associated field values are cleared at the next tick.
+    /// Remove an entity. Associated properties are cleared at the next tick.
     Despawn {
         /// The entity to remove.
-        entity_id: u64,
+        entity_id: EntityId,
     },
     /// Set a single field value at a coordinate. Primarily for `Sparse` fields.
     SetField {
@@ -145,6 +147,7 @@ pub enum CommandPayload {
 ///     applied_tick_id: Some(TickId(5)),
 ///     reason_code: None,
 ///     command_index: 0,
+///     spawned_entity_id: None,
 /// };
 ///
 /// assert!(receipt.accepted);
@@ -160,4 +163,65 @@ pub struct Receipt {
     pub reason_code: Option<IngressError>,
     /// Index of this command within the submitted batch.
     pub command_index: usize,
+    /// Entity ID allocated by a spawn command.
+    pub spawned_entity_id: Option<EntityId>,
+}
+
+#[cfg(test)]
+mod entity_command_tests {
+    use super::*;
+
+    #[test]
+    fn move_and_despawn_use_entity_id() {
+        let id = EntityId::new(12, 3);
+        let move_payload = CommandPayload::Move {
+            entity_id: id,
+            target_coord: vec![1, 2].into(),
+        };
+        let despawn_payload = CommandPayload::Despawn { entity_id: id };
+
+        assert!(matches!(
+            move_payload,
+            CommandPayload::Move {
+                entity_id,
+                ..
+            } if entity_id == id
+        ));
+        assert_eq!(despawn_payload, CommandPayload::Despawn { entity_id: id });
+    }
+
+    #[test]
+    fn spawn_carries_entity_type_and_property_overrides() {
+        let payload = CommandPayload::Spawn {
+            coord: vec![3, 4].into(),
+            entity_type: 7,
+            property_overrides: vec![(PropertyIndex(1), 42.0)],
+        };
+
+        match payload {
+            CommandPayload::Spawn {
+                entity_type,
+                property_overrides,
+                ..
+            } => {
+                assert_eq!(entity_type, 7);
+                assert_eq!(property_overrides, vec![(PropertyIndex(1), 42.0)]);
+            }
+            _ => panic!("expected spawn"),
+        }
+    }
+
+    #[test]
+    fn receipt_can_carry_spawned_entity_id() {
+        let id = EntityId::new(2, 1);
+        let receipt = Receipt {
+            accepted: true,
+            applied_tick_id: Some(TickId(4)),
+            reason_code: None,
+            command_index: 0,
+            spawned_entity_id: Some(id),
+        };
+
+        assert_eq!(receipt.spawned_entity_id, Some(id));
+    }
 }

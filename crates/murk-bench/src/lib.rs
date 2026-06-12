@@ -29,7 +29,9 @@ pub fn reference_profile(seed: u64, action_buffer: ActionBuffer) -> WorldConfig 
     let initial_positions = init_agent_positions(cell_count, 4, seed);
 
     WorldConfig::builder()
-        .space(Box::new(Square4::new(100, 100, EdgeBehavior::Absorb).unwrap()))
+        .space(Box::new(
+            Square4::new(100, 100, EdgeBehavior::Absorb).unwrap(),
+        ))
         .fields(murk_propagators::reference_fields())
         .propagators(vec![
             Box::new(
@@ -76,7 +78,9 @@ pub fn stress_profile(seed: u64, action_buffer: ActionBuffer) -> WorldConfig {
     let initial_positions = init_agent_positions(cell_count, 4, seed);
 
     WorldConfig::builder()
-        .space(Box::new(Square4::new(316, 316, EdgeBehavior::Absorb).unwrap()))
+        .space(Box::new(
+            Square4::new(316, 316, EdgeBehavior::Absorb).unwrap(),
+        ))
         .fields(murk_propagators::reference_fields())
         .propagators(vec![
             Box::new(

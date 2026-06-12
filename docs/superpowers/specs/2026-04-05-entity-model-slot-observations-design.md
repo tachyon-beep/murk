@@ -84,7 +84,8 @@ Small, targeted additions to the types crate. No behavioral logic.
 /// a stale EntityId will fail generation validation on lookup.
 ///
 /// - 20-bit slot → max 1,048,575 concurrent entities
-/// - 12-bit generation → 4,096 generations per slot before wrap
+/// - 12-bit generation → 4,096 generations per slot; slots retire permanently
+///   instead of wrapping to prevent ABA stale-ID resurrection
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct EntityId(u32);  // NOT pub inner — access via methods only
 
@@ -236,7 +237,7 @@ Properties stored as flat SoA slab (not `Box<[f32]>` per record). Same layout as
 
 **Operations:**
 - **Spawn:** Pop from free list (or bump next_slot if empty). Write record with manifest defaults, apply property_overrides. Set `properties[alive_property] = 1.0`. Insert into coord_index. O(1). Returns `EntityId` (with current generation for that slot) or `EntityCapacityFull`.
-- **Despawn:** Validate `EntityId.generation()` matches `generations[slot]` and entity is alive (else `UnknownEntity`). Set `properties[alive_property] = 0.0`, increment generation, push slot to free list, remove from coord_index. O(1).
+- **Despawn:** Validate `EntityId.generation()` matches `generations[slot]` and entity is alive (else `UnknownEntity`). Set `properties[alive_property] = 0.0`, advance the slot generation, retire the slot permanently if advancing would wrap the 12-bit generation back to 0, otherwise push the slot to the free list, then remove from coord_index. O(1).
 - **Move:** Validate generation match and alive (else `UnknownEntity`). Validate `target_coord` against space topology (else `NotApplied`). Dead entities (alive=0) return `UnknownEntity` — dead entities should not be moved. Update coord, update coord_index. O(1).
 - **Lookup by ID:** Check `generations[id.slot()] == id.generation()`. If mismatch, return `None` (stale ID). O(1).
 - **Lookup by coord:** `coord_index[coord_key]` — O(1). Returns `SmallVec`. **Includes dead entities** — callers must filter by alive property.
@@ -375,7 +376,7 @@ Replaces the `UnsupportedCommand` arm at `tick.rs:310-320`:
 
 **Spawn:** Allocate from entity store (free list or bump). Write `entity_type`, apply `property_overrides` over manifest defaults. Set `properties[alive_property] = 1.0`. Insert into coord_index. Return `EntityCapacityFull` if at max_entities. The allocated `EntityId` (with generation) is included in the receipt.
 
-**Despawn:** Validate `EntityId.generation()` matches current generation and entity is alive (else `UnknownEntity`). Set `properties[alive_property] = 0.0`, increment generation, push slot to free list, remove from coord_index.
+**Despawn:** Validate `EntityId.generation()` matches current generation and entity is alive (else `UnknownEntity`). Set `properties[alive_property] = 0.0`, advance the slot generation, retire the slot permanently if advancing would wrap the 12-bit generation back to 0, otherwise push the slot to the free list, then remove from coord_index.
 
 **Move:** Validate generation match and alive (else `UnknownEntity`). Dead entities return `UnknownEntity`. Validate `target_coord` against space topology (else `NotApplied`). Update coord, update coord_index.
 
@@ -1063,6 +1064,7 @@ Each milestone is independently testable and produces a concrete artifact that t
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | Entity ID format | `EntityId(u32)` with 20-bit slot + 12-bit generation | Closes stale-ID use-after-free in observation and propagator APIs. `get()` validates generation. 1M slots, 4096 gens/slot. Packing is a bit shift — negligible cost. |
+| Generation wrap policy | Retire an entity slot permanently before 12-bit generation rollover | Matches the existing `murk-ffi` `HandleTable` policy. Silent rollover would make a stale generation-0 `EntityId` valid again after 4096 recycle cycles on a hot slot; permanent retirement spends one slot to preserve the stale-ID safety invariant. |
 | Aliveness representation | Single source: `properties[manifest.alive_property]` | No separate `alive: bool` on EntityRecord. Eliminates sync divergence between two representations. `iter_alive()` reads the property directly. |
 | Entity storage | Separate EntityStore with flat SoA property slab | Arena untouched. Properties as `Box<[f32]>` slab (not per-record `Box<[f32]>`). Cache-friendly: 4.3 KB for Echelon fits in L1. Same layout as PropertyStaging. |
 | PropertyStaging bitset | `Vec<u64>` (6 words for Echelon) | No BitVec crate dependency. 360 bits = 48 bytes. Stack-friendly. |
