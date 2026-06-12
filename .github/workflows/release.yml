@@ -69,6 +69,7 @@ jobs:
           }
 
           publish murk-core
+          publish murk-entity
           publish murk-arena
           publish murk-space
           publish murk-propagator

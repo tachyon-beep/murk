@@ -93,7 +93,9 @@ fn death_spiral_config(seed: u64) -> (WorldConfig, murk_propagators::ActionBuffe
     let initial_positions = init_agent_positions_safe(cell_count, NUM_AGENTS, seed);
 
     let config = WorldConfig::builder()
-        .space(Box::new(Square4::new(100, 100, EdgeBehavior::Absorb).unwrap()))
+        .space(Box::new(
+            Square4::new(100, 100, EdgeBehavior::Absorb).unwrap(),
+        ))
         .fields(murk_propagators::reference_fields())
         .propagators(vec![
             Box::new(DiffusionPropagator::new(0.1)),

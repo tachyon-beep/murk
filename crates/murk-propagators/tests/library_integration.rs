@@ -54,7 +54,9 @@ fn thousand_tick_stability_scalar_diffusion() {
     // re-injects 100.0 each tick at cell 55. The system should reach a
     // bounded steady state.
     let config = WorldConfig::builder()
-        .space(Box::new(Square4::new(10, 10, EdgeBehavior::Absorb).unwrap()))
+        .space(Box::new(
+            Square4::new(10, 10, EdgeBehavior::Absorb).unwrap(),
+        ))
         .fields(vec![scalar_field("heat")])
         .propagators(vec![Box::new(
             ScalarDiffusion::builder()
@@ -118,24 +120,28 @@ fn thousand_tick_stability_scalar_diffusion() {
 /// Assert bit-identical output field arrays.
 #[test]
 fn determinism_same_seed_same_output() {
-    let make_config = |seed: u64| WorldConfig::builder()
-        .space(Box::new(Square4::new(10, 10, EdgeBehavior::Absorb).unwrap()))
-        .fields(vec![scalar_field("heat")])
-        .propagators(vec![Box::new(
-            ScalarDiffusion::builder()
-                .input_field(HEAT)
-                .output_field(HEAT)
-                .coefficient(0.1)
-                .decay(0.01)
-                .clamp_min(0.0)
-                .sources(vec![(55, 100.0)])
-                .build()
-                .unwrap(),
-        )])
-        .dt(0.1)
-        .seed(seed)
-        .build()
-        .unwrap();
+    let make_config = |seed: u64| {
+        WorldConfig::builder()
+            .space(Box::new(
+                Square4::new(10, 10, EdgeBehavior::Absorb).unwrap(),
+            ))
+            .fields(vec![scalar_field("heat")])
+            .propagators(vec![Box::new(
+                ScalarDiffusion::builder()
+                    .input_field(HEAT)
+                    .output_field(HEAT)
+                    .coefficient(0.1)
+                    .decay(0.01)
+                    .clamp_min(0.0)
+                    .sources(vec![(55, 100.0)])
+                    .build()
+                    .unwrap(),
+            )])
+            .dt(0.1)
+            .seed(seed)
+            .build()
+            .unwrap()
+    };
 
     let run = |seed: u64| -> Vec<f32> {
         let mut world = LockstepWorld::new(make_config(seed)).unwrap();
@@ -167,7 +173,9 @@ fn gradient_compute_with_diffusion() {
     // and writes gradient. Note: GradientCompute uses reads_previous, so the
     // gradient at tick N is computed from the heat field at tick N-1.
     let config = WorldConfig::builder()
-        .space(Box::new(Square4::new(10, 10, EdgeBehavior::Absorb).unwrap()))
+        .space(Box::new(
+            Square4::new(10, 10, EdgeBehavior::Absorb).unwrap(),
+        ))
         .fields(vec![scalar_field("heat"), vector2_field("gradient")])
         .propagators(vec![
             Box::new(
@@ -267,7 +275,9 @@ fn identity_copy_preserves_values() {
     // the engine — any corruption in arena allocation, overlay resolution, or
     // snapshot publishing would show up as non-zero values.
     let config = WorldConfig::builder()
-        .space(Box::new(Square4::new(10, 10, EdgeBehavior::Absorb).unwrap()))
+        .space(Box::new(
+            Square4::new(10, 10, EdgeBehavior::Absorb).unwrap(),
+        ))
         .fields(vec![scalar_field("data")])
         .propagators(vec![Box::new(IdentityCopy::new(FieldId(0)))])
         .dt(0.1)
@@ -324,7 +334,9 @@ fn identity_copy_preserves_values() {
 #[test]
 fn combined_pipeline_three_propagators() {
     let config = WorldConfig::builder()
-        .space(Box::new(Square4::new(10, 10, EdgeBehavior::Absorb).unwrap()))
+        .space(Box::new(
+            Square4::new(10, 10, EdgeBehavior::Absorb).unwrap(),
+        ))
         .fields(vec![
             scalar_field("heat"),      // FieldId(0) = HEAT
             vector2_field("gradient"), // FieldId(1) = GRADIENT

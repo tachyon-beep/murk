@@ -37,3 +37,11 @@ docs/bugs/generated/
 .mcp.json
 .filigree/
 .codex/
+.worktrees/
+findings.jsonl
+
+# Filigree issue tracker
+.weft/
+
+# Legis — local working dir / config (regenerated/local; never commit)
+.weft/legis/
