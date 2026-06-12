@@ -239,6 +239,7 @@ pub type Coord = SmallVec<[i32; 4]>;
 #[cfg(test)]
 mod entity_id_tests {
     use super::*;
+    use proptest::prelude::*;
 
     #[test]
     fn new_packs_slot_and_generation() {
@@ -289,5 +290,19 @@ mod entity_id_tests {
     #[test]
     fn property_index_displays_inner_value() {
         assert_eq!(PropertyIndex::from(17).to_string(), "17");
+    }
+
+    proptest! {
+        #[test]
+        fn entity_id_round_trip_preserves_slot_generation(
+            slot in 0_u32..=1_048_575,
+            generation in 0_u32..=4_095,
+        ) {
+            let id = EntityId::new(slot, generation);
+
+            prop_assert_eq!(id.slot(), slot);
+            prop_assert_eq!(id.generation(), generation);
+            prop_assert_eq!(EntityId::from_u32(id.as_u32()), id);
+        }
     }
 }

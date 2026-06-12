@@ -321,6 +321,7 @@ impl EntityStore {
 #[cfg(test)]
 mod tests {
     use murk_core::{EntityId, EntityManifest, IngressError, PropertyIndex};
+    use proptest::prelude::*;
 
     use super::*;
 
@@ -437,5 +438,42 @@ mod tests {
         assert_eq!(store.alive_count(), 1);
         assert!(store.get(id).is_some());
         assert_eq!(store.at_coord(&vec![0].into()), &[id]);
+    }
+
+    proptest! {
+        #[test]
+        fn proptest_spawn_despawn_sequence_tracks_alive_count(
+            ops in proptest::collection::vec(any::<bool>(), 0..128),
+        ) {
+            let capacity = 16_usize;
+            let mut store = EntityStore::new(capacity as u32, test_manifest());
+            let mut live = Vec::new();
+
+            for op in ops {
+                if op && live.len() < capacity {
+                    let slot_hint = live.len() as i32;
+                    let id = store
+                        .spawn(vec![slot_hint].into(), 0, &[(PropertyIndex(1), 25.0)])
+                        .unwrap();
+                    live.push(id);
+                } else if !op {
+                    if let Some(id) = live.pop() {
+                        store.despawn(id).unwrap();
+                        prop_assert_eq!(store.get(id), None);
+                    }
+                } else {
+                    prop_assert_eq!(
+                        store.spawn(vec![capacity as i32].into(), 0, &[]),
+                        Err(IngressError::EntityCapacityFull),
+                    );
+                }
+
+                prop_assert_eq!(store.alive_count(), live.len());
+                for id in &live {
+                    prop_assert!(store.get(*id).is_some());
+                    prop_assert_eq!(store.property(*id, PropertyIndex(1)), Some(25.0));
+                }
+            }
+        }
     }
 }

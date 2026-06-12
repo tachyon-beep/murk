@@ -101,6 +101,7 @@ impl PropertyStaging {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     #[test]
     fn set_and_get_round_trip() {
@@ -161,5 +162,59 @@ mod tests {
             staging.get(EntityId::new(8, 0), PropertyIndex(6)),
             Some(3.14)
         );
+    }
+
+    proptest! {
+        #[test]
+        fn proptest_bitset_get_reset_and_apply_are_exact(
+            max_entities in 1_u32..=16,
+            property_count in 1_u32..=10,
+            writes in proptest::collection::vec(
+                (0_u32..16, 0_u32..10, -1000.0_f32..1000.0),
+                0..128,
+            ),
+        ) {
+            let mut staging = PropertyStaging::new(max_entities, property_count);
+            let total = max_entities as usize * property_count as usize;
+            let mut expected = vec![None; total];
+
+            for (slot, property, value) in writes {
+                let id = EntityId::new(slot, 0);
+                let property = PropertyIndex(property);
+                let in_bounds = slot < max_entities && property.0 < property_count;
+                prop_assert_eq!(staging.set(id, property, value), in_bounds);
+
+                if in_bounds {
+                    let flat = slot as usize * property_count as usize + property.0 as usize;
+                    expected[flat] = Some(value);
+                }
+            }
+
+            for slot in 0..max_entities {
+                for property in 0..property_count {
+                    let flat = slot as usize * property_count as usize + property as usize;
+                    prop_assert_eq!(
+                        staging.get(EntityId::new(slot, 0), PropertyIndex(property)),
+                        expected[flat],
+                    );
+                }
+            }
+
+            let mut properties = vec![-1.0; total];
+            staging.apply_to(&mut properties);
+            for (flat, expected_value) in expected.iter().copied().enumerate() {
+                prop_assert_eq!(properties[flat], expected_value.unwrap_or(-1.0));
+            }
+
+            staging.reset();
+            for slot in 0..max_entities {
+                for property in 0..property_count {
+                    prop_assert_eq!(
+                        staging.get(EntityId::new(slot, 0), PropertyIndex(property)),
+                        None,
+                    );
+                }
+            }
+        }
     }
 }
