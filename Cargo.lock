@@ -502,7 +502,7 @@ checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 
 [[package]]
 name = "murk"
-version = "0.1.9"
+version = "0.2.0"
 dependencies = [
  "murk-arena",
  "murk-core",
@@ -516,7 +516,7 @@ dependencies = [
 
 [[package]]
 name = "murk-arena"
-version = "0.1.9"
+version = "0.2.0"
 dependencies = [
  "indexmap",
  "murk-core",
@@ -525,7 +525,7 @@ dependencies = [
 
 [[package]]
 name = "murk-bench"
-version = "0.1.9"
+version = "0.2.0"
 dependencies = [
  "criterion",
  "murk-arena",
@@ -541,7 +541,7 @@ dependencies = [
 
 [[package]]
 name = "murk-core"
-version = "0.1.9"
+version = "0.2.0"
 dependencies = [
  "proptest",
  "smallvec",
@@ -549,13 +549,14 @@ dependencies = [
 
 [[package]]
 name = "murk-engine"
-version = "0.1.9"
+version = "0.2.0"
 dependencies = [
  "crossbeam-channel",
  "indexmap",
  "murk-arena",
  "murk-bench",
  "murk-core",
+ "murk-entity",
  "murk-obs",
  "murk-propagator",
  "murk-propagators",
@@ -567,8 +568,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "murk-entity"
+version = "0.2.0"
+dependencies = [
+ "murk-core",
+ "proptest",
+ "smallvec",
+]
+
+[[package]]
 name = "murk-ffi"
-version = "0.1.9"
+version = "0.2.0"
 dependencies = [
  "cbindgen",
  "murk-core",
@@ -583,7 +593,7 @@ dependencies = [
 
 [[package]]
 name = "murk-obs"
-version = "0.1.9"
+version = "0.2.0"
 dependencies = [
  "indexmap",
  "murk-core",
@@ -595,10 +605,11 @@ dependencies = [
 
 [[package]]
 name = "murk-propagator"
-version = "0.1.9"
+version = "0.2.0"
 dependencies = [
  "indexmap",
  "murk-core",
+ "murk-entity",
  "murk-space",
  "murk-test-utils",
  "proptest",
@@ -606,21 +617,21 @@ dependencies = [
 
 [[package]]
 name = "murk-propagators"
-version = "0.1.9"
+version = "0.2.0"
 dependencies = [
  "murk-core",
  "murk-engine",
  "murk-propagator",
  "murk-space",
  "murk-test-utils",
- "rand 0.8.5",
+ "rand 0.8.6",
  "rand_chacha 0.3.1",
  "smallvec",
 ]
 
 [[package]]
 name = "murk-python"
-version = "0.1.9"
+version = "0.2.0"
 dependencies = [
  "murk-core",
  "murk-ffi",
@@ -632,7 +643,7 @@ dependencies = [
 
 [[package]]
 name = "murk-replay"
-version = "0.1.9"
+version = "0.2.0"
 dependencies = [
  "murk-bench",
  "murk-core",
@@ -646,7 +657,7 @@ dependencies = [
 
 [[package]]
 name = "murk-space"
-version = "0.1.9"
+version = "0.2.0"
 dependencies = [
  "indexmap",
  "murk-core",
@@ -656,7 +667,7 @@ dependencies = [
 
 [[package]]
 name = "murk-test-utils"
-version = "0.1.9"
+version = "0.2.0"
 dependencies = [
  "murk-core",
  "murk-propagator",
@@ -920,9 +931,9 @@ checksum = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f"
 
 [[package]]
 name = "rand"
-version = "0.8.5"
+version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34af8d1a0e25924bc5b7c43c079c942339d8f0a8b57c39049bef581b46327404"
+checksum = "5ca0ecfa931c29007047d1bc58e623ab12e5590e8c7cc53200d5202b69266d8a"
 dependencies = [
  "libc",
  "rand_chacha 0.3.1",

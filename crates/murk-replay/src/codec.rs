@@ -7,7 +7,7 @@
 use std::io::{Read, Write};
 
 use murk_core::command::{Command, CommandPayload};
-use murk_core::id::{Coord, FieldId, ParameterKey, TickId};
+use murk_core::id::{Coord, EntityId, FieldId, ParameterKey, PropertyIndex, TickId};
 
 use crate::error::ReplayError;
 use crate::types::*;
@@ -401,32 +401,34 @@ pub fn serialize_command(cmd: &Command) -> Result<SerializedCommand, ReplayError
             target_coord,
         } => {
             let mut buf = Vec::new();
-            buf.extend_from_slice(&entity_id.to_le_bytes());
+            buf.extend_from_slice(&entity_id.as_u32().to_le_bytes());
             serialize_coord(&mut buf, target_coord)?;
             (PAYLOAD_MOVE, buf)
         }
         CommandPayload::Spawn {
             coord,
-            field_values,
+            entity_type,
+            property_overrides,
         } => {
             let mut buf = Vec::new();
             serialize_coord(&mut buf, coord)?;
-            let fv_len =
-                u32::try_from(field_values.len()).map_err(|_| ReplayError::DataTooLarge {
+            buf.extend_from_slice(&entity_type.to_le_bytes());
+            let override_len =
+                u32::try_from(property_overrides.len()).map_err(|_| ReplayError::DataTooLarge {
                     detail: format!(
-                        "Spawn field_values count {} exceeds u32::MAX",
-                        field_values.len()
+                        "Spawn property_overrides count {} exceeds u32::MAX",
+                        property_overrides.len()
                     ),
                 })?;
-            buf.extend_from_slice(&fv_len.to_le_bytes());
-            for (fid, val) in field_values {
-                buf.extend_from_slice(&fid.0.to_le_bytes());
+            buf.extend_from_slice(&override_len.to_le_bytes());
+            for (prop, val) in property_overrides {
+                buf.extend_from_slice(&prop.0.to_le_bytes());
                 buf.extend_from_slice(&val.to_le_bytes());
             }
             (PAYLOAD_SPAWN, buf)
         }
         CommandPayload::Despawn { entity_id } => {
-            let buf = entity_id.to_le_bytes().to_vec();
+            let buf = entity_id.as_u32().to_le_bytes().to_vec();
             (PAYLOAD_DESPAWN, buf)
         }
         CommandPayload::SetField {
@@ -487,13 +489,13 @@ pub fn deserialize_command(sc: &SerializedCommand) -> Result<Command, ReplayErro
     let data = &sc.payload;
     let payload = match sc.payload_type {
         PAYLOAD_MOVE => {
-            if data.len() < 8 {
+            if data.len() < 4 {
                 return Err(ReplayError::MalformedFrame {
                     detail: "truncated Move payload".into(),
                 });
             }
-            let entity_id = u64::from_le_bytes(data[0..8].try_into().unwrap());
-            let mut offset = 8;
+            let entity_id = EntityId::from_u32(u32::from_le_bytes(data[0..4].try_into().unwrap()));
+            let mut offset = 4;
             let target_coord = deserialize_coord(data, &mut offset)?;
             CommandPayload::Move {
                 entity_id,
@@ -505,36 +507,44 @@ pub fn deserialize_command(sc: &SerializedCommand) -> Result<Command, ReplayErro
             let coord = deserialize_coord(data, &mut offset)?;
             if offset + 4 > data.len() {
                 return Err(ReplayError::MalformedFrame {
-                    detail: "truncated Spawn field_values count".into(),
+                    detail: "truncated Spawn entity_type".into(),
+                });
+            }
+            let entity_type = u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap());
+            offset += 4;
+            if offset + 4 > data.len() {
+                return Err(ReplayError::MalformedFrame {
+                    detail: "truncated Spawn property_overrides count".into(),
                 });
             }
             let count = u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap()) as usize;
             offset += 4;
-            let mut field_values = Vec::with_capacity(count);
+            let mut property_overrides = Vec::with_capacity(count);
             for _ in 0..count {
                 if offset + 8 > data.len() {
                     return Err(ReplayError::MalformedFrame {
-                        detail: "truncated Spawn field_values entry".into(),
+                        detail: "truncated Spawn property_overrides entry".into(),
                     });
                 }
-                let fid = u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap());
+                let prop = u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap());
                 offset += 4;
                 let val = f32::from_le_bytes(data[offset..offset + 4].try_into().unwrap());
                 offset += 4;
-                field_values.push((FieldId(fid), val));
+                property_overrides.push((PropertyIndex(prop), val));
             }
             CommandPayload::Spawn {
                 coord,
-                field_values,
+                entity_type,
+                property_overrides,
             }
         }
         PAYLOAD_DESPAWN => {
-            if data.len() < 8 {
+            if data.len() < 4 {
                 return Err(ReplayError::MalformedFrame {
                     detail: "truncated Despawn payload".into(),
                 });
             }
-            let entity_id = u64::from_le_bytes(data[0..8].try_into().unwrap());
+            let entity_id = EntityId::from_u32(u32::from_le_bytes(data[0..4].try_into().unwrap()));
             CommandPayload::Despawn { entity_id }
         }
         PAYLOAD_SET_FIELD => {
@@ -639,11 +649,15 @@ mod tests {
         prop_oneof![Just(None), Just(Some(0u64)), any::<u64>().prop_map(Some),]
     }
 
+    fn arb_entity_id() -> impl Strategy<Value = EntityId> {
+        any::<u32>().prop_map(EntityId::from_u32)
+    }
+
     fn arb_command() -> impl Strategy<Value = Command> {
         prop_oneof![
             // Move
             (
-                any::<u64>(),
+                arb_entity_id(),
                 arb_coord(),
                 arb_opt_u64(),
                 arb_opt_u64(),
@@ -665,25 +679,32 @@ mod tests {
             (
                 arb_coord(),
                 prop::collection::vec((0u32..10, any::<f32>()), 0..4),
+                any::<u32>(),
                 arb_opt_u64(),
                 arb_opt_u64(),
                 any::<u64>(),
                 any::<u64>(),
             )
-                .prop_map(|(coord, fvs, sid, sseq, eat, aseq)| Command {
-                    payload: CommandPayload::Spawn {
-                        coord,
-                        field_values: fvs.into_iter().map(|(f, v)| (FieldId(f), v)).collect(),
-                    },
-                    expires_after_tick: TickId(eat),
-                    source_id: sid,
-                    source_seq: sseq,
-                    priority_class: 0,
-                    arrival_seq: aseq,
+                .prop_map(|(coord, overrides, entity_type, sid, sseq, eat, aseq)| {
+                    Command {
+                        payload: CommandPayload::Spawn {
+                            coord,
+                            entity_type,
+                            property_overrides: overrides
+                                .into_iter()
+                                .map(|(prop, value)| (PropertyIndex(prop), value))
+                                .collect(),
+                        },
+                        expires_after_tick: TickId(eat),
+                        source_id: sid,
+                        source_seq: sseq,
+                        priority_class: 0,
+                        arrival_seq: aseq,
+                    }
                 }),
             // Despawn
             (
-                any::<u64>(),
+                arb_entity_id(),
                 arb_opt_u64(),
                 arb_opt_u64(),
                 any::<u64>(),
@@ -950,7 +971,7 @@ mod tests {
                 .unwrap(),
                 serialize_command(&Command {
                     payload: CommandPayload::Move {
-                        entity_id: 7,
+                        entity_id: EntityId::new(7, 0),
                         target_coord: Coord::from_slice(&[1, 2]),
                     },
                     expires_after_tick: TickId(500),
@@ -1016,7 +1037,9 @@ mod tests {
     #[test]
     fn source_id_none_roundtrips() {
         let cmd = Command {
-            payload: CommandPayload::Despawn { entity_id: 1 },
+            payload: CommandPayload::Despawn {
+                entity_id: EntityId::new(1, 0),
+            },
             expires_after_tick: TickId(u64::MAX),
             source_id: None,
             source_seq: None,
@@ -1035,7 +1058,9 @@ mod tests {
     fn source_id_some_zero_roundtrips_as_some_zero() {
         // This is the critical case: Some(0) must NOT become None.
         let cmd = Command {
-            payload: CommandPayload::Despawn { entity_id: 1 },
+            payload: CommandPayload::Despawn {
+                entity_id: EntityId::new(1, 0),
+            },
             expires_after_tick: TickId(u64::MAX),
             source_id: Some(0),
             source_seq: Some(0),
@@ -1280,7 +1305,9 @@ mod tests {
     #[test]
     fn expires_after_tick_and_arrival_seq_roundtrip() {
         let cmd = Command {
-            payload: CommandPayload::Despawn { entity_id: 1 },
+            payload: CommandPayload::Despawn {
+                entity_id: EntityId::new(1, 0),
+            },
             expires_after_tick: TickId(500),
             source_id: Some(1),
             source_seq: Some(2),

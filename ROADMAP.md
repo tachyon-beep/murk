@@ -10,7 +10,40 @@ engine.
 
 ---
 
-## Current State — v0.1.9
+## Current State — v0.2 Entity Model Release Candidate
+
+The entity model and engine integration stack has been merged onto `main`
+as the `0.2.0` release candidate basis:
+
+| Branch | Purpose | Status |
+|--------|---------|--------|
+| `codex/entity-m1-foundation` | Entity IDs, store, property staging, snapshots, and overlays | Implemented and verified |
+| `codex/entity-m2-engine` | Entity-aware `WorldConfig`, receipts, lockstep snapshots, rollback, command handling, and propagator context accessors | Implemented and verified |
+| `codex/entity-proptest-coverage` | Property coverage for `EntityId`, staging, and store lifecycle invariants | Implemented and verified |
+| `codex/entity-integration-tests` | Cross-module entity pipeline integration coverage | Implemented and verified |
+
+Current tracker and tooling state:
+
+- Filigree shows no open actionable bugs or tasks. The only ready item is
+  the P4 `Future` release-planning issue.
+- Loomweave is fresh after the merge: 3,450 entities, 4,681 edges, 36
+  subsystems, SEIs populated.
+- The local release gate passes from the merged candidate.
+
+Release-readiness work before publishing this batch:
+
+1. Get owner sign-off before publishing crates, publishing Python artifacts,
+   creating a public tag, or announcing the release.
+2. Resolve or intentionally baseline the Wardline trust-surface telemetry
+   by adding real trust-boundary markers where external input enters the
+   system.
+3. Remove the temporary `pyo3 0.28` deny advisory ignores once rust-numpy
+   publishes a `pyo3 0.29`-compatible crate.
+4. Create follow-up issues for entity conflict validation in the
+   propagator pipeline and for exposing entity state through the FFI/Python
+   surfaces when those become release scope.
+
+## Last Published Baseline — v0.1.9
 
 As of March 2026, Murk v0.1.9 is in release prep. This is a hardening
 release focused on FFI safety, engine robustness, and release-mode
