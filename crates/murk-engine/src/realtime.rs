@@ -198,6 +198,8 @@ impl RealtimeAsyncWorld {
             ring_buffer_size: config.ring_buffer_size,
             max_ingress_queue: config.max_ingress_queue,
             tick_rate_hz: config.tick_rate_hz,
+            max_entities: config.max_entities,
+            entity_manifest: config.entity_manifest,
             backoff: backoff_config.clone(),
         };
 

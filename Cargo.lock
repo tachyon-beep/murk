@@ -556,6 +556,7 @@ dependencies = [
  "murk-arena",
  "murk-bench",
  "murk-core",
+ "murk-entity",
  "murk-obs",
  "murk-propagator",
  "murk-propagators",
