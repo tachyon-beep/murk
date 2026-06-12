@@ -38,6 +38,7 @@ docs/bugs/generated/
 .filigree/
 .codex/
 .worktrees/
+findings.jsonl
 
 # Filigree issue tracker
 .weft/

@@ -1054,18 +1054,21 @@ mod tests {
                 applied_tick_id: Some(TickId(1)),
                 reason_code: None,
                 command_index: 0,
+                spawned_entity_id: None,
             },
             Receipt {
                 accepted: true,
                 applied_tick_id: Some(TickId(1)),
                 reason_code: None,
                 command_index: 1,
+                spawned_entity_id: None,
             },
             Receipt {
                 accepted: true,
                 applied_tick_id: Some(TickId(1)),
                 reason_code: None,
                 command_index: 2,
+                spawned_entity_id: None,
             },
         ];
 
@@ -1099,6 +1102,7 @@ mod tests {
             applied_tick_id: Some(TickId(1)),
             reason_code: None,
             command_index: 0,
+            spawned_entity_id: None,
         }];
 
         let mut n_out: usize = 999;

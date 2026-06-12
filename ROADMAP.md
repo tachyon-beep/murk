@@ -10,7 +10,50 @@ engine.
 
 ---
 
-## Current State — v0.1.9
+## Current State — v0.2 Entity Model Batch
+
+The current development batch is a stacked branch line for the entity
+model and engine integration:
+
+| Branch | Purpose | Status |
+|--------|---------|--------|
+| `codex/entity-m1-foundation` | Entity IDs, store, property staging, snapshots, and overlays | Implemented and verified |
+| `codex/entity-m2-engine` | Entity-aware `WorldConfig`, receipts, lockstep snapshots, rollback, command handling, and propagator context accessors | Implemented and verified |
+| `codex/entity-proptest-coverage` | Property coverage for `EntityId`, staging, and store lifecycle invariants | Implemented and verified |
+| `codex/entity-integration-tests` | Cross-module entity pipeline integration coverage | Implemented and verified |
+
+Tracker state after this batch:
+
+- Filigree shows no open actionable bugs or tasks. The only ready item is
+  the P4 `Future` release-planning issue.
+- Wardline reports no active defect findings. The remaining active signal
+  is an informational telemetry finding that the Rust trust surface has no
+  declared `@trusted` markers yet.
+- The branch stack has passed `cargo check --workspace`,
+  `cargo clippy --workspace -- -D warnings`, and
+  `cargo test --workspace --all-targets`. Entity-touched files were also
+  rustfmt-checked.
+
+Release-readiness work before publishing this batch:
+
+1. Merge or squash the branch stack in dependency order: M1 foundation,
+   M2 engine integration, property tests, integration tests, then this
+   release-plan refresh.
+2. Decide whether to make the entity model the named v0.2 release or keep
+   v0.2 for the Echelon feature set below and publish entity support as a
+   v0.1.x foundation release.
+3. Run the full release gate from the merge candidate: `cargo fmt --check
+   --all`, `cargo check --workspace`, `cargo test --workspace --all-targets`,
+   `cargo clippy --workspace -- -D warnings`, doctests, and
+   `wardline scan . --lang rust --fail-on ERROR`.
+4. Resolve or intentionally baseline the Wardline trust-surface telemetry
+   by adding real trust-boundary markers where external input enters the
+   system.
+5. Create follow-up issues for entity conflict validation in the
+   propagator pipeline and for exposing entity state through the FFI/Python
+   surfaces when those become release scope.
+
+## Last Published Baseline — v0.1.9
 
 As of March 2026, Murk v0.1.9 is in release prep. This is a hardening
 release focused on FFI safety, engine robustness, and release-mode

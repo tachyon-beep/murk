@@ -556,12 +556,22 @@ dependencies = [
  "murk-arena",
  "murk-bench",
  "murk-core",
+ "murk-entity",
  "murk-obs",
  "murk-propagator",
  "murk-propagators",
  "murk-replay",
  "murk-space",
  "murk-test-utils",
+ "proptest",
+ "smallvec",
+]
+
+[[package]]
+name = "murk-entity"
+version = "0.1.9"
+dependencies = [
+ "murk-core",
  "proptest",
  "smallvec",
 ]
@@ -599,6 +609,7 @@ version = "0.1.9"
 dependencies = [
  "indexmap",
  "murk-core",
+ "murk-entity",
  "murk-space",
  "murk-test-utils",
  "proptest",
