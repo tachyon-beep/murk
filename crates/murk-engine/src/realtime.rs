@@ -198,8 +198,8 @@ impl RealtimeAsyncWorld {
             ring_buffer_size: config.ring_buffer_size,
             max_ingress_queue: config.max_ingress_queue,
             tick_rate_hz: config.tick_rate_hz,
-            max_entities: config.max_entities,
-            entity_manifest: config.entity_manifest,
+            max_entities: 0,
+            entity_manifest: None,
             backoff: backoff_config.clone(),
         };
 
@@ -826,7 +826,9 @@ impl std::fmt::Debug for ArcSpaceWrapper {
 mod tests {
     use super::*;
     use murk_core::id::FieldId;
-    use murk_core::{BoundaryBehavior, FieldDef, FieldMutability, FieldType};
+    use murk_core::{
+        BoundaryBehavior, EntityManifest, FieldDef, FieldMutability, FieldType, PropertyIndex,
+    };
     use murk_obs::spec::ObsRegion;
     use murk_obs::{ObsEntry, ObsSpec};
     use murk_space::{EdgeBehavior, Line1D};
@@ -847,10 +849,36 @@ mod tests {
         WorldConfig::builder()
             .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
             .fields(vec![scalar_field("energy")])
-            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 42.0))])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                42.0,
+            ))])
             .dt(0.1)
             .seed(42)
             .tick_rate_hz(60.0)
+            .build()
+            .unwrap()
+    }
+
+    fn entity_test_config() -> WorldConfig {
+        WorldConfig::builder()
+            .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                42.0,
+            ))])
+            .dt(0.1)
+            .seed(42)
+            .tick_rate_hz(60.0)
+            .max_entities(4)
+            .entity_manifest(EntityManifest {
+                property_names: vec!["alive".into(), "hp".into()],
+                property_defaults: vec![1.0, 100.0],
+                alive_property: PropertyIndex(0),
+            })
             .build()
             .unwrap()
     }
@@ -1000,6 +1028,17 @@ mod tests {
     }
 
     #[test]
+    fn entity_config_is_disabled_for_realtime_async_m2() {
+        let mut world =
+            RealtimeAsyncWorld::new(entity_test_config(), AsyncConfig::default()).unwrap();
+
+        let report = world.shutdown();
+        assert!(report.tick_joined);
+        let engine = world.recovered_engine.lock().unwrap();
+        assert!(engine.as_ref().unwrap().entity_snapshot().is_none());
+    }
+
+    #[test]
     fn drop_triggers_shutdown() {
         let world = RealtimeAsyncWorld::new(test_config(), AsyncConfig::default()).unwrap();
         std::thread::sleep(Duration::from_millis(50));
@@ -1030,7 +1069,11 @@ mod tests {
         let config = WorldConfig::builder()
             .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
             .fields(vec![scalar_field("energy")])
-            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
             .dt(0.1)
             .seed(42)
             .tick_rate_hz(0.5) // 2-second tick budget
@@ -1115,7 +1158,11 @@ mod tests {
         let config = WorldConfig::builder()
             .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
             .fields(vec![scalar_field("energy")])
-            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
             .dt(0.1)
             .seed(42)
             .tick_rate_hz(0.5)

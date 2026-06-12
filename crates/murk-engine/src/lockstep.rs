@@ -221,10 +221,11 @@ impl std::fmt::Debug for LockstepWorld {
 mod tests {
     use super::*;
     use murk_core::command::CommandPayload;
-    use murk_core::id::{Coord, FieldId};
+    use murk_core::id::{Coord, EntityId, FieldId};
     use murk_core::traits::{FieldReader, SnapshotAccess};
     use murk_core::{
-        BoundaryBehavior, EntityManifest, FieldDef, FieldMutability, FieldType, PropertyIndex,
+        BoundaryBehavior, EntityManifest, FieldDef, FieldMutability, FieldSet, FieldType,
+        IngressError, PropagatorError, PropertyIndex,
     };
     use murk_propagator::propagator::WriteMode;
     use murk_propagator::Propagator;
@@ -246,7 +247,11 @@ mod tests {
         WorldConfig::builder()
             .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
             .fields(vec![scalar_field("energy")])
-            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 42.0))])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                42.0,
+            ))])
             .dt(0.1)
             .seed(42)
             .build()
@@ -265,12 +270,128 @@ mod tests {
         WorldConfig::builder()
             .space(Box::new(Line1D::new(4, EdgeBehavior::Absorb).unwrap()))
             .fields(vec![scalar_field("energy")])
-            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
             .dt(0.1)
             .max_entities(max_entities)
             .entity_manifest(entity_manifest())
             .build()
             .unwrap()
+    }
+
+    fn entity_config_with_failing_propagator(max_entities: u32) -> WorldConfig {
+        WorldConfig::builder()
+            .space(Box::new(Line1D::new(4, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(FailingPropagator::new(
+                "fail",
+                FieldId(0),
+                0,
+            ))])
+            .dt(0.1)
+            .max_entities(max_entities)
+            .entity_manifest(entity_manifest())
+            .build()
+            .unwrap()
+    }
+
+    struct EntityHpPropagator {
+        value: f32,
+    }
+
+    impl Propagator for EntityHpPropagator {
+        fn name(&self) -> &str {
+            "entity_hp"
+        }
+
+        fn reads(&self) -> FieldSet {
+            FieldSet::empty()
+        }
+
+        fn writes(&self) -> Vec<(FieldId, WriteMode)> {
+            Vec::new()
+        }
+
+        fn step(&self, ctx: &mut murk_propagator::StepContext<'_>) -> Result<(), PropagatorError> {
+            let entity_id = {
+                let entities =
+                    ctx.entities_overlaid()
+                        .ok_or_else(|| PropagatorError::ExecutionFailed {
+                            reason: "entity overlay missing".into(),
+                        })?;
+                let record = entities.iter_alive().next().ok_or_else(|| {
+                    PropagatorError::ExecutionFailed {
+                        reason: "no alive entity".into(),
+                    }
+                })?;
+                record.id
+            };
+
+            ctx.entity_writes()
+                .ok_or_else(|| PropagatorError::ExecutionFailed {
+                    reason: "entity staging missing".into(),
+                })?
+                .set(entity_id, PropertyIndex(1), self.value)
+                .then_some(())
+                .ok_or_else(|| PropagatorError::ExecutionFailed {
+                    reason: "entity hp write rejected".into(),
+                })
+        }
+    }
+
+    fn entity_config_with_hp_propagator(max_entities: u32, hp: f32) -> WorldConfig {
+        WorldConfig::builder()
+            .space(Box::new(Line1D::new(4, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(EntityHpPropagator { value: hp })])
+            .dt(0.1)
+            .max_entities(max_entities)
+            .entity_manifest(entity_manifest())
+            .build()
+            .unwrap()
+    }
+
+    fn spawn_command(coord: Vec<i32>, entity_type: u32) -> Command {
+        Command {
+            payload: CommandPayload::Spawn {
+                coord: coord.into(),
+                entity_type,
+                property_overrides: Vec::new(),
+            },
+            expires_after_tick: TickId(10),
+            source_id: None,
+            source_seq: None,
+            priority_class: 0,
+            arrival_seq: 0,
+        }
+    }
+
+    fn move_command(entity_id: EntityId, target_coord: Vec<i32>) -> Command {
+        Command {
+            payload: CommandPayload::Move {
+                entity_id,
+                target_coord: target_coord.into(),
+            },
+            expires_after_tick: TickId(10),
+            source_id: None,
+            source_seq: None,
+            priority_class: 0,
+            arrival_seq: 0,
+        }
+    }
+
+    fn despawn_command(entity_id: EntityId) -> Command {
+        Command {
+            payload: CommandPayload::Despawn { entity_id },
+            expires_after_tick: TickId(10),
+            source_id: None,
+            source_seq: None,
+            priority_class: 0,
+            arrival_seq: 0,
+        }
     }
 
     /// Two-field pipeline: PropA writes field0=7.0, PropB copies field0→field1.
@@ -341,7 +462,9 @@ mod tests {
         }
 
         WorldConfig::builder()
-            .space(Box::new(Square4::new(10, 10, EdgeBehavior::Absorb).unwrap()))
+            .space(Box::new(
+                Square4::new(10, 10, EdgeBehavior::Absorb).unwrap(),
+            ))
             .fields(vec![
                 scalar_field("field0"),
                 scalar_field("field1"),
@@ -448,11 +571,72 @@ mod tests {
     }
 
     #[test]
+    fn move_and_despawn_validate_entity_generation() {
+        let mut world = LockstepWorld::new(entity_config(4)).unwrap();
+        let spawn = world.step_sync(vec![spawn_command(vec![0], 1)]).unwrap();
+        let id = spawn.receipts[0].spawned_entity_id.unwrap();
+
+        let moved = world.step_sync(vec![move_command(id, vec![2])]).unwrap();
+        assert!(moved.receipts[0].accepted);
+        assert_eq!(
+            moved
+                .entity_snapshot
+                .unwrap()
+                .get(id)
+                .unwrap()
+                .coord
+                .as_slice(),
+            &[2]
+        );
+
+        let despawned = world.step_sync(vec![despawn_command(id)]).unwrap();
+        assert!(despawned.receipts[0].accepted);
+        assert!(despawned.entity_snapshot.unwrap().get(id).is_none());
+
+        let stale = EntityId::new(id.slot(), id.generation());
+        let rejected = world.step_sync(vec![move_command(stale, vec![3])]).unwrap();
+        assert_eq!(
+            rejected.receipts[0].reason_code,
+            Some(IngressError::UnknownEntity)
+        );
+    }
+
+    #[test]
+    fn propagator_failure_rolls_back_entity_commands() {
+        let mut world = LockstepWorld::new(entity_config_with_failing_propagator(4)).unwrap();
+        let err = match world.step_sync(vec![spawn_command(vec![0], 1)]) {
+            Ok(_) => panic!("expected propagator failure"),
+            Err(err) => err,
+        };
+
+        assert_eq!(
+            err.receipts[0].reason_code,
+            Some(IngressError::TickRollback)
+        );
+        assert_eq!(world.snapshot().tick_id(), TickId(0));
+        assert!(world.entity_snapshot().unwrap().iter_all().next().is_none());
+    }
+
+    #[test]
+    fn propagators_can_stage_entity_properties() {
+        let mut world = LockstepWorld::new(entity_config_with_hp_propagator(4, 25.0)).unwrap();
+        let result = world.step_sync(vec![spawn_command(vec![0], 1)]).unwrap();
+        let id = result.receipts[0].spawned_entity_id.unwrap();
+
+        let entities = result.entity_snapshot.unwrap();
+        assert_eq!(entities.property(id, PropertyIndex(1)), Some(25.0));
+    }
+
+    #[test]
     fn step_sync_propagator_failure_returns_tick_error() {
         let config = WorldConfig::builder()
             .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
             .fields(vec![scalar_field("energy")])
-            .propagators(vec![Box::new(FailingPropagator::new("fail", FieldId(0), 0))])
+            .propagators(vec![Box::new(FailingPropagator::new(
+                "fail",
+                FieldId(0),
+                0,
+            ))])
             .dt(0.1)
             .seed(42)
             .build()
@@ -640,7 +824,11 @@ mod tests {
         let config = WorldConfig::builder()
             .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
             .fields(vec![scalar_field("energy")])
-            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
             .dt(0.1)
             .seed(42)
             .max_ingress_queue(2)

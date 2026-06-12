@@ -391,6 +391,10 @@ impl TickEngine {
                 spawned_entity_id: None,
             });
         }
+        let entity_rollback = self
+            .entity_store
+            .as_ref()
+            .map(murk_entity::EntityStore::snapshot_for_rollback);
         // 3b. Apply commands to the staging writer.
         for (i, dc) in commands.iter().enumerate() {
             let receipt = &mut receipts[accepted_receipt_start + i];
@@ -421,8 +425,6 @@ impl TickEngine {
                 }
                 CommandPayload::SetParameter { .. }
                 | CommandPayload::SetParameterBatch { .. }
-                | CommandPayload::Move { .. }
-                | CommandPayload::Despawn { .. }
                 | CommandPayload::Custom { .. } => {
                     receipt.accepted = false;
                     receipt.reason_code = Some(IngressError::UnsupportedCommand);
@@ -448,6 +450,34 @@ impl TickEngine {
                             receipt.accepted = false;
                             receipt.reason_code = Some(err);
                         }
+                    }
+                }
+                CommandPayload::Move {
+                    entity_id,
+                    target_coord,
+                } => {
+                    let result = if self.space.canonical_rank(target_coord).is_some() {
+                        self.entity_store
+                            .as_mut()
+                            .ok_or(IngressError::UnsupportedCommand)
+                            .and_then(|store| store.move_entity(*entity_id, target_coord.clone()))
+                    } else {
+                        Err(IngressError::NotApplied)
+                    };
+                    if let Err(err) = result {
+                        receipt.accepted = false;
+                        receipt.reason_code = Some(err);
+                    }
+                }
+                CommandPayload::Despawn { entity_id } => {
+                    let result = self
+                        .entity_store
+                        .as_mut()
+                        .ok_or(IngressError::UnsupportedCommand)
+                        .and_then(|store| store.despawn(*entity_id));
+                    if let Err(err) = result {
+                        receipt.accepted = false;
+                        receipt.reason_code = Some(err);
                     }
                 }
             }
@@ -499,6 +529,7 @@ impl TickEngine {
                                     field,
                                 ),
                             },
+                            entity_rollback.clone(),
                             receipts,
                             accepted_receipt_start,
                         );
@@ -516,6 +547,7 @@ impl TickEngine {
                                 field, prev_len, buf_len,
                             ),
                         },
+                        entity_rollback.clone(),
                         receipts,
                         accepted_receipt_start,
                     );
@@ -541,6 +573,7 @@ impl TickEngine {
                                     expected_len,
                                 ),
                             },
+                            entity_rollback.clone(),
                             receipts,
                             accepted_receipt_start,
                         );
@@ -550,11 +583,9 @@ impl TickEngine {
                         return self.handle_rollback(
                             prop_name,
                             murk_core::PropagatorError::ExecutionFailed {
-                                reason: format!(
-                                    "declared read field {:?} not present",
-                                    field_id,
-                                ),
+                                reason: format!("declared read field {:?} not present", field_id,),
                             },
+                            entity_rollback.clone(),
                             receipts,
                             accepted_receipt_start,
                         );
@@ -576,6 +607,7 @@ impl TickEngine {
                                     expected_len,
                                 ),
                             },
+                            entity_rollback.clone(),
                             receipts,
                             accepted_receipt_start,
                         );
@@ -590,6 +622,7 @@ impl TickEngine {
                                     field_id,
                                 ),
                             },
+                            entity_rollback.clone(),
                             receipts,
                             accepted_receipt_start,
                         );
@@ -607,11 +640,10 @@ impl TickEngine {
                             murk_core::PropagatorError::ExecutionFailed {
                                 reason: format!(
                                     "write field {:?} buffer length {} != expected {}",
-                                    field_id,
-                                    len,
-                                    expected_len,
+                                    field_id, len, expected_len,
                                 ),
                             },
+                            entity_rollback.clone(),
                             receipts,
                             accepted_receipt_start,
                         );
@@ -621,11 +653,9 @@ impl TickEngine {
                         return self.handle_rollback(
                             prop_name,
                             murk_core::PropagatorError::ExecutionFailed {
-                                reason: format!(
-                                    "declared write field {:?} not present",
-                                    field_id,
-                                ),
+                                reason: format!("declared write field {:?} not present", field_id,),
                             },
+                            entity_rollback.clone(),
                             receipts,
                             accepted_receipt_start,
                         );
@@ -636,15 +666,31 @@ impl TickEngine {
 
             // 4e. Construct StepContext and call step().
             {
-                let mut ctx = murk_propagator::StepContext::new(
-                    &overlay,
-                    &self.base_cache,
-                    &mut guard.writer,
-                    &mut self.propagator_scratch,
-                    self.space.as_ref(),
-                    next_tick,
-                    self.dt,
-                );
+                let mut ctx = if let (Some(store), Some(staging)) =
+                    (self.entity_store.as_ref(), self.entity_staging.as_mut())
+                {
+                    murk_propagator::StepContext::new_with_entities(
+                        &overlay,
+                        &self.base_cache,
+                        &mut guard.writer,
+                        &mut self.propagator_scratch,
+                        self.space.as_ref(),
+                        store.snapshot(),
+                        staging,
+                        next_tick,
+                        self.dt,
+                    )
+                } else {
+                    murk_propagator::StepContext::new(
+                        &overlay,
+                        &self.base_cache,
+                        &mut guard.writer,
+                        &mut self.propagator_scratch,
+                        self.space.as_ref(),
+                        next_tick,
+                        self.dt,
+                    )
+                };
 
                 // 4f. Call propagator step.
                 if let Err(reason) = prop.step(&mut ctx) {
@@ -654,6 +700,7 @@ impl TickEngine {
                     return self.handle_rollback(
                         prop_name,
                         reason,
+                        entity_rollback.clone(),
                         receipts,
                         accepted_receipt_start,
                     );
@@ -670,15 +717,25 @@ impl TickEngine {
 
         // 6. Publish.
         let publish_start = Instant::now();
-        self.arena
-            .publish(next_tick, self.param_version)
-            .map_err(|_| {
-                self.arena.reset_sparse_reuse_counters();
-                TickError {
-                    kind: StepError::AllocationFailed,
-                    receipts: vec![],
+        if self.arena.publish(next_tick, self.param_version).is_err() {
+            self.arena.reset_sparse_reuse_counters();
+            if let Some(snapshot) = entity_rollback {
+                if let Some(store) = &mut self.entity_store {
+                    store.restore_from_snapshot(snapshot);
                 }
-            })?;
+            }
+            if let Some(staging) = &mut self.entity_staging {
+                staging.reset();
+            }
+            return Err(TickError {
+                kind: StepError::AllocationFailed,
+                receipts: vec![],
+            });
+        }
+        if let (Some(store), Some(staging)) = (&mut self.entity_store, &mut self.entity_staging) {
+            store.apply_staged_properties(staging);
+            staging.reset();
+        }
         let snapshot_publish_us = publish_start.elapsed().as_micros() as u64;
 
         // 7. Update state.
@@ -730,6 +787,7 @@ impl TickEngine {
         &mut self,
         prop_name: String,
         reason: murk_core::PropagatorError,
+        entity_rollback: Option<murk_entity::EntityStoreSnapshot>,
         mut receipts: Vec<Receipt>,
         accepted_start: usize,
     ) -> Result<TickResult, TickError> {
@@ -737,6 +795,14 @@ impl TickEngine {
         // Cancel the in-progress tick so begin_tick() can be called again.
         self.arena.cancel_tick();
         self.arena.reset_sparse_reuse_counters();
+        if let Some(snapshot) = entity_rollback {
+            if let Some(store) = &mut self.entity_store {
+                store.restore_from_snapshot(snapshot);
+            }
+        }
+        if let Some(staging) = &mut self.entity_staging {
+            staging.reset();
+        }
         self.counters.rollback_events = self.counters.rollback_events.saturating_add(1);
         self.consecutive_rollback_count = self.consecutive_rollback_count.saturating_add(1);
         if self.consecutive_rollback_count >= self.max_consecutive_rollbacks {
@@ -777,8 +843,10 @@ impl TickEngine {
         self.consecutive_rollback_count = 0;
         self.counters = CumulativeCounters::default();
         if let Some(store) = &self.entity_store {
-            self.entity_store =
-                Some(murk_entity::EntityStore::new(store.capacity(), store.manifest().clone()));
+            self.entity_store = Some(murk_entity::EntityStore::new(
+                store.capacity(),
+                store.manifest().clone(),
+            ));
         }
         if let Some(staging) = &mut self.entity_staging {
             staging.reset();
@@ -888,7 +956,9 @@ mod tests {
     use murk_core::command::CommandPayload;
     use murk_core::id::{Coord, ParameterKey};
     use murk_core::traits::SnapshotAccess;
-    use murk_core::{BoundaryBehavior, FieldDef, FieldMutability, FieldSet, FieldType, PropagatorError};
+    use murk_core::{
+        BoundaryBehavior, FieldDef, FieldMutability, FieldSet, FieldType, PropagatorError,
+    };
     use murk_propagator::propagator::WriteMode;
     use murk_space::{EdgeBehavior, Line1D};
     use murk_test_utils::{ConstPropagator, FailingPropagator, IdentityPropagator};
@@ -934,7 +1004,11 @@ mod tests {
         let config = WorldConfig::builder()
             .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
             .fields(vec![scalar_field("energy")])
-            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 42.0))])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                42.0,
+            ))])
             .dt(0.1)
             .seed(42)
             .build()
@@ -1497,7 +1571,11 @@ mod tests {
         let config = WorldConfig::builder()
             .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
             .fields(vec![scalar_field("energy")])
-            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
             .dt(0.1)
             .seed(42)
             .max_ingress_queue(1)
@@ -1957,9 +2035,15 @@ mod tests {
         assert_eq!(engine.expectations.read_previous[1], vec![(FieldId(0), 10)]);
 
         // Tick 0→1: reads_previous sees initial zeros via base_cache.
-        assert!(engine.execute_tick().is_ok(), "tick 1 should pass validation");
+        assert!(
+            engine.execute_tick().is_ok(),
+            "tick 1 should pass validation"
+        );
         // Tick 1→2: reads_previous sees published tick 1 data.
-        assert!(engine.execute_tick().is_ok(), "tick 2 should pass validation");
+        assert!(
+            engine.execute_tick().is_ok(),
+            "tick 2 should pass validation"
+        );
     }
 
     #[test]

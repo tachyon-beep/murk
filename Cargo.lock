@@ -609,6 +609,7 @@ version = "0.1.9"
 dependencies = [
  "indexmap",
  "murk-core",
+ "murk-entity",
  "murk-space",
  "murk-test-utils",
  "proptest",
