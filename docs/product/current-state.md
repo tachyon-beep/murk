@@ -1,14 +1,14 @@
 # Current State - Murk
 
-Checkpoint: 2026-06-12 15:22 UTC - commit ed90bcf
+Checkpoint: 2026-06-12 15:53 UTC - commit 3f2a556
 
 ## The bet right now
-Prepare the merged entity-model batch as the `0.2.0` release candidate basis, without weakening identity, replay, or FFI safety.
+Hold `main` as the `0.2.0` release candidate basis, without weakening identity, replay, or FFI safety.
 
 ## In flight
 - Entity M1/M2 implementation branches are merged onto `main`.
 - Workspace version metadata is advanced to `0.2.0`.
-- Local release gates pass from the merged candidate.
+- PR #61 merged the release candidate into `main`; main CI and Docs are green at commit `3f2a556`.
 
 ## Open questions / blocked-on-owner
 - Public release, crate publishing, PyPI publishing, or announcement still need owner sign-off.
@@ -21,7 +21,8 @@ Prepare the merged entity-model batch as the `0.2.0` release candidate basis, wi
 - Ran `cargo fmt --check --all`, `cargo check --workspace`, `cargo test --workspace --all-targets`, `cargo clippy --workspace -- -D warnings`, and `cargo test --workspace --doc` successfully.
 - Ran `wardline scan . --lang rust --fail-on ERROR` successfully: 0 active findings; trust-surface marker coverage remains a telemetry follow-up.
 - Ran `cargo deny check` successfully after recording temporary `pyo3 0.28` advisory ignores; `numpy 0.28.0` is the latest published Rust NumPy crate and pins `pyo3 0.28`, so remove the ignores once rust-numpy ships a `pyo3 0.29`-compatible release.
+- Merged PR #61 after GitHub Actions passed on the release-candidate branch; main push CI and Docs also passed at `3f2a556`.
 - Found the plain `uvx filigree` CLI package is older than this repo's migrated `.weft/filigree` database, so tracker writes should wait for the project-pinned Filigree tool or MCP surface.
 
 ## Next session, start here
-Push/create the release PR or tag only after owner sign-off for outward-facing release actions; then plan follow-up scope for entity-slot observations and FFI/Python exposure.
+Create the public release tag and publish crates/PyPI artifacts only after owner sign-off for outward-facing release actions; then plan follow-up scope for entity-slot observations and FFI/Python exposure.
