@@ -7,7 +7,7 @@
 //!
 //! Crate-internal code (e.g., `realtime.rs`) retains `pub(crate)` field
 //! access for reconstruction patterns where the space is replaced with
-//! an `Arc`-wrapped variant. See [`RealtimeAsyncWorld::new()`] for details.
+//! an `Arc`-wrapped variant. See [`crate::RealtimeAsyncWorld::new()`] for details.
 
 use std::error::Error;
 use std::fmt;
