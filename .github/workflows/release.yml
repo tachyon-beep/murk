@@ -54,18 +54,51 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          set -e
+          set -euo pipefail
+          VERSION="$(cargo metadata --no-deps --format-version 1 \
+            | python -c 'import json, sys; print(json.load(sys.stdin)["packages"][0]["version"])')"
+
+          wait_for_registry() {
+            local crate=$1
+            local tmpdir
+            echo "Waiting for $crate $VERSION to appear in the crates.io index..."
+            for attempt in $(seq 1 20); do
+              tmpdir="$(mktemp -d)"
+              if (cd "$tmpdir" && cargo info "$crate@$VERSION" >/dev/null 2>&1); then
+                rm -rf "$tmpdir"
+                echo "$crate $VERSION is visible in the crates.io index"
+                return 0
+              fi
+              rm -rf "$tmpdir"
+              echo "$crate $VERSION is not visible yet (attempt $attempt/20); sleeping 30s"
+              sleep 30
+            done
+            echo "::error::$crate $VERSION did not appear in the crates.io index"
+            return 1
+          }
+
           publish() {
             local crate=$1
+            local output
+            local status
+
             echo "Publishing $crate..."
-            # Tolerate "already uploaded" (exit 0), fail on other errors
-            if ! cargo publish -p "$crate" --no-verify 2>&1 | tee /dev/stderr \
-                 | grep -q "already uploaded"; then
+            set +e
+            output="$(cargo publish -p "$crate" --no-verify 2>&1)"
+            status=$?
+            set -e
+            printf '%s\n' "$output"
+
+            if [ "$status" -eq 0 ]; then
               echo "$crate published successfully"
-            else
+              wait_for_registry "$crate"
+            elif grep -Eq "already uploaded|already exists|crate version .* is already uploaded" <<<"$output"; then
               echo "$crate already published, skipping"
+              wait_for_registry "$crate"
+            else
+              echo "::error::$crate failed to publish"
+              return "$status"
             fi
-            sleep 30  # Wait for crates.io index propagation
           }
 
           publish murk-core
