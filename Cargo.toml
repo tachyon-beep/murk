@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/murk",
     "crates/murk-core",
+    "crates/murk-entity",
     "crates/murk-arena",
     "crates/murk-space",
     "crates/murk-propagator",

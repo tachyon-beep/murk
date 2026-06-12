@@ -326,6 +326,8 @@ impl TickEngine {
                 | Some(IngressError::ShuttingDown)
                 | Some(IngressError::UnsupportedCommand)
                 | Some(IngressError::NotApplied)
+                | Some(IngressError::UnknownEntity)
+                | Some(IngressError::EntityCapacityFull)
                 | None => {}
             }
         }

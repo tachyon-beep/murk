@@ -567,6 +567,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "murk-entity"
+version = "0.1.9"
+dependencies = [
+ "murk-core",
+ "proptest",
+ "smallvec",
+]
+
+[[package]]
 name = "murk-ffi"
 version = "0.1.9"
 dependencies = [

@@ -1,0 +1,21 @@
+[package]
+name = "murk-entity"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+description = "Entity storage and staging for Murk simulations"
+readme = "README.md"
+
+[dependencies]
+murk-core = { path = "../murk-core", version = "0.1.9" }
+smallvec = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }

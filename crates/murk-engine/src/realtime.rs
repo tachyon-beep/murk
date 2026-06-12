@@ -391,16 +391,8 @@ impl RealtimeAsyncWorld {
 
         let (reply_tx, reply_rx) = crossbeam_channel::bounded(1);
         let n_agents = agent_centers.len();
-        let per_agent_output = if n_agents > 0 {
-            output.len() / n_agents
-        } else {
-            0
-        };
-        let per_agent_mask = if n_agents > 0 {
-            mask.len() / n_agents
-        } else {
-            0
-        };
+        let per_agent_output = output.len().checked_div(n_agents).unwrap_or(0);
+        let per_agent_mask = mask.len().checked_div(n_agents).unwrap_or(0);
 
         let task = ObsTask::Agents {
             plan: Arc::clone(plan),
