@@ -479,7 +479,11 @@ mod tests {
                 bounds: None,
                 boundary_behavior: BoundaryBehavior::Clamp,
             }])
-            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 42.0))])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                42.0,
+            ))])
             .dt(0.1)
             .seed(42)
             .build()

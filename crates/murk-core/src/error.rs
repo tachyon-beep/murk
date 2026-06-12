@@ -133,6 +133,10 @@ pub enum IngressError {
     /// The command was accepted but could not be applied (e.g. invalid
     /// coordinate or unknown field) (`MURK_ERROR_NOT_APPLIED`).
     NotApplied,
+    /// The referenced entity does not exist, is dead, or has a stale generation.
+    UnknownEntity,
+    /// Entity capacity is full.
+    EntityCapacityFull,
 }
 
 impl fmt::Display for IngressError {
@@ -148,6 +152,8 @@ impl fmt::Display for IngressError {
                 f,
                 "command accepted but not applied (invalid coordinate or unknown field)"
             ),
+            Self::UnknownEntity => write!(f, "unknown entity"),
+            Self::EntityCapacityFull => write!(f, "entity capacity full"),
         }
     }
 }

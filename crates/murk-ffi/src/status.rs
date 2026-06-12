@@ -114,6 +114,8 @@ impl From<&IngressError> for MurkStatus {
             IngressError::ShuttingDown => MurkStatus::ShuttingDown,
             IngressError::UnsupportedCommand => MurkStatus::UnsupportedCommand,
             IngressError::NotApplied => MurkStatus::NotApplied,
+            IngressError::UnknownEntity => MurkStatus::NotApplied,
+            IngressError::EntityCapacityFull => MurkStatus::QueueFull,
         }
     }
 }

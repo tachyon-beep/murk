@@ -7,13 +7,13 @@
 //!
 //! Crate-internal code (e.g., `realtime.rs`) retains `pub(crate)` field
 //! access for reconstruction patterns where the space is replaced with
-//! an `Arc`-wrapped variant. See [`RealtimeAsyncWorld::new()`] for details.
+//! an `Arc`-wrapped variant. See [`crate::RealtimeAsyncWorld::new()`] for details.
 
 use std::error::Error;
 use std::fmt;
 
 use murk_arena::ArenaError;
-use murk_core::{FieldDef, FieldId, FieldSet};
+use murk_core::{EntityManifest, FieldDef, FieldId, FieldSet};
 use murk_propagator::{validate_pipeline, PipelineError, Propagator};
 use murk_space::Space;
 
@@ -160,6 +160,13 @@ pub enum ConfigError {
         /// Description of the validation failure.
         reason: String,
     },
+    /// `max_entities` is positive but no entity manifest was supplied.
+    EntityManifestRequired,
+    /// Entity manifest validation failed.
+    InvalidEntityManifest {
+        /// Description of the validation failure.
+        reason: String,
+    },
     /// Engine could not be recovered from tick thread (e.g. thread panicked).
     EngineRecoveryFailed,
     /// A background thread could not be spawned.
@@ -212,6 +219,12 @@ impl fmt::Display for ConfigError {
             }
             Self::InvalidField { reason } => {
                 write!(f, "invalid field: {reason}")
+            }
+            Self::EntityManifestRequired => {
+                write!(f, "entity_manifest is required when max_entities > 0")
+            }
+            Self::InvalidEntityManifest { reason } => {
+                write!(f, "invalid entity manifest: {reason}")
             }
             Self::EngineRecoveryFailed => {
                 write!(f, "engine could not be recovered from tick thread")
@@ -268,6 +281,10 @@ pub struct WorldConfig {
     pub(crate) max_ingress_queue: usize,
     /// Optional target tick rate for realtime-async mode.
     pub(crate) tick_rate_hz: Option<f64>,
+    /// Maximum number of concurrent entities. Zero disables entity support.
+    pub(crate) max_entities: u32,
+    /// Entity property schema. Required when `max_entities > 0`.
+    pub(crate) entity_manifest: Option<EntityManifest>,
     /// Adaptive backoff configuration.
     pub(crate) backoff: BackoffConfig,
 }
@@ -346,8 +363,20 @@ impl WorldConfig {
         if b.decay_rate == 0 {
             return Err(ConfigError::BackoffZeroDecayRate);
         }
+        // 7. Entity configuration invariants.
+        if self.max_entities > 0 {
+            let manifest = self
+                .entity_manifest
+                .as_ref()
+                .ok_or(ConfigError::EntityManifestRequired)?;
+            manifest
+                .validate()
+                .map_err(|err| ConfigError::InvalidEntityManifest {
+                    reason: err.to_string(),
+                })?;
+        }
 
-        // 7. Pipeline validation (delegates to murk-propagator).
+        // 8. Pipeline validation (delegates to murk-propagator).
         //    The plan is intentionally discarded here — the world constructor
         //    calls validate_pipeline() again to obtain it.
         let defined = self.defined_field_set()?;
@@ -398,6 +427,16 @@ impl WorldConfig {
         self.tick_rate_hz
     }
 
+    /// Maximum number of concurrent entities. Zero means entities are disabled.
+    pub fn max_entities(&self) -> u32 {
+        self.max_entities
+    }
+
+    /// Entity property schema when entity support is enabled.
+    pub fn entity_manifest(&self) -> Option<&EntityManifest> {
+        self.entity_manifest.as_ref()
+    }
+
     /// The adaptive backoff configuration.
     pub fn backoff(&self) -> &BackoffConfig {
         &self.backoff
@@ -416,6 +455,8 @@ impl WorldConfig {
             ring_buffer_size: 8,
             max_ingress_queue: 1024,
             tick_rate_hz: None,
+            max_entities: 0,
+            entity_manifest: None,
             backoff: BackoffConfig::default(),
         }
     }
@@ -454,6 +495,8 @@ pub struct WorldConfigBuilder {
     ring_buffer_size: usize,
     max_ingress_queue: usize,
     tick_rate_hz: Option<f64>,
+    max_entities: u32,
+    entity_manifest: Option<EntityManifest>,
     backoff: BackoffConfig,
 }
 
@@ -521,6 +564,18 @@ impl WorldConfigBuilder {
         self
     }
 
+    /// Set the maximum number of concurrent entities. Zero disables entities.
+    pub fn max_entities(mut self, max_entities: u32) -> Self {
+        self.max_entities = max_entities;
+        self
+    }
+
+    /// Set the entity property schema.
+    pub fn entity_manifest(mut self, entity_manifest: EntityManifest) -> Self {
+        self.entity_manifest = Some(entity_manifest);
+        self
+    }
+
     /// Set the adaptive backoff configuration. If called multiple times, the last value wins.
     pub fn backoff(mut self, backoff: BackoffConfig) -> Self {
         self.backoff = backoff;
@@ -545,6 +600,8 @@ impl WorldConfigBuilder {
             ring_buffer_size: self.ring_buffer_size,
             max_ingress_queue: self.max_ingress_queue,
             tick_rate_hz: self.tick_rate_hz,
+            max_entities: self.max_entities,
+            entity_manifest: self.entity_manifest,
             backoff: self.backoff,
         };
 
@@ -565,6 +622,8 @@ impl fmt::Debug for WorldConfig {
             .field("ring_buffer_size", &self.ring_buffer_size)
             .field("max_ingress_queue", &self.max_ingress_queue)
             .field("tick_rate_hz", &self.tick_rate_hz)
+            .field("max_entities", &self.max_entities)
+            .field("entity_manifest", &self.entity_manifest)
             .field("backoff", &self.backoff)
             .finish()
     }
@@ -592,7 +651,11 @@ mod tests {
         WorldConfig::builder()
             .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
             .fields(vec![scalar_field("energy")])
-            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
             .dt(0.1)
             .seed(42)
             .build()
@@ -602,6 +665,47 @@ mod tests {
     #[test]
     fn validate_valid_config_succeeds() {
         assert!(valid_config().validate().is_ok());
+    }
+
+    #[test]
+    fn builder_accepts_entity_manifest_when_capacity_positive() {
+        let config = WorldConfig::builder()
+            .space(Box::new(Line1D::new(4, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
+            .dt(0.1)
+            .max_entities(8)
+            .entity_manifest(murk_core::EntityManifest {
+                property_names: vec!["alive".into(), "hp".into()],
+                property_defaults: vec![1.0, 100.0],
+                alive_property: murk_core::PropertyIndex(0),
+            })
+            .build()
+            .unwrap();
+
+        assert_eq!(config.max_entities(), 8);
+        assert_eq!(config.entity_manifest().unwrap().property_count(), 2);
+    }
+
+    #[test]
+    fn positive_entity_capacity_requires_manifest() {
+        let result = WorldConfig::builder()
+            .space(Box::new(Line1D::new(4, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("energy")])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
+            .dt(0.1)
+            .max_entities(8)
+            .build();
+
+        assert!(matches!(result, Err(ConfigError::EntityManifestRequired)));
     }
 
     #[test]
@@ -909,7 +1013,11 @@ mod tests {
     fn builder_missing_space_fails() {
         let result = WorldConfig::builder()
             .fields(vec![scalar_field("energy")])
-            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
             .dt(0.1)
             .build();
         match result {
@@ -923,7 +1031,11 @@ mod tests {
         let result = WorldConfig::builder()
             .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
             .fields(vec![scalar_field("energy")])
-            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
             .build();
         match result {
             Err(ConfigError::MissingDt) => {}
@@ -936,7 +1048,11 @@ mod tests {
         let config = WorldConfig::builder()
             .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
             .fields(vec![scalar_field("energy")])
-            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
             .dt(0.1)
             .build()
             .expect("builder with defaults should succeed");
@@ -951,7 +1067,11 @@ mod tests {
         let config = WorldConfig::builder()
             .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
             .fields(vec![scalar_field("energy")])
-            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
             .dt(0.05)
             .seed(99)
             .ring_buffer_size(16)
@@ -983,7 +1103,11 @@ mod tests {
         let result = WorldConfig::builder()
             .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
             .fields(vec![scalar_field("energy")])
-            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
             .dt(0.1)
             .ring_buffer_size(1)
             .build();
@@ -998,7 +1122,11 @@ mod tests {
         let result = WorldConfig::builder()
             .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
             .fields(vec![scalar_field("energy")])
-            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
             .dt(0.0)
             .build();
         match result {
@@ -1033,7 +1161,11 @@ mod tests {
             .space(Box::new(Line1D::new(5, EdgeBehavior::Absorb).unwrap()))
             .space(Box::new(Line1D::new(20, EdgeBehavior::Absorb).unwrap()))
             .fields(vec![scalar_field("energy")])
-            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
             .dt(0.1)
             .build()
             .unwrap();
@@ -1045,7 +1177,11 @@ mod tests {
         let result = WorldConfig::builder()
             .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
             .fields(vec![scalar_field("energy")])
-            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
             .dt(0.1)
             .max_ingress_queue(0)
             .build();
@@ -1060,7 +1196,11 @@ mod tests {
         let result = WorldConfig::builder()
             .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
             .fields(vec![scalar_field("energy")])
-            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
             .dt(f64::NAN)
             .build();
         match result {
