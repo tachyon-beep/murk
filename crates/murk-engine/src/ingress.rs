@@ -98,6 +98,7 @@ impl IngressQueue {
                     applied_tick_id: None,
                     reason_code: Some(IngressError::TickDisabled),
                     command_index: i,
+                    spawned_entity_id: None,
                 });
                 continue;
             }
@@ -108,6 +109,7 @@ impl IngressQueue {
                     applied_tick_id: None,
                     reason_code: Some(IngressError::QueueFull),
                     command_index: i,
+                    spawned_entity_id: None,
                 });
                 continue;
             }
@@ -128,6 +130,7 @@ impl IngressQueue {
                 applied_tick_id: None,
                 reason_code: None,
                 command_index: i,
+                spawned_entity_id: None,
             });
         }
 
@@ -153,6 +156,7 @@ impl IngressQueue {
                     applied_tick_id: None,
                     reason_code: Some(IngressError::Stale),
                     command_index: entry.command_index,
+                    spawned_entity_id: None,
                 });
             } else {
                 valid.push(DrainedCommand {

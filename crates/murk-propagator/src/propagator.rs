@@ -5,7 +5,7 @@
 //! engine to validate the pipeline and precompute overlay routing.
 
 use crate::context::StepContext;
-use murk_core::{FieldId, FieldSet, PropagatorError};
+use murk_core::{FieldId, FieldSet, PropagatorError, PropertyIndex};
 
 /// Write initialization strategy for a field.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -92,6 +92,27 @@ pub trait Propagator: Send + 'static {
     ///
     /// Called once at pipeline construction, not per-tick.
     fn writes(&self) -> Vec<(FieldId, WriteMode)>;
+
+    /// Entity properties this propagator reads through the overlaid entity view.
+    ///
+    /// Default: no entity property reads.
+    fn reads_entities(&self) -> &[PropertyIndex] {
+        &[]
+    }
+
+    /// Entity properties this propagator reads from the previous entity snapshot.
+    ///
+    /// Default: no previous-snapshot entity property reads.
+    fn reads_entities_previous(&self) -> &[PropertyIndex] {
+        &[]
+    }
+
+    /// Entity properties this propagator stages for writing.
+    ///
+    /// Default: no entity property writes.
+    fn writes_entities(&self) -> &[PropertyIndex] {
+        &[]
+    }
 
     /// Maximum stable timestep for this propagator (e.g., CFL).
     ///
