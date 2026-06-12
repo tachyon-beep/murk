@@ -28,7 +28,8 @@ Current tracker and tooling state:
   the P4 `Future` release-planning issue.
 - Loomweave is fresh after the merge: 3,450 entities, 4,681 edges, 36
   subsystems, SEIs populated.
-- The local release gate passes from the merged candidate.
+- The release-candidate PR (#61) is merged to `main`, and main CI/Docs
+  passed at commit `3f2a556`.
 
 Release-readiness work before publishing this batch:
 
