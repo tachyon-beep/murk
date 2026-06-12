@@ -5,14 +5,14 @@ Last read: 2026-06-12
 ## North-star
 | Metric | Target | Current | Read on | Trend |
 |--------|--------|---------|---------|-------|
-| Echelon-blocking capability coverage | Entity model M1-M4 accepted before v0.2 release candidate | M1 design exists; implementation absent on `main` | 2026-06-12 | baseline |
+| Echelon-blocking capability coverage | Entity model M1-M4 accepted before v0.2 release candidate | M1/M2 entity foundation merged to `main`; entity-slot observations remain follow-up scope | 2026-06-12 | improving |
 
 ## Input metrics
 | Metric | Target | Current | Read on |
 |--------|--------|---------|---------|
-| Live tracker accuracy | 0 ready issues that reference nonexistent implementation as if present | 3 ready entity-model issues point at nonexistent `murk-entity` files | 2026-06-12 |
-| Tooling index health | Loomweave fresh with Rust entities and SEIs populated | Fresh: 3,246 entities, 4,464 edges, 21 subsystems, SEIs populated | 2026-06-12 |
-| Verification health | Full Cargo workspace tests pass | `cargo test --workspace --all-targets` passed | 2026-06-12 |
+| Live tracker accuracy | 0 ready issues that reference nonexistent implementation as if present | `.weft/filigree/context.md` reports only P4 `Future` planning ready; plain `uvx filigree` is too old for the migrated DB | 2026-06-12 |
+| Tooling index health | Loomweave fresh with Rust entities and SEIs populated | Fresh after merge: 3,450 entities, 4,681 edges, 36 subsystems, SEIs populated | 2026-06-12 |
+| Verification health | Full Cargo workspace tests pass | `cargo fmt --check --all`, `cargo check --workspace`, `cargo test --workspace --all-targets`, `cargo clippy --workspace -- -D warnings`, and `cargo test --workspace --doc` passed | 2026-06-12 |
 
 ## Guardrails
 | Metric | Floor / ceiling | Current | Read on |

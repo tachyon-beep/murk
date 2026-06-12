@@ -10,10 +10,10 @@ engine.
 
 ---
 
-## Current State — v0.2 Entity Model Batch
+## Current State — v0.2 Entity Model Release Candidate
 
-The current development batch is a stacked branch line for the entity
-model and engine integration:
+The entity model and engine integration stack has been merged onto `main`
+as the `0.2.0` release candidate basis:
 
 | Branch | Purpose | Status |
 |--------|---------|--------|
@@ -22,34 +22,22 @@ model and engine integration:
 | `codex/entity-proptest-coverage` | Property coverage for `EntityId`, staging, and store lifecycle invariants | Implemented and verified |
 | `codex/entity-integration-tests` | Cross-module entity pipeline integration coverage | Implemented and verified |
 
-Tracker state after this batch:
+Current tracker and tooling state:
 
 - Filigree shows no open actionable bugs or tasks. The only ready item is
   the P4 `Future` release-planning issue.
-- Wardline reports no active defect findings. The remaining active signal
-  is an informational telemetry finding that the Rust trust surface has no
-  declared `@trusted` markers yet.
-- The branch stack has passed `cargo check --workspace`,
-  `cargo clippy --workspace -- -D warnings`, and
-  `cargo test --workspace --all-targets`. Entity-touched files were also
-  rustfmt-checked.
+- Loomweave is fresh after the merge: 3,450 entities, 4,681 edges, 36
+  subsystems, SEIs populated.
+- The local release gate passes from the merged candidate.
 
 Release-readiness work before publishing this batch:
 
-1. Merge or squash the branch stack in dependency order: M1 foundation,
-   M2 engine integration, property tests, integration tests, then this
-   release-plan refresh.
-2. Decide whether to make the entity model the named v0.2 release or keep
-   v0.2 for the Echelon feature set below and publish entity support as a
-   v0.1.x foundation release.
-3. Run the full release gate from the merge candidate: `cargo fmt --check
-   --all`, `cargo check --workspace`, `cargo test --workspace --all-targets`,
-   `cargo clippy --workspace -- -D warnings`, doctests, and
-   `wardline scan . --lang rust --fail-on ERROR`.
-4. Resolve or intentionally baseline the Wardline trust-surface telemetry
+1. Get owner sign-off before publishing crates, publishing Python artifacts,
+   creating a public tag, or announcing the release.
+2. Resolve or intentionally baseline the Wardline trust-surface telemetry
    by adding real trust-boundary markers where external input enters the
    system.
-5. Create follow-up issues for entity conflict validation in the
+3. Create follow-up issues for entity conflict validation in the
    propagator pipeline and for exposing entity state through the FFI/Python
    surfaces when those become release scope.
 

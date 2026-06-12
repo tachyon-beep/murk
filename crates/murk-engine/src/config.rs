@@ -651,7 +651,11 @@ mod tests {
         WorldConfig::builder()
             .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
             .fields(vec![scalar_field("energy")])
-            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
             .dt(0.1)
             .seed(42)
             .build()
@@ -668,7 +672,11 @@ mod tests {
         let config = WorldConfig::builder()
             .space(Box::new(Line1D::new(4, EdgeBehavior::Absorb).unwrap()))
             .fields(vec![scalar_field("energy")])
-            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
             .dt(0.1)
             .max_entities(8)
             .entity_manifest(murk_core::EntityManifest {
@@ -688,7 +696,11 @@ mod tests {
         let result = WorldConfig::builder()
             .space(Box::new(Line1D::new(4, EdgeBehavior::Absorb).unwrap()))
             .fields(vec![scalar_field("energy")])
-            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
             .dt(0.1)
             .max_entities(8)
             .build();
@@ -1001,7 +1013,11 @@ mod tests {
     fn builder_missing_space_fails() {
         let result = WorldConfig::builder()
             .fields(vec![scalar_field("energy")])
-            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
             .dt(0.1)
             .build();
         match result {
@@ -1015,7 +1031,11 @@ mod tests {
         let result = WorldConfig::builder()
             .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
             .fields(vec![scalar_field("energy")])
-            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
             .build();
         match result {
             Err(ConfigError::MissingDt) => {}
@@ -1028,7 +1048,11 @@ mod tests {
         let config = WorldConfig::builder()
             .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
             .fields(vec![scalar_field("energy")])
-            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
             .dt(0.1)
             .build()
             .expect("builder with defaults should succeed");
@@ -1043,7 +1067,11 @@ mod tests {
         let config = WorldConfig::builder()
             .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
             .fields(vec![scalar_field("energy")])
-            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
             .dt(0.05)
             .seed(99)
             .ring_buffer_size(16)
@@ -1075,7 +1103,11 @@ mod tests {
         let result = WorldConfig::builder()
             .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
             .fields(vec![scalar_field("energy")])
-            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
             .dt(0.1)
             .ring_buffer_size(1)
             .build();
@@ -1090,7 +1122,11 @@ mod tests {
         let result = WorldConfig::builder()
             .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
             .fields(vec![scalar_field("energy")])
-            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
             .dt(0.0)
             .build();
         match result {
@@ -1125,7 +1161,11 @@ mod tests {
             .space(Box::new(Line1D::new(5, EdgeBehavior::Absorb).unwrap()))
             .space(Box::new(Line1D::new(20, EdgeBehavior::Absorb).unwrap()))
             .fields(vec![scalar_field("energy")])
-            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
             .dt(0.1)
             .build()
             .unwrap();
@@ -1137,7 +1177,11 @@ mod tests {
         let result = WorldConfig::builder()
             .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
             .fields(vec![scalar_field("energy")])
-            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
             .dt(0.1)
             .max_ingress_queue(0)
             .build();
@@ -1152,7 +1196,11 @@ mod tests {
         let result = WorldConfig::builder()
             .space(Box::new(Line1D::new(10, EdgeBehavior::Absorb).unwrap()))
             .fields(vec![scalar_field("energy")])
-            .propagators(vec![Box::new(ConstPropagator::new("const", FieldId(0), 1.0))])
+            .propagators(vec![Box::new(ConstPropagator::new(
+                "const",
+                FieldId(0),
+                1.0,
+            ))])
             .dt(f64::NAN)
             .build();
         match result {

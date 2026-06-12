@@ -1,25 +1,26 @@
 # Current State - Murk
 
-Checkpoint: 2026-06-12 14:08 UTC - commit 0cd5a36
+Checkpoint: 2026-06-12 15:22 UTC - commit ed90bcf
 
 ## The bet right now
-Make the entity model real enough to unblock Echelon-style fixed-shape entity observations, without weakening identity, replay, or FFI safety.
+Prepare the merged entity-model batch as the `0.2.0` release candidate basis, without weakening identity, replay, or FFI safety.
 
 ## In flight
-- `murk-d10dc88f0f` - generation wrap policy decision - claimed by `codex`; decision recorded as retire-on-wrap in the entity design and M1 plan.
-- `murk-e4505f17ed` - proptest coverage for entity IDs and staging - tracker is premature because `murk-entity` is not implemented on `main`.
-- `murk-5cebd6aca0` - integration tests for `murk-entity` cross-module behavior - tracker is premature because `murk-entity` is not implemented on `main`.
+- Entity M1/M2 implementation branches are merged onto `main`.
+- Workspace version metadata is advanced to `0.2.0`.
+- Local release gates pass from the merged candidate.
 
 ## Open questions / blocked-on-owner
-- Confirm whether the next major release target should be `v0.2` entity-slot observations, with line-of-sight following, or whether line-of-sight should remain the headline v0.2 bet from `ROADMAP.md`.
-- Decide whether to create a fresh Filigree milestone plan for entity M1-M5 or rewrite the existing loose ready issues into milestone children.
+- Public release, crate publishing, PyPI publishing, or announcement still need owner sign-off.
+- Entity-slot observations, FFI/Python entity surface, and line-of-sight remain follow-up scope after the entity foundation release candidate.
 
 ## Last checkpoint did
-- Installed/verified Filigree 3.0.0rc12, Loomweave 1.1.0rc4 with Rust plugin, Wardline 1.0.0rc4 with Rust scanner support, and Legis 1.0.0.
-- Ran Loomweave analysis successfully: 3,246 entities, 4,464 edges, 21 subsystems, SEIs populated.
-- Ran Wardline Rust scan successfully: 0 active ERROR findings; one coverage metric finding.
-- Ran `cargo test --workspace --all-targets` successfully.
-- Established that no branch/worktree contains the planned `murk-entity` implementation.
+- Merged `codex/release-plan-refresh`, including M1 foundation, M2 engine integration, property coverage, and cross-module integration tests.
+- Confirmed Filigree's `.weft/filigree/context.md` snapshot reports no actionable ready work besides the P4 `Future` planning item.
+- Refreshed Loomweave after the merge: 3,450 entities, 4,681 edges, 36 subsystems, SEIs populated.
+- Ran `cargo fmt --check --all`, `cargo check --workspace`, `cargo test --workspace --all-targets`, `cargo clippy --workspace -- -D warnings`, and `cargo test --workspace --doc` successfully.
+- Ran `wardline scan . --lang rust --fail-on ERROR` successfully: 0 active findings; trust-surface marker coverage remains a telemetry follow-up.
+- Found the plain `uvx filigree` CLI package is older than this repo's migrated `.weft/filigree` database, so tracker writes should wait for the project-pinned Filigree tool or MCP surface.
 
 ## Next session, start here
-Turn the entity M1 plan into executable tracker structure, then implement M1 in a branch/worktree using the updated retire-on-wrap policy and tests.
+Push/create the release PR or tag only after owner sign-off for outward-facing release actions; then plan follow-up scope for entity-slot observations and FFI/Python exposure.

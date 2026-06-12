@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-12
+
 ### Added
 
 - **murk-entity:** Entity model foundation with slot+generation IDs, store lifecycle management, coordinate indexing, typed property staging, snapshots, rollback, and overlay reads.
