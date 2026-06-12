@@ -145,7 +145,8 @@ const ENTITY_GEN_MAX: u32 = (1 << (32 - ENTITY_SLOT_BITS)) - 1;
 /// a stale `EntityId` will fail generation validation on lookup.
 ///
 /// - 20-bit slot -> max 1,048,575 concurrent entities
-/// - 12-bit generation -> 4,096 generations per slot before wrap
+/// - 12-bit generation -> 4,096 generations per slot; slots retire permanently
+///   instead of wrapping to prevent ABA stale-ID resurrection
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct EntityId(u32);
 
@@ -469,7 +470,8 @@ Replace the Spawn variant (lines 88-94):
 Replace the Despawn variant (lines 95-99):
 
 ```rust
-    /// Remove an entity. Slot is recycled with incremented generation.
+    /// Remove an entity. Slot is recycled with incremented generation unless
+    /// the 12-bit generation would wrap, in which case the slot is retired.
     Despawn {
         /// The entity to remove (includes generation for stale-ID detection).
         entity_id: EntityId,
@@ -930,9 +932,15 @@ impl EntityStore {
         let alive_idx = self.manifest.alive_property.0 as usize;
         self.properties[slot * prop_count + alive_idx] = 0.0;
 
-        // Increment generation, push to free list.
-        self.generations[slot] = self.generations[slot].wrapping_add(1) & 0xFFF;
-        self.free_list.push(id.slot());
+        // Increment generation. If the 12-bit counter would wrap to zero,
+        // permanently retire the slot rather than reusing an epoch-0 ID.
+        // This mirrors murk-ffi's HandleTable policy and prevents ABA stale-ID
+        // resurrection after 4096 recycle cycles on a hot slot.
+        let next_generation = self.generations[slot].wrapping_add(1) & 0xFFF;
+        self.generations[slot] = next_generation;
+        if next_generation != 0 {
+            self.free_list.push(id.slot());
+        }
 
         // Remove from coord_index.
         let coord_key = CoordKey(self.records[slot].coord.clone());
@@ -1198,6 +1206,28 @@ mod tests {
         let id1 = store.spawn(vec![1].into(), 0, &[]).unwrap();
         assert_eq!(id1.slot(), 0, "should reuse slot 0");
         assert_eq!(id1.generation(), 1, "generation should increment");
+    }
+
+    #[test]
+    fn generation_wrap_retires_slot_instead_of_recycling() {
+        let mut store = EntityStore::new(2, test_manifest());
+        let id0 = store.spawn(vec![0].into(), 0, &[]).unwrap();
+        store.despawn(id0).unwrap();
+
+        let slot = id0.slot() as usize;
+        store.generations[slot] = 0xFFF;
+        let id1 = store.spawn(vec![1].into(), 0, &[]).unwrap();
+        assert_eq!(id1.slot(), id0.slot());
+        assert_eq!(id1.generation(), 0xFFF);
+
+        store.despawn(id1).unwrap();
+        let id2 = store.spawn(vec![2].into(), 0, &[]).unwrap();
+        assert_ne!(
+            id2.slot(),
+            id0.slot(),
+            "slot whose generation wrapped to zero must be retired"
+        );
+        assert_eq!(store.get(EntityId::new(id0.slot(), 0)), None);
     }
 
     #[test]
