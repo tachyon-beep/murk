@@ -6,6 +6,7 @@
 
 use crate::scratch::ScratchRegion;
 use murk_core::{FieldReader, FieldWriter, TickId};
+use murk_entity::{EntityOverlayReader, EntitySnapshot, PropertyStaging};
 use murk_space::Space;
 
 /// Execution context passed to each propagator's `step()` method.
@@ -30,6 +31,8 @@ pub struct StepContext<'a> {
     writes: &'a mut dyn FieldWriter,
     scratch: &'a mut ScratchRegion,
     space: &'a dyn Space,
+    entity_snapshot: Option<EntitySnapshot<'a>>,
+    entity_staging: Option<&'a mut PropertyStaging>,
     tick_id: TickId,
     dt: f64,
 }
@@ -54,6 +57,37 @@ impl<'a> StepContext<'a> {
             writes,
             scratch,
             space,
+            entity_snapshot: None,
+            entity_staging: None,
+            tick_id,
+            dt,
+        }
+    }
+
+    /// Construct a step context with entity access enabled.
+    ///
+    /// Typically called by the engine after command application, so entity
+    /// reads include entities spawned or moved earlier in the current tick.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_entities(
+        reads: &'a dyn FieldReader,
+        reads_previous: &'a dyn FieldReader,
+        writes: &'a mut dyn FieldWriter,
+        scratch: &'a mut ScratchRegion,
+        space: &'a dyn Space,
+        entity_snapshot: EntitySnapshot<'a>,
+        entity_staging: &'a mut PropertyStaging,
+        tick_id: TickId,
+        dt: f64,
+    ) -> Self {
+        Self {
+            reads,
+            reads_previous,
+            writes,
+            scratch,
+            space,
+            entity_snapshot: Some(entity_snapshot),
+            entity_staging: Some(entity_staging),
             tick_id,
             dt,
         }
@@ -76,6 +110,37 @@ impl<'a> StepContext<'a> {
     /// Mutable field writer for the current propagator's declared outputs.
     pub fn writes(&mut self) -> &mut dyn FieldWriter {
         self.writes
+    }
+
+    /// Entity snapshot visible to the current propagator.
+    ///
+    /// Returns `None` when the world was not configured with entity support.
+    pub fn entities(&self) -> Option<EntitySnapshot<'_>> {
+        self.entity_snapshot
+    }
+
+    /// Frozen entity snapshot from the start of this propagator's dispatch.
+    ///
+    /// Returns `None` when the world was not configured with entity support.
+    pub fn entities_previous(&self) -> Option<EntitySnapshot<'_>> {
+        self.entity_snapshot
+    }
+
+    /// Euler-style entity reader with staged property writes overlaid.
+    ///
+    /// Returns `None` when the world was not configured with entity support.
+    pub fn entities_overlaid(&self) -> Option<EntityOverlayReader<'_, '_>> {
+        let snapshot = self.entity_snapshot?;
+        let staging = self.entity_staging.as_deref()?;
+        Some(EntityOverlayReader::new(snapshot, staging))
+    }
+
+    /// Mutable entity property staging for the current tick.
+    ///
+    /// Staged values are visible through [`Self::entities`] and are committed
+    /// to the entity store only after the full propagator pipeline succeeds.
+    pub fn entity_writes(&mut self) -> Option<&mut PropertyStaging> {
+        self.entity_staging.as_deref_mut()
     }
 
     /// Scratch memory allocator. Reset between propagators.
@@ -104,7 +169,8 @@ impl<'a> StepContext<'a> {
 mod tests {
     use super::*;
     use crate::scratch::ScratchRegion;
-    use murk_core::FieldId;
+    use murk_core::{EntityManifest, FieldId, PropertyIndex};
+    use murk_entity::{EntityStore, PropertyStaging};
     use murk_space::{EdgeBehavior, Line1D};
     use murk_test_utils::{MockFieldReader, MockFieldWriter};
 
@@ -192,5 +258,70 @@ mod tests {
 
         let buf = ctx.scratch().alloc(8).unwrap();
         assert_eq!(buf.len(), 8);
+    }
+
+    #[test]
+    fn entity_access_is_optional() {
+        let reader = MockFieldReader::new();
+        let mut writer = MockFieldWriter::new();
+        let mut scratch = ScratchRegion::new(16);
+        let space = Line1D::new(4, EdgeBehavior::Absorb).unwrap();
+
+        let mut ctx = StepContext::new(
+            &reader,
+            &reader,
+            &mut writer,
+            &mut scratch,
+            &space,
+            TickId(0),
+            0.1,
+        );
+
+        assert!(ctx.entities().is_none());
+        assert!(ctx.entities_previous().is_none());
+        assert!(ctx.entities_overlaid().is_none());
+        assert!(ctx.entity_writes().is_none());
+    }
+
+    #[test]
+    fn context_exposes_entities_and_entity_writes() {
+        let manifest = EntityManifest {
+            property_names: vec!["alive".into(), "hp".into()],
+            property_defaults: vec![1.0, 100.0],
+            alive_property: PropertyIndex(0),
+        };
+        let mut store = EntityStore::new(4, manifest);
+        let id = store.spawn(vec![0].into(), 0, &[]).unwrap();
+        let snapshot = store.snapshot();
+        let mut staging = PropertyStaging::new(4, 2);
+
+        let reader = MockFieldReader::new();
+        let mut writer = MockFieldWriter::new();
+        let mut scratch = ScratchRegion::new(16);
+        let space = Line1D::new(4, EdgeBehavior::Absorb).unwrap();
+
+        let mut ctx = StepContext::new_with_entities(
+            &reader,
+            &reader,
+            &mut writer,
+            &mut scratch,
+            &space,
+            snapshot,
+            &mut staging,
+            TickId(1),
+            0.1,
+        );
+
+        assert_eq!(
+            ctx.entities().unwrap().property(id, PropertyIndex(1)),
+            Some(100.0)
+        );
+        assert!(ctx.entity_writes().unwrap().set(id, PropertyIndex(1), 25.0));
+        assert_eq!(
+            ctx.entities_overlaid()
+                .unwrap()
+                .property(id, PropertyIndex(1)),
+            Some(25.0)
+        );
     }
 }

@@ -52,3 +52,4 @@ markers = [
 python-source = "python"
 module-name = "murk._murk"
 features = ["pyo3/extension-module"]
+include = [{ path = "README.md", format = "sdist" }]

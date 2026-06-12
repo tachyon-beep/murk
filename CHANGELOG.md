@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-12
+
+### Added
+
+- **murk-entity:** Entity model foundation with slot+generation IDs, store lifecycle management, coordinate indexing, typed property staging, snapshots, rollback, and overlay reads.
+- **murk-engine:** Optional entity storage in lockstep worlds, including entity-aware configuration, spawn receipts, entity snapshots in step results, and rollback of entity mutations.
+- **murk-propagator:** Entity accessors on `StepContext` for current, previous, overlaid, and staged entity views.
+
+### Changed
+
+- **murk-engine:** `Spawn`, `Move`, and `Despawn` commands can now mutate the entity store in lockstep mode while preserving deterministic rollback semantics.
+- **murk-engine:** Realtime-async reconstruction explicitly disables entity storage for this batch; entity support remains lockstep-only until the realtime ownership model is designed.
+
+### Testing
+
+- Added property tests for entity ID round-trips, property staging semantics, and randomized store spawn/despawn sequences.
+- Added cross-module integration tests covering staging-to-store commit, rollback restoration of coordinate indexes, spatial overlay queries, and stale-ID rejection after slot reuse.
+
 ## [0.1.9] - 2026-03-10
 
 ### Added
