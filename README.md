@@ -598,6 +598,7 @@ CI runs check, test, clippy, rustfmt, and Miri on every push and PR.
 
 - **New to Murk?** Start with the [quickstart example](crates/murk-engine/examples/quickstart.rs), the [concepts guide](docs/CONCEPTS.md), and the [heat_seeker demo](examples/heat_seeker/).
 - **Building a simulation?** Read the [Modeling Concepts](#modeling-concepts) section above, then explore the [propagator examples](crates/murk-propagators/) for reference implementations.
+- **Planning against the next release?** See the [roadmap](ROADMAP.md) for the current entity-model branch stack, release gates, and Echelon-driven follow-up scope.
 - **Contributing?** See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, code style, and the PR process.
 - **Questions?** Open a [GitHub issue](https://github.com/tachyon-beep/murk/issues) -- we welcome bug reports, feature requests, and design discussions.
 

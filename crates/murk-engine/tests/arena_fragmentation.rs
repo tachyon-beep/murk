@@ -85,7 +85,9 @@ fn sparse_churn_config() -> WorldConfig {
     ];
 
     WorldConfig::builder()
-        .space(Box::new(murk_space::Line1D::new(100, murk_space::EdgeBehavior::Absorb).unwrap()))
+        .space(Box::new(
+            murk_space::Line1D::new(100, murk_space::EdgeBehavior::Absorb).unwrap(),
+        ))
         .fields(fields)
         .propagators(vec![Box::new(FillPropagator::new(
             "fill_energy",

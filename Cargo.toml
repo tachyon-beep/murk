@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/murk",
     "crates/murk-core",
+    "crates/murk-entity",
     "crates/murk-arena",
     "crates/murk-space",
     "crates/murk-propagator",
@@ -17,7 +18,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.9"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/tachyon-beep/murk"
@@ -34,5 +35,5 @@ indexmap = "2"
 proptest = "1"
 criterion = { version = "0.8", features = ["html_reports"] }
 rand = "0.9"
-rand_chacha = "0.3"
+rand_chacha = "0.9"
 smallvec = "1"

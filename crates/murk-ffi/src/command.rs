@@ -245,6 +245,7 @@ mod tests {
             applied_tick_id: Some(TickId(42)),
             reason_code: None,
             command_index: 7,
+            spawned_entity_id: None,
         };
         let c = convert_receipt(&r);
         assert_eq!(c.accepted, 1);
@@ -257,6 +258,7 @@ mod tests {
             applied_tick_id: None,
             reason_code: Some(IngressError::QueueFull),
             command_index: 3,
+            spawned_entity_id: None,
         };
         let c2 = convert_receipt(&r2);
         assert_eq!(c2.accepted, 0);

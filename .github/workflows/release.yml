@@ -34,7 +34,7 @@ jobs:
         with:
           ref: ${{ inputs.tag || '' }}
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ inputs.tag || github.ref_name }}
           generate_release_notes: true
@@ -69,6 +69,7 @@ jobs:
           }
 
           publish murk-core
+          publish murk-entity
           publish murk-arena
           publish murk-space
           publish murk-propagator

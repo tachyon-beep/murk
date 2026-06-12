@@ -8,6 +8,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_HTTP_MULTIPLEXING: "false"
 
 jobs:
   check:
@@ -144,7 +145,7 @@ jobs:
       - name: Run coverage
         run: cargo tarpaulin --workspace --exclude murk-python --out xml --skip-clean
       - name: Upload to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v7
         with:
           files: cobertura.xml
           fail_ci_if_error: false

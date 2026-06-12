@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "project_name": "murk",
+  "prefix": "murk",
+  "db": ".weft/filigree/filigree.db"
+}

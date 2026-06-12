@@ -9,6 +9,7 @@
 #![forbid(unsafe_code)]
 
 pub mod command;
+pub mod entity;
 pub mod error;
 pub mod field;
 pub mod id;
@@ -16,10 +17,11 @@ pub mod traits;
 
 // Re-export core types at crate root for convenience.
 pub use command::{Command, CommandPayload, Receipt};
+pub use entity::EntityManifest;
 pub use error::{IngressError, ObsError, PropagatorError, StepError};
 pub use field::{BoundaryBehavior, FieldDef, FieldMutability, FieldSet, FieldSetIter, FieldType};
 pub use id::{
-    Coord, FieldId, ParameterKey, ParameterVersion, SpaceId, SpaceInstanceId, TickId,
-    WorldGenerationId,
+    Coord, EntityId, FieldId, ParameterKey, ParameterVersion, PropertyIndex, SpaceId,
+    SpaceInstanceId, TickId, WorldGenerationId,
 };
 pub use traits::{FieldReader, FieldWriter, SnapshotAccess};
