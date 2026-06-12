@@ -3,6 +3,10 @@
 # Docs: https://embarkstudios.github.io/cargo-deny/
 
 [advisories]
+ignore = [
+    { id = "RUSTSEC-2026-0176", reason = "pyo3 0.29 fixes this, but the latest published numpy crate is 0.28.0 and pins pyo3 0.28; remove once rust-numpy publishes a pyo3 0.29-compatible release" },
+    { id = "RUSTSEC-2026-0177", reason = "pyo3 0.29 fixes this, but the latest published numpy crate is 0.28.0 and pins pyo3 0.28; remove once rust-numpy publishes a pyo3 0.29-compatible release" },
+]
 
 [licenses]
 allow = [

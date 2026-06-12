@@ -18,5 +18,6 @@ Last read: 2026-06-12
 | Metric | Floor / ceiling | Current | Read on |
 |--------|-----------------|---------|---------|
 | Wardline Rust ERROR findings | 0 active ERROR findings | 0 active ERROR findings; one `WLN-RUST-COVERAGE` metric finding at severity NONE | 2026-06-12 |
+| Cargo deny advisories | 0 unreviewed advisory failures | Passes with temporary ignores for `RUSTSEC-2026-0176` and `RUSTSEC-2026-0177` until rust-numpy publishes a `pyo3 0.29`-compatible release | 2026-06-12 |
 | Secret exposure in committed files | 0 committed secrets | Loomweave detected high entropy in ignored local `.env`; not committed | 2026-06-12 |
 | Public release actions without owner sign-off | 0 | 0 | 2026-06-12 |

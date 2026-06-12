@@ -20,6 +20,7 @@ Prepare the merged entity-model batch as the `0.2.0` release candidate basis, wi
 - Refreshed Loomweave after the merge: 3,450 entities, 4,681 edges, 36 subsystems, SEIs populated.
 - Ran `cargo fmt --check --all`, `cargo check --workspace`, `cargo test --workspace --all-targets`, `cargo clippy --workspace -- -D warnings`, and `cargo test --workspace --doc` successfully.
 - Ran `wardline scan . --lang rust --fail-on ERROR` successfully: 0 active findings; trust-surface marker coverage remains a telemetry follow-up.
+- Ran `cargo deny check` successfully after recording temporary `pyo3 0.28` advisory ignores; `numpy 0.28.0` is the latest published Rust NumPy crate and pins `pyo3 0.28`, so remove the ignores once rust-numpy ships a `pyo3 0.29`-compatible release.
 - Found the plain `uvx filigree` CLI package is older than this repo's migrated `.weft/filigree` database, so tracker writes should wait for the project-pinned Filigree tool or MCP surface.
 
 ## Next session, start here

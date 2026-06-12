@@ -37,7 +37,9 @@ Release-readiness work before publishing this batch:
 2. Resolve or intentionally baseline the Wardline trust-surface telemetry
    by adding real trust-boundary markers where external input enters the
    system.
-3. Create follow-up issues for entity conflict validation in the
+3. Remove the temporary `pyo3 0.28` deny advisory ignores once rust-numpy
+   publishes a `pyo3 0.29`-compatible crate.
+4. Create follow-up issues for entity conflict validation in the
    propagator pipeline and for exposing entity state through the FFI/Python
    surfaces when those become release scope.
 
