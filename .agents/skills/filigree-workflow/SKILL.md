@@ -20,13 +20,25 @@ agent or in a multi-agent swarm.
 Every task follows this lifecycle:
 
 ```
-filigree ready          → find available work (no blockers)
-filigree show <id>      → read requirements and context
-filigree transitions <id> → check valid state changes
-filigree update <id> --status=in_progress  → claim the work
+filigree ready                                      → find available work (no blockers)
+filigree show <issue-id>                            → read requirements and context
+filigree transitions <issue-id>                     → check valid status transitions
+filigree start-work <issue-id> --assignee <name>    → atomically claim + transition into its working status
 [do the work, commit code]
-filigree close <id> --reason="summary of what was done"
+filigree close <issue-id> --reason="summary of what was done"
 ```
+
+Or skip steps 1–3 entirely with `filigree start-next-work --assignee <name>` to grab the highest-priority **startable** issue.
+
+> **Ready ≠ startable.** The working status is type-specific (tasks →
+> `in_progress`, features → `building`). Bugs start at `triage`, which has no
+> single-hop transition into work — they walk `triage → confirmed → fixing`. So
+> a triage bug is *ready* but not directly *startable*: `start-work` on one
+> returns `INVALID_TRANSITION` naming the next status to move through, and
+> `start-next-work` skips it. `ready` items carry a `startable` flag (and a
+> `next_action` hint when false). Pass `--advance` to either command to walk the
+> soft transitions automatically (`triage → confirmed → fixing`) instead of
+> being blocked or skipped.
 
 Always close with a `--reason` — it becomes audit trail for the next agent.
 
@@ -42,23 +54,42 @@ Always close with a `--reason` — it becomes audit trail for the next agent.
 
 When triaging, use `filigree batch-update <ids...> --priority=N` for bulk changes.
 
-## Claiming Work
+## Starting Work
 
-### Solo Agent
+### Solo or Swarm — Same Tool
 
-Use `filigree update <id> --status=in_progress` to signal active work.
-
-### Multi-Agent Swarm
-
-Use atomic claiming to prevent races:
+Use `start-work` (or `start-next-work`) for the usual case. Both atomically
+claim the issue *and* transition it into its working status in one DB
+transaction — optimistic-locking on the assignee, so concurrent callers can't
+both think they own the issue. The working status is type-specific (tasks →
+`in_progress`, features → `building`, bugs → `fixing`).
 
 ```bash
-filigree claim <id> --assignee <agent-name>     # specific issue
-filigree claim-next --assignee <agent-name>      # highest-priority ready
+filigree start-work <issue-id> --assignee <agent-name>              # specific issue
+filigree start-next-work --assignee <agent-name>                    # highest-priority startable
+filigree start-work <bug-id> --assignee <agent-name> --advance      # walk triage → confirmed → fixing
 ```
 
-Claiming sets the assignee atomically — if two agents race, only one wins.
-After claiming, advance state with `update --status=in_progress`.
+If another agent already owns the claim, the call fails with `code: CONFLICT`
+(CLI exit 4). Safe to retry against a different issue.
+
+`start-work` on a `triage` bug (or any type with no single-hop working status)
+returns `INVALID_TRANSITION` naming the intermediate status to move through
+first; `start-next-work` skips such issues. Pass `--advance` to walk the soft
+transitions to the nearest working status automatically (missing required
+fields become warnings, not blocks; hard edges are never auto-walked).
+
+### Niche: Claim Without Transitioning
+
+`claim` and `claim-next` still exist for the rare case where you want to
+reserve an issue but not advance its status (e.g. a coordinator earmarking
+work for a worker that will pick it up later). Prefer `start-work` for
+normal flow.
+
+```bash
+filigree claim <issue-id> --assignee <agent-name>     # reserve only, no transition
+filigree claim-next --assignee <agent-name>
+```
 
 ## Key Commands
 
@@ -151,6 +182,30 @@ and a full endpoint catalog. When linking issues to files, use file associations
 | `scan_finding` | Automated scan finding |
 | `mentioned_in` | File referenced in issue |
 
+## Response Shapes (2.0)
+
+When parsing `--json` output or MCP responses, expect these unified envelopes:
+
+- **Batch ops** → `{succeeded: [...], failed: [{id, error, code}, ...], newly_unblocked?: [...]}`.
+  `failed` is always present (empty list if none); `newly_unblocked` is
+  present only when non-empty (omitted when the op unblocked nothing). Pass `--detail=full` (CLI) or
+  `response_detail="full"` (MCP) to get full records back.
+- **List ops** → `{items: [...], has_more: bool, next_offset?: int}`.
+  `next_offset` only appears when there is a next page.
+- **Errors** → `{error: str, code: ErrorCode, details?: dict}`. `code` is
+  one of: `VALIDATION`, `NOT_FOUND`, `CONFLICT`, `INVALID_TRANSITION`,
+  `PERMISSION`, `NOT_INITIALIZED`, `IO`, `INVALID_API_URL`,
+  `FILE_REGISTRY_DISPLACED`, `REGISTRY_UNAVAILABLE`,
+  `LOOMWEAVE_REGISTRY_VERSION_MISMATCH`, `LOOMWEAVE_OUT_OF_SYNC`,
+  `BRIEFING_BLOCKED`, `STOP_FAILED`, `SCHEMA_MISMATCH`, `INTERNAL`.
+  Branch on `code` for retry policy
+  (`CONFLICT` → exit 4, retryable; everything at exit 1 needs operator
+  intervention).
+
+The issue ID is always `issue_id` in 2.0 — in MCP inputs, response payloads,
+and CLI JSON. Status is always `status`; "state" was retired as a
+user-facing word.
+
 ## Health and Diagnostics
 
 ```bash
@@ -168,43 +223,70 @@ without breaking flow.
 
 ### When to Observe
 
-Use `observe` (MCP) or `filigree observe` (CLI) whenever you notice something in
-passing that doesn't warrant stopping your current task. The core use case is:
-"I don't have time to investigate this right now, but I want to come back to it."
-Examples:
+Observations are for **incidental** defects — things you notice *in passing*
+while working on something else, that fall *outside the scope of your current
+task*. The core use case is: "I don't have time to investigate this right now,
+but I want to come back to it."
 
-- A code smell or design concern in a file you're reading
-- A missing test for an edge case you spotted
-- A potential bug that isn't related to your current work
+Examples of good observations:
+
+- A code smell in a neighbouring file you happened to read
+- A missing test for an edge case unrelated to what you're changing
+- A potential bug in a module you're not touching
 - A TODO or FIXME that looks stale
 - A dependency that might be outdated
 
 **Always include `file_path` and `line`** when the observation is about specific code.
 This anchors it for whoever triages it later.
 
-**Don't observe things that are clearly issues.** If you're confident something is a
-bug or a needed feature, create an issue directly. Observations are for "hmm, this
-might be worth looking at" — the uncertain middle ground.
+### When NOT to Observe
+
+**You fix bugs in your currently defined scope. You do NOT use observations to
+finish work prematurely.**
+
+If you're working on task X and you notice that your implementation of X has a
+gap, a missed edge case, an untested branch, a known shortcoming, or a piece of
+follow-up that "should really be done too" — that is **task scope, not an
+observation**. You own it. Handle it one of these ways instead:
+
+- **Fix it now** as part of the current task. (Default.)
+- **Expand the task** (or split a sub-task) and address it in this work stream.
+- **File a proper issue** with a dependency on the current task, so the gap is
+  visible in the work record before you close.
+- **Surface it to the user** if it changes the shape of what you're delivering.
+
+Filing your own task's deficiencies as observations and closing the task is
+**not** completing the task. It is shipping known-broken work and hiding the
+debt in a 14-day expiring scratchpad — where it will quietly rot, get
+auto-dismissed, and never be addressed. The work record must reflect what is
+actually outstanding.
+
+**The test:** *"Would I have noticed this even if I weren't working on this
+task?"* If yes → observation. If no → it's part of the work, fix it.
+
+**Don't observe things that are clearly issues either.** If you're confident
+something is a bug or a needed feature, create an issue directly. Observations
+are for "hmm, this might be worth looking at" — the uncertain middle ground.
 
 ### Triage Workflow
 
 Observations expire after 14 days. Triage them before they rot:
 
-1. **At session end:** run `list_observations` and quickly scan what's accumulated
+1. **At session end:** run `observation_list` and quickly scan what's accumulated
 2. **For each observation, decide:**
    - **Dismiss** — not actionable, already fixed, or not worth tracking. Use
-     `dismiss_observation` with a brief reason for the audit trail.
-   - **Promote** — deserves to be tracked as an issue. Use `promote_observation`
+     `observation_dismiss` with a brief reason for the audit trail.
+   - **Promote** — deserves to be tracked as an issue. Use `observation_promote`
      which atomically creates an issue and labels it `from-observation`. Choose
      the right issue type:
      - `type='bug'` — something is broken or produces wrong results
      - `type='task'` (default) — cleanup, improvement, or "this works but is shitty"
      - `type='feature'` — a missing capability that should exist
-     - `type='requirement'` — a formal requirement to be reviewed, approved, and verified
+     - `type='requirement'` — a formal requirement to be reviewed, approved, and verified, when the requirements pack is enabled
    - **Leave it** — still uncertain. Let it age. If it survives a few sessions
      without being promoted, it's probably a dismiss.
 
-3. **Batch cleanup:** use the MCP tool `batch_dismiss_observations` when several observations
+3. **Batch cleanup:** use the MCP tool `observation_batch_dismiss` when several observations
    have gone stale together.
 
 ### Promote vs Dismiss
@@ -233,10 +315,11 @@ filigree search "from-observation"         # Search with context
 |-----------|--------|
 | "What should I work on?" | `filigree ready`, pick highest priority |
 | "Is this blocked?" | `filigree show <id>`, check blocked_by |
-| "Multiple agents need work" | `filigree claim-next --assignee <name>` |
+| "Multiple agents need work" | `filigree start-next-work --assignee <name>` |
 | "I found a new bug" | `filigree create "..." --type=bug --priority=1` |
 | "This task is bigger than expected" | Create sub-tasks, add deps |
 | "I'm done" | Comment, close with reason, check `ready` |
 | "Something changed while I worked" | `filigree changes --since <timestamp>` |
-| "I noticed something odd in this file" | `observe` with file_path and line — keep working |
-| "These observations are piling up" | `list_observations`, then dismiss or promote each |
+| "I noticed something odd in a file I'm passing through" | `observation_create` with file_path and line — keep working |
+| "I noticed a gap in the work I'm currently doing" | Fix it, expand the task, or file a proper issue — **do not** observe it |
+| "These observations are piling up" | `observation_list`, then dismiss or promote each |

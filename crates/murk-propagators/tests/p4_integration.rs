@@ -50,7 +50,9 @@ fn vector2_field(name: &str) -> FieldDef {
 #[test]
 fn emission_diffusion_flow_pipeline() {
     let config = WorldConfig::builder()
-        .space(Box::new(Square4::new(10, 10, EdgeBehavior::Absorb).unwrap()))
+        .space(Box::new(
+            Square4::new(10, 10, EdgeBehavior::Absorb).unwrap(),
+        ))
         .fields(vec![
             scalar_field("presence"), // 0 = PRESENCE
             scalar_field("emission"), // 1 = EMISSION
@@ -153,7 +155,9 @@ fn resource_consumption_and_regrowth() {
 #[test]
 fn wave_stability_500_ticks() {
     let config = WorldConfig::builder()
-        .space(Box::new(Square4::new(10, 10, EdgeBehavior::Absorb).unwrap()))
+        .space(Box::new(
+            Square4::new(10, 10, EdgeBehavior::Absorb).unwrap(),
+        ))
         .fields(vec![
             scalar_field("displacement"), // 0
             scalar_field("velocity"),     // 1
@@ -191,22 +195,24 @@ fn wave_stability_500_ticks() {
 
 #[test]
 fn noise_determinism() {
-    let make_config = |seed: u64| WorldConfig::builder()
-        .space(Box::new(Square4::new(5, 5, EdgeBehavior::Absorb).unwrap()))
-        .fields(vec![scalar_field("noisy")])
-        .propagators(vec![Box::new(
-            NoiseInjection::builder()
-                .field(FieldId(0))
-                .noise_type(NoiseType::Gaussian)
-                .scale(0.5)
-                .seed_offset(seed)
-                .build()
-                .unwrap(),
-        )])
-        .dt(0.1)
-        .seed(42)
-        .build()
-        .unwrap();
+    let make_config = |seed: u64| {
+        WorldConfig::builder()
+            .space(Box::new(Square4::new(5, 5, EdgeBehavior::Absorb).unwrap()))
+            .fields(vec![scalar_field("noisy")])
+            .propagators(vec![Box::new(
+                NoiseInjection::builder()
+                    .field(FieldId(0))
+                    .noise_type(NoiseType::Gaussian)
+                    .scale(0.5)
+                    .seed_offset(seed)
+                    .build()
+                    .unwrap(),
+            )])
+            .dt(0.1)
+            .seed(42)
+            .build()
+            .unwrap()
+    };
 
     let run = |seed: u64| -> Vec<f32> {
         let mut world = LockstepWorld::new(make_config(seed)).unwrap();
